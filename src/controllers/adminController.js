@@ -4,6 +4,7 @@ import UptimeEvent from "../models/UptimeEvent.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import User from "../models/User.js";
+import SystemMetric from "../models/SystemMetric.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 
 const hydrateInstitute = async (institute) => {
@@ -30,11 +31,72 @@ const getNextStartDate = (institute) => {
 
 export const getAdminOverview = async (req, res) => {
   try {
-    const institutes = await Institute.find().sort({ createdAt: -1 });
+    const [institutes, totalStudents, totalTeachers, totalSolo, totalInstitutions] = await Promise.all([
+      Institute.find().sort({ createdAt: -1 }),
+      Student.countDocuments(),
+      User.countDocuments({ role: "teacher" }),
+      Institute.countDocuments({ tuitionType: "solo" }),
+      Institute.countDocuments({ tuitionType: "institution" }),
+    ]);
+
     const hydrated = await Promise.all(institutes.map((institute) => hydrateInstitute(institute)));
 
     const now = Date.now();
     const sevenDays = 1000 * 60 * 60 * 24 * 7;
+
+    // Active Now: count users/students active in the last 5 minutes
+    const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
+    const [activeUsersNow, activeStudentsNow] = await Promise.all([
+      User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
+      Student.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
+    ]);
+    const activeNow = activeUsersNow + activeStudentsNow;
+
+    // Active Today: count users/students active since midnight
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const [activeUsersToday, activeStudentsToday] = await Promise.all([
+      User.countDocuments({ lastActiveAt: { $gte: startOfToday } }),
+      Student.countDocuments({ lastActiveAt: { $gte: startOfToday } }),
+    ]);
+    const activeToday = activeUsersToday + activeStudentsToday;
+
+    // Peak Concurrent: read from SystemMetric
+    const peakMetric = await SystemMetric.findOne({ key: "highestConcurrentActiveUsers" });
+    const highestConcurrent = peakMetric ? Number(peakMetric.value || 0) : activeNow;
+
+    // Growth Analytics signup trends (last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+    sixMonthsAgo.setDate(1);
+    sixMonthsAgo.setHours(0, 0, 0, 0);
+
+    const [institutesSignups, studentsSignups] = await Promise.all([
+      Institute.find({ createdAt: { $gte: sixMonthsAgo } }).select("createdAt"),
+      Student.find({ createdAt: { $gte: sixMonthsAgo } }).select("createdAt"),
+    ]);
+
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const yearMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      months.push({ month: yearMonth, institutesCount: 0, studentsCount: 0 });
+    }
+
+    for (const inst of institutesSignups) {
+      const date = new Date(inst.createdAt);
+      const ym = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const bucket = months.find((m) => m.month === ym);
+      if (bucket) bucket.institutesCount += 1;
+    }
+
+    for (const stud of studentsSignups) {
+      const date = new Date(stud.createdAt);
+      const ym = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const bucket = months.find((m) => m.month === ym);
+      if (bucket) bucket.studentsCount += 1;
+    }
 
     const summary = hydrated.reduce(
       (totals, institute) => {
@@ -69,6 +131,14 @@ export const getAdminOverview = async (req, res) => {
         totalRevenueTillDate: 0,
         monthlyRecurringRevenue: 0,
         expiringInstitutes: [],
+        totalStudents,
+        totalTeachers,
+        totalSolo,
+        totalInstitutions,
+        activeNow,
+        activeToday,
+        highestConcurrent,
+        registrationStats: months,
       }
     );
 
@@ -77,6 +147,7 @@ export const getAdminOverview = async (req, res) => {
       institutes: hydrated,
     });
   } catch (error) {
+    console.error("getAdminOverview error:", error);
     return res.status(500).json({ message: "Could not load admin overview" });
   }
 };
@@ -109,6 +180,7 @@ export const createInstitute = async (req, res) => {
       subscriptionAmount,
       trialDays,
       subscriptionStart,
+      tuitionType,
     } = req.body;
 
     if (
@@ -152,6 +224,7 @@ export const createInstitute = async (req, res) => {
       subscriptionStart: startDate,
       subscriptionEnd: endDate,
       status: "active",
+      tuitionType: tuitionType || "solo",
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -206,6 +279,7 @@ export const updateInstitute = async (req, res) => {
       trialDays,
       subscriptionStart,
       status,
+      tuitionType,
     } = req.body;
 
     if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
@@ -224,6 +298,7 @@ export const updateInstitute = async (req, res) => {
     if (trialDays !== undefined) institute.trialDays = Number(trialDays);
     if (subscriptionStart !== undefined) institute.subscriptionStart = new Date(subscriptionStart);
     if (status !== undefined) institute.status = status;
+    if (tuitionType !== undefined) institute.tuitionType = tuitionType;
 
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
@@ -355,5 +430,74 @@ export const getUptimeOverview = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Could not load uptime overview" });
+  }
+};
+
+export const getAdminTeachers = async (req, res) => {
+  try {
+    const teachers = await User.find({ role: "teacher" })
+      .populate("institute", "name")
+      .sort({ lastActiveAt: -1, createdAt: -1 });
+
+    const teachersWithDetails = await Promise.all(
+      teachers.map(async (teacher) => {
+        const teacherBatches = await Batch.find({ teacher: teacher._id }).select(
+          "name scheduleDays startTime endTime"
+        );
+        
+        const batchesWithCounts = await Promise.all(
+          teacherBatches.map(async (b) => {
+            const studentCount = await Student.countDocuments({ batch: b._id });
+            return {
+              ...b.toObject(),
+              studentCount,
+            };
+          })
+        );
+
+        return {
+          ...teacher.toObject(),
+          batches: batchesWithCounts,
+          batchCount: batchesWithCounts.length,
+        };
+      })
+    );
+
+    return res.json(teachersWithDetails);
+  } catch (error) {
+    return res.status(500).json({ message: "Could not fetch teachers list" });
+  }
+};
+
+export const getAdminStudents = async (req, res) => {
+  try {
+    const students = await Student.find()
+      .populate({
+        path: "batch",
+        select: "name teacher",
+        populate: {
+          path: "teacher",
+          select: "name email",
+        },
+      })
+      .sort({ lastActiveAt: -1, createdAt: -1 });
+
+    const studentsWithDetails = await Promise.all(
+      students.map(async (student) => {
+        const adminUser = await User.findById(student.user);
+        const institute = adminUser
+          ? await Institute.findOne({ adminUser: adminUser._id }).select("name")
+          : null;
+
+        return {
+          ...student.toJSON(),
+          instituteName: institute ? institute.name : "Unknown",
+        };
+      })
+    );
+
+    return res.json(studentsWithDetails);
+  } catch (error) {
+    return res.status(500).json({ message: "Could not fetch students list" });
   }
 };

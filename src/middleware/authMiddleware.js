@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import UptimeEvent from "../models/UptimeEvent.js";
+import { updateConcurrentPeak } from "../utils/activityTracker.js";
 
 const protect = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -32,7 +33,7 @@ const protect = async (req, res, next) => {
 
     if (req.user.role !== "super_admin" && req.user.institute) {
       const institute = await Institute.findById(req.user.institute).select(
-        "status subscriptionEnd"
+        "status subscriptionEnd adminUser tuitionType"
       );
 
       if (institute) {
@@ -53,6 +54,14 @@ const protect = async (req, res, next) => {
     }
 
     next();
+    
+    if (req.user && req.user._id) {
+      User.updateOne({ _id: req.user._id }, { lastActiveAt: new Date() })
+        .then(() => updateConcurrentPeak())
+        .catch(() => {});
+    } else {
+      updateConcurrentPeak().catch(() => {});
+    }
   } catch (error) {
     return res.status(401).json({ message: "Invalid token" });
   }

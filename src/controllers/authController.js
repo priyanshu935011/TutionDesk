@@ -15,7 +15,7 @@ const buildInstituteState = async (user) => {
   }
 
   const institute = await Institute.findById(user.institute).select(
-    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status"
+    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType"
   );
 
   if (!institute) {
@@ -31,6 +31,7 @@ const buildInstituteState = async (user) => {
     subscriptionStart: institute.subscriptionStart,
     subscriptionEnd: institute.subscriptionEnd,
     status: institute.status,
+    tuitionType: institute.tuitionType || "solo",
   };
 };
 
@@ -93,5 +94,37 @@ export const loginUser = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Login failed" });
+  }
+};
+
+export const changeUserPassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current and new passwords are required." });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Incorrect current password." });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters long." });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    return res.json({ message: "Password updated successfully." });
+  } catch (error) {
+    console.error("Change user password error:", error);
+    return res.status(500).json({ message: "Could not change password" });
   }
 };

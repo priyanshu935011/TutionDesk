@@ -1,42 +1,41 @@
 import mongoose from "mongoose";
 
-const batchSchema = new mongoose.Schema(
+const noteSchema = new mongoose.Schema(
   {
-    user: {
+    institute: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Institute",
+      required: true,
+    },
+    createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
-    name: {
+    title: {
       type: String,
       required: true,
       trim: true,
     },
-    scheduleDays: {
-      type: [String],
-      default: [],
-    },
-    startTime: {
+    pdfUrl: {
       type: String,
       required: true,
       trim: true,
     },
-    endTime: {
+    pdfPublicId: {
       type: String,
       required: true,
       trim: true,
     },
-    teacher: {
+    batch: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Batch",
       default: null,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-const Batch = mongoose.model("Batch", batchSchema);
+const Note = mongoose.model("Note", noteSchema);
 
-export default Batch;
+export default Note;

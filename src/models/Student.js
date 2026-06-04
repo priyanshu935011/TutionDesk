@@ -82,7 +82,6 @@ const studentSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      unique: true,
     },
     batch: {
       type: mongoose.Schema.Types.ObjectId,
@@ -115,6 +114,14 @@ const studentSchema = new mongoose.Schema(
       type: [attendanceSchema],
       default: [],
     },
+    password: {
+      type: String,
+      default: "",
+    },
+    lastActiveAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -125,13 +132,14 @@ const studentSchema = new mongoose.Schema(
           (sum, payment) => sum + payment.amount,
           0
         );
+        const totalFees = Number(ret.totalFees || 0);
         const attendanceRecords = ret.attendanceRecords || [];
         const presentCount = attendanceRecords.filter(
           (record) => record.status === "present"
         ).length;
 
         ret.paidAmount = paidAmount;
-        ret.pendingAmount = ret.totalFees - paidAmount;
+        ret.pendingAmount = totalFees - paidAmount;
         ret.attendanceSummary = {
           total: attendanceRecords.length,
           present: presentCount,
@@ -145,11 +153,11 @@ const studentSchema = new mongoose.Schema(
 );
 
 studentSchema.virtual("paidAmount").get(function getPaidAmount() {
-  return this.paymentHistory.reduce((sum, payment) => sum + payment.amount, 0);
+  return (this.paymentHistory || []).reduce((sum, payment) => sum + payment.amount, 0);
 });
 
 studentSchema.virtual("pendingAmount").get(function getPendingAmount() {
-  return this.totalFees - this.paidAmount;
+  return Number(this.totalFees || 0) - this.paidAmount;
 });
 
 const Student = mongoose.model("Student", studentSchema);

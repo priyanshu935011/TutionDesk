@@ -56,6 +56,11 @@ const instituteSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    tuitionType: {
+      type: String,
+      enum: ["institution", "solo"],
+      default: "solo",
+    },
     subscriptionHistory: {
       type: [
         {
