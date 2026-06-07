@@ -20,6 +20,7 @@ import {
   getActiveSessionForTeacher,
   startLiveQuiz,
 } from "../services/quizRuntime.js";
+import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 
 const uploadBufferToCloudinary = (buffer, options = {}) =>
   new Promise((resolve, reject) => {
@@ -44,8 +45,17 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
 
 export const getTeacherDashboard = async (req, res) => {
   try {
+    const cacheKey = `teacher:dashboard:${req.user._id}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
     const instituteId = req.user.institute?._id || req.user.institute;
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
+    const institute = await Institute.findById(instituteId).select(
+      "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled"
+    );
+    const ownerId = req.user.role === "teacher" ? institute?.adminUser : req.user._id;
 
     let studentQuery = { user: ownerId };
     let batchQuery = { user: ownerId };
@@ -118,14 +128,19 @@ export const getTeacherDashboard = async (req, res) => {
       });
     }
 
-    return res.json({
+    const responsePayload = {
       summary,
       students: processedStudents,
       batches,
       quizzes,
       notes,
       testResults,
-    });
+      institute,
+    };
+
+    await setCache(cacheKey, responsePayload, 1800);
+
+    return res.json(responsePayload);
   } catch (error) {
     return res
       .status(500)
@@ -156,6 +171,7 @@ export const createQuiz = async (req, res) => {
       restSeconds,
       negativeMarkingEnabled,
       negativeMarkPerWrong,
+      pointsPerCorrect,
       questions,
       batchIds = [],
     } = req.body;
@@ -202,6 +218,7 @@ export const createQuiz = async (req, res) => {
       restSeconds: Number(restSeconds || 10),
       negativeMarkingEnabled: Boolean(negativeMarkingEnabled),
       negativeMarkPerWrong: Number(negativeMarkPerWrong || 0),
+      pointsPerCorrect: Number(pointsPerCorrect || 10),
       questions: questions.map((question) => ({
         text: question.text,
         options: (question.options || []).map((option) => ({
@@ -210,6 +227,10 @@ export const createQuiz = async (req, res) => {
         correctOptionIndex: Number(question.correctOptionIndex),
       })),
     });
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json(quiz);
   } catch (error) {
@@ -229,12 +250,17 @@ export const updateQuiz = async (req, res) => {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
+    if (quiz.status === "completed") {
+      return res.status(400).json({ message: "Conducted/completed quizzes cannot be edited" });
+    }
+
     const {
       title,
       durationSeconds,
       restSeconds,
       negativeMarkingEnabled,
       negativeMarkPerWrong,
+      pointsPerCorrect,
       questions,
       batchIds = [],
     } = req.body;
@@ -269,6 +295,8 @@ export const updateQuiz = async (req, res) => {
       quiz.negativeMarkingEnabled = Boolean(negativeMarkingEnabled);
     if (negativeMarkPerWrong !== undefined)
       quiz.negativeMarkPerWrong = Number(negativeMarkPerWrong);
+    if (pointsPerCorrect !== undefined)
+      quiz.pointsPerCorrect = Number(pointsPerCorrect);
     if (batchIds !== undefined) quiz.batches = selectedBatchIds;
     if (Array.isArray(questions) && questions.length) {
       quiz.questions = questions.map((question) => ({
@@ -282,6 +310,10 @@ export const updateQuiz = async (req, res) => {
 
     await quiz.save();
 
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
     return res.json(quiz);
   } catch (error) {
     return res.status(500).json({ message: "Could not update quiz" });
@@ -291,7 +323,7 @@ export const updateQuiz = async (req, res) => {
 export const deleteQuiz = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const quiz = await Quiz.findOneAndDelete({
+    const quiz = await Quiz.findOne({
       _id: req.params.id,
       institute: instituteId,
     });
@@ -300,7 +332,17 @@ export const deleteQuiz = async (req, res) => {
       return res.status(404).json({ message: "Quiz not found" });
     }
 
+    if (quiz.status === "completed") {
+      return res.status(400).json({ message: "Conducted/completed quizzes cannot be deleted" });
+    }
+
+    await Quiz.deleteOne({ _id: req.params.id });
+
     await forceStopLiveQuiz(req.params.id);
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Quiz deleted successfully" });
   } catch (error) {
@@ -321,6 +363,9 @@ export const startQuizLive = async (req, res) => {
     }
 
     const liveState = await startLiveQuiz(quiz);
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
     return res.json(liveState);
   } catch (error) {
     return res.status(500).json({ message: "Could not start live quiz" });
@@ -352,10 +397,17 @@ export const downloadNote = async (req, res) => {
     }
 
     if (note.pdfUrl && note.pdfUrl.startsWith("http")) {
-      // Fallback for legacy Cloudinary files
+      let downloadUrl = note.pdfUrl;
+      if (note.pdfUrl.includes("/raw/private/")) {
+        downloadUrl = cloudinary.utils.private_download_url(note.pdfPublicId, "", {
+          resource_type: "raw",
+          type: "private",
+        });
+      }
+
       await streamRemoteFileAsAttachment({
         res,
-        url: note.pdfUrl,
+        url: downloadUrl,
         filename: buildNoteDownloadFilename(note),
       });
     } else {
@@ -401,27 +453,29 @@ export const uploadNote = async (req, res) => {
 
     const fileExt = req.file.originalname.split('.').pop() || 'pdf';
     const cleanBaseName = sanitizeFilename(req.file.originalname.replace(/\.[^/.]+$/, ""));
-    const uniquePath = `note_${Date.now()}_${cleanBaseName}.${fileExt}`;
+    const uniquePublicId = `note_${Date.now()}_${cleanBaseName}.${fileExt}`;
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(supabaseBucket)
-      .upload(uniquePath, req.file.buffer, {
-        contentType: req.file.mimetype,
-        duplex: "half",
-      });
+    const result = await uploadBufferToCloudinary(req.file.buffer, {
+      public_id: uniquePublicId,
+      type: "private",
+    });
 
-    if (uploadError) {
-      return res.status(502).json({ message: `Supabase upload failed: ${uploadError.message}` });
+    if (!result || !result.secure_url) {
+      return res.status(502).json({ message: "Cloudinary upload failed" });
     }
 
     const note = await Note.create({
       institute: instituteId,
       createdBy: req.user._id,
       title,
-      pdfUrl: uniquePath,
-      pdfPublicId: uniquePath,
+      pdfUrl: result.secure_url,
+      pdfPublicId: result.public_id,
       batch: batchId || null,
     });
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json(await note.populate("batch", "name"));
   } catch (error) {
@@ -441,17 +495,31 @@ export const deleteNote = async (req, res) => {
       return res.status(404).json({ message: "Note not found" });
     }
 
-    if (note.pdfPublicId && !note.pdfUrl.startsWith("http")) {
-      const { error: deleteStorageError } = await supabase.storage
-        .from(supabaseBucket)
-        .remove([note.pdfPublicId]);
+    if (note.pdfPublicId) {
+      if (note.pdfUrl.startsWith("http")) {
+        // Delete from Cloudinary
+        try {
+          await cloudinary.uploader.destroy(note.pdfPublicId, { resource_type: "raw" });
+        } catch (cloudinaryErr) {
+          console.error(`Failed to delete file from Cloudinary: ${cloudinaryErr.message || cloudinaryErr}`);
+        }
+      } else {
+        // Fallback for legacy Supabase files
+        const { error: deleteStorageError } = await supabase.storage
+          .from(supabaseBucket)
+          .remove([note.pdfPublicId]);
 
-      if (deleteStorageError) {
-        console.error(`Failed to delete file from Supabase storage: ${deleteStorageError.message}`);
+        if (deleteStorageError) {
+          console.error(`Failed to delete file from Supabase storage: ${deleteStorageError.message}`);
+        }
       }
     }
 
     await Note.findByIdAndDelete(note._id);
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Note deleted successfully" });
   } catch (error) {
@@ -499,6 +567,10 @@ export const createTestResult = async (req, res) => {
       examDate,
       remarks: remarks || "",
     });
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res
       .status(201)
@@ -568,6 +640,10 @@ export const createTestResultsBulk = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("student", "name enrollmentNumber email");
 
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
     return res.status(201).json(populatedResults);
   } catch (error) {
     return res.status(500).json({ message: "Could not save test marks" });
@@ -608,6 +684,10 @@ export const createHiredTeacher = async (req, res) => {
       role: "teacher",
       institute: instituteId,
     });
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json({
       _id: newTeacher._id,
@@ -655,8 +735,33 @@ export const deleteHiredTeacher = async (req, res) => {
       return res.status(404).json({ message: "Teacher not found" });
     }
 
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
     return res.json({ message: "Teacher deleted successfully" });
   } catch (error) {
     return res.status(500).json({ message: "Could not delete teacher" });
+  }
+};
+
+export const getQuizLeaderboard = async (req, res) => {
+  try {
+    const quizId = req.params.id;
+    const attempts = await QuizAttempt.find({ quiz: quizId })
+      .populate("student", "name")
+      .sort({ score: -1, updatedAt: 1 });
+
+    const leaderboard = attempts.map((attempt, index) => ({
+      studentId: attempt.student?._id || attempt.student,
+      studentName: attempt.student?.name || "Unknown Student",
+      score: attempt.score,
+      lastAnswerAt: attempt.updatedAt,
+    }));
+
+    return res.json(leaderboard);
+  } catch (error) {
+    console.error("getQuizLeaderboard error:", error);
+    return res.status(500).json({ message: "Could not fetch leaderboard" });
   }
 };

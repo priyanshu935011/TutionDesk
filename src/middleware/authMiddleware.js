@@ -3,6 +3,7 @@ import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import { updateConcurrentPeak } from "../utils/activityTracker.js";
+import redisClient from "../config/redis.js";
 
 const protect = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -31,9 +32,38 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ message: "User not found" });
     }
 
+    if (decoded.role !== "super_admin" && decoded.sessionId) {
+      let sessionValid = true;
+      const cacheSessionKey = `active_session:user:${decoded.id}`;
+      if (redisClient.isReady) {
+        try {
+          let activeSessionId = await redisClient.get(cacheSessionKey);
+          if (!activeSessionId) {
+            activeSessionId = req.user.currentSessionId;
+            if (activeSessionId) {
+              await redisClient.set(cacheSessionKey, activeSessionId);
+            }
+          }
+          if (activeSessionId && activeSessionId !== decoded.sessionId) {
+            sessionValid = false;
+          }
+        } catch (redisErr) {
+          console.error("Redis session lookup error:", redisErr);
+        }
+      } else {
+        if (req.user.currentSessionId && req.user.currentSessionId !== decoded.sessionId) {
+          sessionValid = false;
+        }
+      }
+
+      if (!sessionValid) {
+        return res.status(401).json({ message: "Session expired due to login on another device." });
+      }
+    }
+
     if (req.user.role !== "super_admin" && req.user.institute) {
       const institute = await Institute.findById(req.user.institute).select(
-        "status subscriptionEnd adminUser tuitionType"
+        "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan"
       );
 
       if (institute) {
@@ -56,12 +86,12 @@ const protect = async (req, res, next) => {
     next();
     
     if (req.user && req.user._id) {
-      User.updateOne({ _id: req.user._id }, { lastActiveAt: new Date() })
-        .then(() => updateConcurrentPeak())
-        .catch(() => {});
-    } else {
-      updateConcurrentPeak().catch(() => {});
+      User.updateOne({ _id: req.user._id }, { lastActiveAt: new Date() }).catch(() => {});
+      if (redisClient.isReady) {
+        redisClient.set(`active:user:${req.user._id}`, req.user.role || "teacher", { EX: 300 }).catch(() => {});
+      }
     }
+    updateConcurrentPeak().catch(() => {});
   } catch (error) {
     return res.status(401).json({ message: "Invalid token" });
   }

@@ -76,13 +76,18 @@ const quizSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    pointsPerCorrect: {
+      type: Number,
+      default: 10,
+      min: 1,
+    },
     questions: {
       type: [quizQuestionSchema],
       validate: [(value) => value.length > 0, "Quiz must include at least one question"],
     },
     status: {
       type: String,
-      enum: ["draft", "live", "archived"],
+      enum: ["draft", "live", "completed", "archived"],
       default: "draft",
     },
     liveSessionId: {

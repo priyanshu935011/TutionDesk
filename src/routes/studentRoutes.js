@@ -1,6 +1,7 @@
 import express from "express";
 import {
   addPayment,
+  bulkCreateStudents,
   createStudent,
   deleteStudent,
   getStudentById,
@@ -13,6 +14,7 @@ import protect from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 router.use(protect);
+router.post("/bulk", bulkCreateStudents);
 router.route("/").get(getStudents).post(createStudent);
 router.get("/:id", getStudentById);
 router.post("/:id/payments", addPayment);

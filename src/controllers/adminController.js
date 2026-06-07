@@ -1,17 +1,29 @@
 import bcrypt from "bcryptjs";
+import mongoose from "mongoose";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
+import TestResult from "../models/TestResult.js";
+import QuizAttempt from "../models/QuizAttempt.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import User from "../models/User.js";
 import SystemMetric from "../models/SystemMetric.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
+import redisClient from "../config/redis.js";
+import { clearCachePattern } from "../utils/cache.js";
 
 const hydrateInstitute = async (institute) => {
-  const [studentCount, batchCount] = await Promise.all([
-    Student.countDocuments({ user: institute.adminUser }),
+  const matchUser = institute.adminUser ? (mongoose.Types.ObjectId.isValid(institute.adminUser) ? new mongoose.Types.ObjectId(institute.adminUser) : institute.adminUser) : null;
+  const [studentCountResult, batchCount] = await Promise.all([
+    Student.aggregate([
+      { $match: { user: matchUser } },
+      { $group: { _id: "$enrollmentNumber" } },
+      { $count: "count" }
+    ]),
     Batch.countDocuments({ user: institute.adminUser }),
   ]);
+
+  const studentCount = studentCountResult[0]?.count || 0;
 
   return {
     ...institute.toObject(),
@@ -31,13 +43,18 @@ const getNextStartDate = (institute) => {
 
 export const getAdminOverview = async (req, res) => {
   try {
-    const [institutes, totalStudents, totalTeachers, totalSolo, totalInstitutions] = await Promise.all([
+    const [institutes, totalStudentsResult, totalTeachers, totalSolo, totalInstitutions] = await Promise.all([
       Institute.find().sort({ createdAt: -1 }),
-      Student.countDocuments(),
+      Student.aggregate([
+        { $group: { _id: "$enrollmentNumber" } },
+        { $count: "count" }
+      ]),
       User.countDocuments({ role: "teacher" }),
       Institute.countDocuments({ tuitionType: "solo" }),
       Institute.countDocuments({ tuitionType: "institution" }),
     ]);
+
+    const totalStudents = totalStudentsResult[0]?.count || 0;
 
     const hydrated = await Promise.all(institutes.map((institute) => hydrateInstitute(institute)));
 
@@ -45,20 +62,42 @@ export const getAdminOverview = async (req, res) => {
     const sevenDays = 1000 * 60 * 60 * 24 * 7;
 
     // Active Now: count users/students active in the last 5 minutes
-    const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
-    const [activeUsersNow, activeStudentsNow] = await Promise.all([
-      User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
-      Student.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
-    ]);
-    const activeNow = activeUsersNow + activeStudentsNow;
+    let activeNow = 0;
+    if (redisClient.isReady) {
+      let count = 0;
+      for await (const key of redisClient.scanIterator({
+        MATCH: "active:user:*",
+        COUNT: 500,
+      })) {
+        count++;
+      }
+      activeNow = count;
+    } else {
+      const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
+      const [activeUsersNow, activeStudentsNowResult] = await Promise.all([
+        User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
+        Student.aggregate([
+          { $match: { lastActiveAt: { $gte: fiveMinsAgo } } },
+          { $group: { _id: "$enrollmentNumber" } },
+          { $count: "count" }
+        ]),
+      ]);
+      const activeStudentsNow = activeStudentsNowResult[0]?.count || 0;
+      activeNow = activeUsersNow + activeStudentsNow;
+    }
 
     // Active Today: count users/students active since midnight
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    const [activeUsersToday, activeStudentsToday] = await Promise.all([
+    const [activeUsersToday, activeStudentsTodayResult] = await Promise.all([
       User.countDocuments({ lastActiveAt: { $gte: startOfToday } }),
-      Student.countDocuments({ lastActiveAt: { $gte: startOfToday } }),
+      Student.aggregate([
+        { $match: { lastActiveAt: { $gte: startOfToday } } },
+        { $group: { _id: "$enrollmentNumber" } },
+        { $count: "count" }
+      ]),
     ]);
+    const activeStudentsToday = activeStudentsTodayResult[0]?.count || 0;
     const activeToday = activeUsersToday + activeStudentsToday;
 
     // Peak Concurrent: read from SystemMetric
@@ -181,6 +220,7 @@ export const createInstitute = async (req, res) => {
       trialDays,
       subscriptionStart,
       tuitionType,
+      quizFeatureEnabled,
     } = req.body;
 
     if (
@@ -225,6 +265,7 @@ export const createInstitute = async (req, res) => {
       subscriptionEnd: endDate,
       status: "active",
       tuitionType: tuitionType || "solo",
+      quizFeatureEnabled: quizFeatureEnabled !== false,
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -280,6 +321,7 @@ export const updateInstitute = async (req, res) => {
       subscriptionStart,
       status,
       tuitionType,
+      quizFeatureEnabled,
     } = req.body;
 
     if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
@@ -299,6 +341,7 @@ export const updateInstitute = async (req, res) => {
     if (subscriptionStart !== undefined) institute.subscriptionStart = new Date(subscriptionStart);
     if (status !== undefined) institute.status = status;
     if (tuitionType !== undefined) institute.tuitionType = tuitionType;
+    if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
 
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
@@ -316,6 +359,9 @@ export const updateInstitute = async (req, res) => {
         await adminUser.save();
       }
     }
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.json(await hydrateInstitute(institute));
   } catch (error) {
@@ -365,6 +411,9 @@ export const renewInstituteSubscription = async (req, res) => {
 
     await institute.save();
 
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
     return res.json(await hydrateInstitute(institute));
   } catch (error) {
     return res.status(500).json({ message: "Could not renew subscription" });
@@ -391,6 +440,9 @@ export const deleteInstitute = async (req, res) => {
       User.deleteMany({ institute: institute._id }),
       Institute.deleteOne({ _id: institute._id }),
     ]);
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.json({
       message: "Tution deleted successfully",
@@ -499,5 +551,122 @@ export const getAdminStudents = async (req, res) => {
     return res.json(studentsWithDetails);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch students list" });
+  }
+};
+
+export const updateAdminTeacher = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    const teacher = await User.findOne({ _id: req.params.id, role: "teacher" });
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    if (email) {
+      const normalizedEmail = email.toLowerCase();
+      const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: teacher._id } });
+      if (existingUser) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
+      teacher.email = normalizedEmail;
+    }
+
+    if (name !== undefined) teacher.name = name;
+    if (password) {
+      teacher.password = await bcrypt.hash(password, 10);
+    }
+
+    await teacher.save();
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+    return res.json({ message: "Teacher updated successfully", teacher: { _id: teacher._id, name: teacher.name, email: teacher.email } });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not update teacher" });
+  }
+};
+
+export const deleteAdminTeacher = async (req, res) => {
+  try {
+    const teacher = await User.findOneAndDelete({ _id: req.params.id, role: "teacher" });
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    await Batch.updateMany({ teacher: teacher._id }, { $set: { teacher: null } });
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Teacher deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not delete teacher" });
+  }
+};
+
+export const updateAdminStudent = async (req, res) => {
+  try {
+    const { name, email, phone, parentName, parentPhone, address, pendingAmount, totalFees, paidAmount, dueDate, feePlanType } = req.body;
+    const student = await Student.findById(req.params.id);
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    if (name !== undefined) student.name = name;
+    if (email !== undefined) student.email = email.toLowerCase();
+    if (phone !== undefined) student.phone = phone;
+    if (parentName !== undefined) student.parentName = parentName;
+    if (parentPhone !== undefined) student.parentPhone = parentPhone;
+    if (address !== undefined) student.address = address;
+    if (pendingAmount !== undefined) student.pendingAmount = Number(pendingAmount);
+    if (totalFees !== undefined) student.totalFees = Number(totalFees);
+    if (paidAmount !== undefined) student.paidAmount = Number(paidAmount);
+    if (dueDate !== undefined) student.dueDate = dueDate;
+    if (feePlanType !== undefined) student.feePlanType = feePlanType;
+
+    await student.save();
+
+    if (student.enrollmentNumber) {
+      await Student.updateMany(
+        { enrollmentNumber: student.enrollmentNumber, _id: { $ne: student._id } },
+        {
+          $set: {
+            name: student.name,
+            email: student.email,
+            phone: student.phone,
+            parentName: student.parentName,
+            parentPhone: student.parentPhone,
+            address: student.address,
+          }
+        }
+      );
+    }
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Student updated successfully", student });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not update student" });
+  }
+};
+
+export const deleteAdminStudent = async (req, res) => {
+  try {
+    const student = await Student.findByIdAndDelete(req.params.id);
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    await Promise.all([
+      TestResult.deleteMany({ student: student._id }),
+      QuizAttempt.deleteMany({ student: student._id }),
+    ]);
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Student deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not delete student" });
   }
 };

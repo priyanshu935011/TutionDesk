@@ -4,7 +4,11 @@ import Institute from "../models/Institute.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
 import User from "../models/User.js";
+import Quiz from "../models/Quiz.js";
+import QuizAttempt from "../models/QuizAttempt.js";
 import bcrypt from "bcryptjs";
+import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
+import cloudinary from "../utils/cloudinary.js";
 
 export const getInitialPassword = (name, phone) => {
   const namePart = (name || "").replace(/\s+/g, "").substring(0, 4).toLowerCase();
@@ -286,6 +290,11 @@ export const createStudent = async (req, res) => {
       const populatedStudent = await populateStudent(Student.findById(student._id));
       createdStudents.push(populatedStudent);
     }
+    
+    if (cleanEmail) {
+      await deleteCache(`student:dashboard:${cleanEmail}`);
+    }
+    await clearCachePattern("teacher:dashboard:*");
 
     // Return array if array requested, else single object for backward compatibility
     if (Array.isArray(req.body.batches) && req.body.batches.length > 0) {
@@ -452,6 +461,14 @@ export const updateStudent = async (req, res) => {
       await rec.save();
     }
 
+    if (originalEmail) {
+      await deleteCache(`student:dashboard:${originalEmail}`);
+    }
+    if (newEmail && newEmail !== originalEmail) {
+      await deleteCache(`student:dashboard:${newEmail}`);
+    }
+    await clearCachePattern("teacher:dashboard:*");
+
     // Find and return a populated active student record for response compatibility
     const responseRecord = remainingRecords.find((r) => String(r._id) === String(student._id)) || remainingRecords[0];
     
@@ -489,6 +506,11 @@ export const deleteStudent = async (req, res) => {
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
+
+    if (student.email) {
+      await deleteCache(`student:dashboard:${student.email.toLowerCase()}`);
+    }
+    await clearCachePattern("teacher:dashboard:*");
 
     return res.json({ message: "Student deleted successfully" });
   } catch (error) {
@@ -537,6 +559,11 @@ export const addPayment = async (req, res) => {
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
+    if (student.email) {
+      await deleteCache(`student:dashboard:${student.email.toLowerCase()}`);
+    }
+    await clearCachePattern("teacher:dashboard:*");
+
     return res.json(populatedStudent);
   } catch (error) {
     return res.status(500).json({ message: "Could not add payment" });
@@ -580,6 +607,11 @@ export const markAttendance = async (req, res) => {
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
+    if (student.email) {
+      await deleteCache(`student:dashboard:${student.email.toLowerCase()}`);
+    }
+    await clearCachePattern("teacher:dashboard:*");
+
     return res.json(populatedStudent);
   } catch (error) {
     return res.status(500).json({ message: "Could not update attendance" });
@@ -588,6 +620,14 @@ export const markAttendance = async (req, res) => {
 
 export const getStudentPortalData = async (req, res) => {
   try {
+    const studentEmail = req.studentEmail;
+    const cacheKey = `student:dashboard:${studentEmail}`;
+    
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
     const students = req.students; // all student records from protectStudent middleware
     const classes = [];
 
@@ -631,7 +671,7 @@ export const getStudentPortalData = async (req, res) => {
       if (!academyAdmin) continue;
 
       const institute = await Institute.findOne({ adminUser: student.user }).select(
-        "_id name status subscriptionEnd"
+        "_id name status subscriptionEnd quizFeatureEnabled"
       );
       if (!institute) continue;
 
@@ -658,7 +698,9 @@ export const getStudentPortalData = async (req, res) => {
         }
       }
 
-      const [notes, testResults, liveQuiz] = await Promise.all([
+      const isQuizEnabled = institute.quizFeatureEnabled !== false;
+
+      const [notes, testResults, liveQuiz, rawQuizzes] = await Promise.all([
         Note.find({
           institute: instituteId,
           $or: [{ batch: batch?._id || batch }, { batch: null }],
@@ -668,8 +710,26 @@ export const getStudentPortalData = async (req, res) => {
         TestResult.find({ institute: instituteId, student: student._id }).sort({
           createdAt: -1,
         }),
-        Promise.resolve(getLiveStateForStudent(student)),
+        isQuizEnabled ? Promise.resolve(getLiveStateForStudent(student)) : Promise.resolve(null),
+        isQuizEnabled ? Quiz.find({
+          institute: instituteId,
+          $or: [
+            { batches: batch?._id || batch },
+            { batches: { $size: 0 } }
+          ],
+          status: { $ne: "archived" },
+        }).sort({ createdAt: -1 }) : Promise.resolve([]),
       ]);
+
+      const quizzes = rawQuizzes.map((q) => ({
+        _id: q._id,
+        title: q.title,
+        status: q.status,
+        durationSeconds: q.durationSeconds,
+        restSeconds: q.restSeconds,
+        liveSessionId: q.liveSessionId,
+        questionsCount: q.questions?.length || 0,
+      }));
 
       const instUserKey = String(student.user);
       const collectiveFees = instituteFeesMap[instUserKey] || {
@@ -712,12 +772,15 @@ export const getStudentPortalData = async (req, res) => {
         notes,
         testResults,
         liveQuiz,
+        quizzes,
+        quizFeatureEnabled: isQuizEnabled,
       });
     }
 
-    return res.json({
-      classes,
-    });
+    const responsePayload = { classes };
+    await setCache(cacheKey, responsePayload, 3600); // Cache for 1 hour
+
+    return res.json(responsePayload);
   } catch (error) {
     console.error("getStudentPortalData error:", error);
     return res.status(500).json({ message: "Could not load student dashboard" });
@@ -745,10 +808,17 @@ export const downloadStudentNote = async (req, res) => {
     }
 
     if (note.pdfUrl && note.pdfUrl.startsWith("http")) {
-      // Fallback for legacy Cloudinary files
+      let downloadUrl = note.pdfUrl;
+      if (note.pdfUrl.includes("/raw/private/")) {
+        downloadUrl = cloudinary.utils.private_download_url(note.pdfPublicId, "", {
+          resource_type: "raw",
+          type: "private",
+        });
+      }
+
       await streamRemoteFileAsAttachment({
         res,
-        url: note.pdfUrl,
+        url: downloadUrl,
         filename: buildNoteDownloadFilename(note),
       });
     } else {
@@ -772,4 +842,190 @@ export const downloadStudentNote = async (req, res) => {
     return res.status(500).json({ message: "Could not download note" });
   }
 };
+
+export const bulkCreateStudents = async (req, res) => {
+  try {
+    if (req.user.role === "teacher") {
+      return res.status(403).json({ message: "Access denied. Teachers cannot enroll students." });
+    }
+
+    const { students } = req.body;
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ message: "Invalid students array" });
+    }
+
+    const results = {
+      successCount: 0,
+      failCount: 0,
+      errors: [],
+      created: []
+    };
+
+    // Cache batches for this user to avoid excessive DB queries
+    const userBatches = await Batch.find({ user: req.user._id });
+    const batchMap = new Map();
+    userBatches.forEach(b => {
+      batchMap.set(b.name.toLowerCase().trim(), b._id);
+    });
+
+    for (let index = 0; index < students.length; index++) {
+      const row = students[index];
+      const rowNum = index + 2; // Row 1 is header
+
+      try {
+        const name = row.name ? String(row.name).trim() : "";
+        const phone = row.phone ? String(row.phone).trim() : "";
+        const parentName = row.parentName ? String(row.parentName).trim() : "";
+        const parentPhone = row.parentPhone ? String(row.parentPhone).trim() : "";
+        const email = row.email ? String(row.email).toLowerCase().trim() : "";
+        const address = row.address ? String(row.address).trim() : "";
+        const batchName = row.batchName ? String(row.batchName).toLowerCase().trim() : "";
+        const joinedOn = row.joinedOn ? String(row.joinedOn).trim() : new Date().toISOString().split('T')[0];
+        const totalFees = row.totalFees !== undefined && row.totalFees !== "" ? Number(row.totalFees) : 0;
+        const feePlanType = row.feePlanType ? String(row.feePlanType).toLowerCase().trim() : "full_course";
+        const dueDate = row.dueDate ? String(row.dueDate).trim() : null;
+
+        // Validate required fields
+        if (!name) throw new Error("Name is required");
+        if (!phone) throw new Error("Phone is required");
+        if (!parentName) throw new Error("Parent Name is required");
+        if (!batchName) throw new Error("Batch Name is required");
+
+        // Resolve batch ID
+        const batchId = batchMap.get(batchName);
+        if (!batchId) {
+          throw new Error(`Batch "${row.batchName}" not found. Create the batch first.`);
+        }
+
+        if (Number.isNaN(totalFees) || totalFees < 0) {
+          throw new Error("Total Fees must be a positive number");
+        }
+
+        if (!["monthly", "full_course", "partial"].includes(feePlanType)) {
+          throw new Error("Fee Plan Type must be 'monthly', 'full_course', or 'partial'");
+        }
+
+        if (feePlanType === "partial" && !dueDate) {
+          throw new Error("Due Date is required for partial fee plan");
+        }
+
+        // Check if student is already enrolled in this exact batch at this institute
+        const alreadyEnrolled = await Student.findOne({
+          user: req.user._id,
+          batch: batchId,
+          $or: [
+            ...(email ? [{ email }] : []),
+            ...(phone ? [{ phone }] : [])
+          ].filter(Boolean)
+        });
+        if (alreadyEnrolled) {
+          throw new Error(`Student is already enrolled in batch "${row.batchName}"`);
+        }
+
+        // Find existing student by email/phone to reuse credentials
+        let enrollmentNumberToUse;
+        let hashedPasswordToUse;
+
+        const cleanEmail = email ? email.toLowerCase().trim() : "";
+        const cleanPhone = phone ? phone.trim() : "";
+
+        const existingStudent = await Student.findOne({
+          $or: [
+            ...(cleanEmail ? [{ email: cleanEmail }] : []),
+            ...(cleanPhone ? [{ phone: cleanPhone }] : []),
+          ].filter(Boolean),
+        }).select("enrollmentNumber password");
+
+        if (existingStudent) {
+          enrollmentNumberToUse = existingStudent.enrollmentNumber;
+          hashedPasswordToUse = existingStudent.password;
+        } else {
+          enrollmentNumberToUse = await generateEnrollmentNumber(req.user._id);
+          const initialPassword = getInitialPassword(name, phone);
+          hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
+        }
+
+        // Automatically mark the fee as fully collected by default to match client behavior
+        const paymentHistory = [];
+        if (totalFees > 0) {
+          paymentHistory.push({
+            amount: totalFees,
+            paymentDate: new Date(joinedOn),
+            paymentType: feePlanType,
+            note: "Auto-collected on bulk import"
+          });
+        }
+
+        const student = await Student.create({
+          user: req.user._id,
+          name,
+          phone,
+          parentName,
+          parentPhone,
+          email: email ? email.toLowerCase() : "",
+          address,
+          enrollmentNumber: enrollmentNumberToUse,
+          batch: batchId,
+          joinedOn,
+          totalFees,
+          feePlanType,
+          dueDate: resolveDueDate({ feePlanType, joinedOn, dueDate }),
+          paymentHistory,
+          attendanceRecords: [],
+          password: hashedPasswordToUse,
+        });
+
+        results.successCount++;
+        results.created.push({ id: student._id, name: student.name });
+      } catch (err) {
+        results.failCount++;
+        results.errors.push({
+          row: rowNum,
+          studentName: row.name || "Unknown",
+          message: err.message
+        });
+      }
+    }
+
+    if (results.successCount > 0) {
+      await clearCachePattern("student:dashboard:*");
+      await clearCachePattern("teacher:dashboard:*");
+    }
+
+    return res.status(200).json(results);
+  } catch (error) {
+    console.error("bulkCreateStudents error:", error);
+    return res.status(500).json({ message: "Could not bulk import students" });
+  }
+};
+
+export const getQuizLeaderboard = async (req, res) => {
+  try {
+    const quizId = req.params.id;
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({ message: "Quiz not found" });
+    }
+    const institute = await Institute.findById(quiz.institute);
+    if (institute?.quizFeatureEnabled === false) {
+      return res.status(403).json({ message: "Quiz feature is disabled for this institute" });
+    }
+    const attempts = await QuizAttempt.find({ quiz: quizId })
+      .populate("student", "name")
+      .sort({ score: -1, updatedAt: 1 });
+
+    const leaderboard = attempts.map((attempt, index) => ({
+      studentId: attempt.student?._id || attempt.student,
+      studentName: attempt.student?.name || "Unknown Student",
+      score: attempt.score,
+      lastAnswerAt: attempt.updatedAt,
+    }));
+
+    return res.json(leaderboard);
+  } catch (error) {
+    console.error("getQuizLeaderboard error:", error);
+    return res.status(500).json({ message: "Could not fetch leaderboard" });
+  }
+};
+
 

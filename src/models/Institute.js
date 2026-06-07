@@ -61,6 +61,10 @@ const instituteSchema = new mongoose.Schema(
       enum: ["institution", "solo"],
       default: "solo",
     },
+    quizFeatureEnabled: {
+      type: Boolean,
+      default: true,
+    },
     subscriptionHistory: {
       type: [
         {

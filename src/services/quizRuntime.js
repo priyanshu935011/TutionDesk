@@ -100,7 +100,7 @@ const serializeSession = (session) => ({
   status: session.status,
   currentQuestionIndex: session.currentQuestionIndex,
   currentQuestion:
-    session.currentQuestionIndex >= 0 && session.currentQuestionIndex < session.quiz.questions.length
+    session.status !== "starting" && session.currentQuestionIndex >= 0 && session.currentQuestionIndex < session.quiz.questions.length
       ? serializeQuestion(session.quiz.questions[session.currentQuestionIndex])
       : null,
   questionEndsAt: session.questionEndsAt,
@@ -109,6 +109,7 @@ const serializeSession = (session) => ({
   totalQuestions: session.quiz.questions.length,
   durationSeconds: session.quiz.durationSeconds,
   restSeconds: session.quiz.restSeconds || 10,
+  pointsPerCorrect: session.quiz.pointsPerCorrect || 10,
   poll: calculatePoll(session),
   audienceCount: session.students?.size || 0,
   reveal:
@@ -190,18 +191,24 @@ const finishQuiz = async (session) => {
   session.breakEndsAt = null;
   session.questionEndsAt = null;
   session.reveal = null;
-  session.quiz.status = "draft";
+  session.quiz.status = "completed";
   session.quiz.liveSessionId = "";
   await session.quiz.save();
   broadcastState(session);
   broadcastLeaderboard(session);
   emitToRoom(session, "quiz:end", serializeSession(session));
-  sessions.delete(session.sessionId);
+  
+  // Keep completed session in memory for 30 minutes to allow final leaderboard views on reload/refreshes.
+  setTimeout(() => {
+    sessions.delete(session.sessionId);
+  }, 30 * 60 * 1000);
 };
 
 const beginBreak = (session) => {
   session.status = "break";
-  session.breakEndsAt = Date.now() + (session.quiz.restSeconds || 10) * 1000;
+  if (!session.breakEndsAt) {
+    session.breakEndsAt = Date.now() + (session.quiz.restSeconds || 10) * 1000;
+  }
   session.questionEndsAt = null;
   broadcastState(session);
   emitToRoom(session, "quiz:break", serializeSession(session));
@@ -228,16 +235,14 @@ const beginReveal = (session) => {
   const remainingBreakMs = Math.max(1000, totalRestMs - revealDurationMs);
 
   session.revealTimer = setTimeout(() => {
-    beginBreak(session);
-
     const nextQuestionIndex = session.currentQuestionIndex + 1;
 
     if (nextQuestionIndex >= session.quiz.questions.length) {
-      session.breakTimer = setTimeout(() => {
-        finishQuiz(session);
-      }, remainingBreakMs);
+      finishQuiz(session);
       return;
     }
+
+    beginBreak(session);
 
     session.breakTimer = setTimeout(() => {
       session.currentQuestionIndex = nextQuestionIndex;
@@ -269,6 +274,13 @@ export const setSocketServer = (socketIo) => {
 };
 
 export const createLiveSession = async (quiz) => {
+  // Clean up any existing live/ended session for this institute/teacher to avoid memory leaks or conflicts.
+  for (const [sid, sess] of sessions.entries()) {
+    if (String(sess.quiz.institute) === String(quiz.institute)) {
+      sessions.delete(sid);
+    }
+  }
+
   const sessionId = `quiz_${quiz._id}_${Date.now()}`;
   quiz.status = "live";
   quiz.liveSessionId = sessionId;
@@ -296,7 +308,6 @@ export const createLiveSession = async (quiz) => {
 
 export const startLiveQuiz = async (quiz) => {
   const session = await createLiveSession(quiz);
-  startQuestion(session);
   return serializeSession(session);
 };
 
@@ -376,7 +387,7 @@ export const submitStudentAnswer = async ({
   let pointsAwarded = 0;
 
   if (isCorrect) {
-    pointsAwarded = Math.max(10, 1000 - Math.floor(responseTimeMs / 10));
+    pointsAwarded = Number(session.quiz.pointsPerCorrect || 10);
   } else if (session.quiz.negativeMarkingEnabled) {
     pointsAwarded = -Math.abs(Number(session.quiz.negativeMarkPerWrong || 0));
   }
@@ -427,6 +438,7 @@ export const quizRuntimeSocketHandlers = (socket) => {
     socket.data.role = role;
 
     if (role === "student") {
+      socket.data.studentId = studentId;
       joinStudentLiveRoom({ sessionId, studentId, studentName });
     }
 
@@ -436,6 +448,17 @@ export const quizRuntimeSocketHandlers = (socket) => {
 
     broadcastState(session);
     socket.emit("quiz:state", serializeSession(session));
+  });
+
+  socket.on("disconnect", () => {
+    const { sessionId, studentId, role } = socket.data;
+    if (role === "student" && sessionId && studentId) {
+      const session = ensureSession(sessionId);
+      if (session && session.students) {
+        session.students.delete(String(studentId));
+        broadcastState(session);
+      }
+    }
   });
 
   socket.on("quiz:answer", async (payload, callback) => {
@@ -469,6 +492,24 @@ export const quizRuntimeSocketHandlers = (socket) => {
       callback?.({ success: true, state });
     } catch (error) {
       callback?.({ success: false, message: "Could not start live quiz" });
+    }
+  });
+
+  socket.on("quiz:teacher:begin", ({ sessionId }, callback) => {
+    try {
+      const session = ensureSession(sessionId);
+      if (!session) {
+        callback?.({ success: false, message: "Session not found" });
+        return;
+      }
+      if (session.status !== "starting") {
+        callback?.({ success: false, message: "Quiz already started" });
+        return;
+      }
+      startQuestion(session);
+      callback?.({ success: true });
+    } catch (error) {
+      callback?.({ success: false, message: "Could not start quiz" });
     }
   });
 };

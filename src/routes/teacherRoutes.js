@@ -17,6 +17,7 @@ import {
   createHiredTeacher,
   getHiredTeachers,
   deleteHiredTeacher,
+  getQuizLeaderboard,
 } from "../controllers/teacherController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -25,12 +26,20 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect);
 
+const checkQuizFeature = (req, res, next) => {
+  if (req.user?.role !== "super_admin" && req.user?.institute?.quizFeatureEnabled === false) {
+    return res.status(403).json({ message: "Quiz feature is disabled for this institute" });
+  }
+  next();
+};
+
 router.get("/dashboard", getTeacherDashboard);
-router.get("/quizzes", getQuizzes);
-router.post("/quizzes", createQuiz);
-router.put("/quizzes/:id", updateQuiz);
-router.delete("/quizzes/:id", deleteQuiz);
-router.post("/quizzes/:id/live", startQuizLive);
+router.get("/quizzes", checkQuizFeature, getQuizzes);
+router.post("/quizzes", checkQuizFeature, createQuiz);
+router.put("/quizzes/:id", checkQuizFeature, updateQuiz);
+router.delete("/quizzes/:id", checkQuizFeature, deleteQuiz);
+router.post("/quizzes/:id/live", checkQuizFeature, startQuizLive);
+router.get("/quizzes/:id/leaderboard", checkQuizFeature, getQuizLeaderboard);
 
 router.get("/notes", getNotes);
 router.get("/notes/:id/download", downloadNote);

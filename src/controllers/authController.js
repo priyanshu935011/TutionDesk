@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
+import redisClient from "../config/redis.js";
 
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@tutiondesk.com").toLowerCase();
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
@@ -15,7 +16,7 @@ const buildInstituteState = async (user) => {
   }
 
   const institute = await Institute.findById(user.institute).select(
-    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType"
+    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled"
   );
 
   if (!institute) {
@@ -32,6 +33,7 @@ const buildInstituteState = async (user) => {
     subscriptionEnd: institute.subscriptionEnd,
     status: institute.status,
     tuitionType: institute.tuitionType || "solo",
+    quizFeatureEnabled: institute.quizFeatureEnabled !== false,
   };
 };
 
@@ -79,11 +81,24 @@ export const loginUser = async (req, res) => {
 
     const institute = await buildInstituteState(user);
 
+    const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+    user.currentSessionId = sessionId;
+    await user.save();
+
+    if (redisClient.isReady) {
+      try {
+        await redisClient.set(`active_session:user:${user._id}`, sessionId);
+      } catch (redisError) {
+        console.error("Redis set active session error:", redisError);
+      }
+    }
+
     return res.json({
       token: generateToken({
         id: user._id,
         email: user.email,
         role: user.role,
+        sessionId,
       }),
       user: {
         id: user._id,

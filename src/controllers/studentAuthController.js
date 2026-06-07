@@ -4,6 +4,7 @@ import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import { getInitialPassword } from "./studentController.js";
 import { sendResetEmail } from "../utils/mailer.js";
+import redisClient from "../config/redis.js";
 
 const generateToken = (payload) =>
   jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
@@ -77,6 +78,21 @@ export const studentLogin = async (req, res) => {
 
     const activeInstitute = await Institute.findOne({ adminUser: matchedStudent.user }).select("name");
 
+    const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+
+    await Student.updateMany(
+      { email: matchedStudent.email.toLowerCase() },
+      { currentSessionId: sessionId }
+    );
+
+    if (redisClient.isReady) {
+      try {
+        await redisClient.set(`active_session:student:${matchedStudent.email.toLowerCase()}`, sessionId);
+      } catch (redisError) {
+        console.error("Redis set student active session error:", redisError);
+      }
+    }
+
     return res.json({
       token: generateToken({
         id: matchedStudent._id,
@@ -84,6 +100,7 @@ export const studentLogin = async (req, res) => {
         studentId: matchedStudent._id,
         instituteId: matchedStudent.user,
         email: matchedStudent.email,
+        sessionId,
       }),
       student: {
         id: matchedStudent._id,

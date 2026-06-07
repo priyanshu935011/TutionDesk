@@ -4,6 +4,7 @@ import Quiz from "../models/Quiz.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
 import QuizAttempt from "../models/QuizAttempt.js";
+import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 
 
 export const getBatches = async (req, res) => {
@@ -42,6 +43,8 @@ export const createBatch = async (req, res) => {
     });
 
     const populated = await Batch.findById(batch._id).populate("teacher", "name email");
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
     return res.status(201).json(populated);
   } catch (error) {
     return res.status(500).json({ message: "Could not create batch" });
@@ -70,6 +73,9 @@ export const updateBatch = async (req, res) => {
     if (!batch) {
       return res.status(404).json({ message: "Batch not found" });
     }
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.json(batch);
   } catch (error) {
@@ -151,6 +157,9 @@ export const deleteBatch = async (req, res) => {
 
     // Finally delete the batch
     await Batch.deleteOne({ _id: batchId });
+
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Batch and associated student records deleted successfully" });
   } catch (error) {

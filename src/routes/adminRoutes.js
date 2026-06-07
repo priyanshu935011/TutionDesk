@@ -9,6 +9,10 @@ import {
   updateInstitute,
   getAdminTeachers,
   getAdminStudents,
+  updateAdminTeacher,
+  deleteAdminTeacher,
+  updateAdminStudent,
+  deleteAdminStudent,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import superAdminOnly from "../middleware/superAdminMiddleware.js";
@@ -19,8 +23,19 @@ router.use(protect, superAdminOnly);
 
 router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
-router.get("/teachers", getAdminTeachers);
-router.get("/students", getAdminStudents);
+
+router.route("/teachers")
+  .get(getAdminTeachers);
+router.route("/teachers/:id")
+  .put(updateAdminTeacher)
+  .delete(deleteAdminTeacher);
+
+router.route("/students")
+  .get(getAdminStudents);
+router.route("/students/:id")
+  .put(updateAdminStudent)
+  .delete(deleteAdminStudent);
+
 router.get("/institutes/:id", getInstituteDetail);
 router.post("/institutes", createInstitute);
 router.put("/institutes/:id", updateInstitute);
