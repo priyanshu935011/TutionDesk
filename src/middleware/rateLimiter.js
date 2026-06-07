@@ -8,6 +8,7 @@ const globalMemoryLimiter = rateLimit({
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
   message: {
     message: "Too many requests from this IP, please try again after a minute",
   },
@@ -18,6 +19,7 @@ const globalRedisLimiter = rateLimit({
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
   store: new RedisStore({
     sendCommand: (...args) => redisClient.sendCommand(args),
   }),
@@ -39,6 +41,7 @@ const authMemoryLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
   message: {
     message: "Too many authentication attempts from this IP, please try again after 15 minutes",
   },
@@ -49,6 +52,7 @@ const authRedisLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === "OPTIONS",
   store: new RedisStore({
     sendCommand: (...args) => redisClient.sendCommand(args),
   }),
