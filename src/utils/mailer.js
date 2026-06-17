@@ -40,7 +40,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px;">
       <h2 style="color: #4f46e5; margin-bottom: 20px;">TutionDesk Password Reset</h2>
       <p>Hello ${name},</p>
-      <p>You requested a password reset for your student account at TutionDesk.</p>
+      <p>You requested a password reset for your account at TutionDesk.</p>
       <p>Please click the button below to reset your password. This link is valid for 1 hour.</p>
       <div style="margin: 30px 0; text-align: center;">
         <a href="${resetLink}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">Reset Password</a>
@@ -73,7 +73,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
             name: name,
           },
         ],
-        subject: "Reset your TutionDesk Student Password",
+        subject: "Reset your TutionDesk Password",
         htmlContent: emailHtml,
       }),
     });
@@ -103,7 +103,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
     const mailOptions = {
       from,
       to: email,
-      subject: "Reset your TutionDesk Student Password",
+      subject: "Reset your TutionDesk Password",
       html: emailHtml,
     };
 
