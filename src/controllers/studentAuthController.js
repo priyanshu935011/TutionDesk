@@ -149,7 +149,11 @@ export const forgotStudentPassword = async (req, res) => {
     return res.json({ message: "Password reset link has been sent to your email." });
   } catch (error) {
     console.error("Forgot password error:", error);
-    return res.status(500).json({ message: "Could not initiate forgot password flow." });
+    return res.status(500).json({ 
+      message: "Could not initiate forgot password flow.",
+      error: error.message,
+      stack: error.stack
+    });
   }
 };
 
