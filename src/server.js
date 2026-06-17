@@ -38,6 +38,8 @@ const checkOrigin = (origin, callback) => {
                     normalized.startsWith("https://localhost:") ||
                     normalized.startsWith("http://127.0.0.1:") ||
                     normalized.startsWith("https://127.0.0.1:") ||
+                    normalized.endsWith("tutiondesk.in") ||
+                    normalized.endsWith("tuitiondesk.in") ||
                     normalized.includes("netlify.app") ||
                     normalized.includes("vercel.app");
   if (isAllowed) {
