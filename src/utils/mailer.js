@@ -5,7 +5,10 @@ export const sendResetEmail = async (email, name, resetLink) => {
   const port = process.env.SMTP_PORT || 587;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM || `"TutionDesk" <support@tutiondesk.in>`;
+  let from = process.env.SMTP_FROM || `"TutionDesk" <support@tutiondesk.in>`;
+  if (from.includes("tuitiondesk.in")) {
+    from = from.replace("tuitiondesk.in", "tutiondesk.in");
+  }
 
   console.log(`\n==================================================`);
   console.log(`PASSWORD RESET EMAIL REQUEST FOR: ${name} (${email})`);
