@@ -157,11 +157,11 @@ export const forgotUserPassword = async (req, res) => {
       return res.status(404).json({ message: "User with this email not found" });
     }
 
-    // Generate JWT reset token valid for 1 hour
+    // Generate JWT reset token valid for 30 minutes
     const resetToken = jwt.sign(
       { id: user._id, type: "user_reset", email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: "1h" }
+      { expiresIn: "30m" }
     );
 
     const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";

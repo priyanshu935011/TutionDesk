@@ -133,11 +133,11 @@ export const forgotStudentPassword = async (req, res) => {
       return res.status(404).json({ message: "Student with this email not found" });
     }
 
-    // Generate JWT reset token valid for 1 hour
+    // Generate JWT reset token valid for 30 minutes
     const resetToken = jwt.sign(
       { id: student._id, type: "student_reset", email: student.email },
       process.env.JWT_SECRET,
-      { expiresIn: "1h" }
+      { expiresIn: "30m" }
     );
 
     const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
@@ -180,8 +180,11 @@ export const resetStudentPassword = async (req, res) => {
       return res.status(404).json({ message: "Student not found." });
     }
 
-    student.password = await bcrypt.hash(password, 10);
-    await student.save();
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await Student.updateMany(
+      { email: student.email.toLowerCase() },
+      { password: hashedPassword }
+    );
 
     return res.json({ message: "Password has been reset successfully. You can now log in." });
   } catch (error) {
