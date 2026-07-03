@@ -233,14 +233,34 @@ export const createStudent = async (req, res) => {
       return res.status(400).json({ message: "One or more selected batches do not exist" });
     }
 
+    const cleanEmail = email ? email.toLowerCase().trim() : "";
+    const cleanPhone = phone ? phone.trim() : "";
+    const cleanName = name.trim().toLowerCase();
+
+    // Check if this exact student is already enrolled in any of the target batches
+    for (const currentBatchId of targetBatches) {
+      const alreadyEnrolled = await Student.findOne({
+        user: req.user._id,
+        name: { $regex: new RegExp(`^${cleanName}$`, "i") },
+        batch: currentBatchId,
+        $or: [
+          ...(cleanEmail ? [{ email: cleanEmail }] : []),
+          ...(cleanPhone ? [{ phone: cleanPhone }] : []),
+        ].filter(Boolean),
+      });
+
+      if (alreadyEnrolled) {
+        const batchObj = verifiedBatches.find(b => String(b._id) === String(currentBatchId));
+        return res.status(400).json({
+          message: `Student "${name}" is already enrolled in batch "${batchObj ? batchObj.name : "selected batch"}"`
+        });
+      }
+    }
+
     // Find existing student by email/phone to reuse password and enrollmentNumber
     let enrollmentNumberToUse;
     let hashedPasswordToUse;
 
-    const cleanEmail = email ? email.toLowerCase().trim() : "";
-    const cleanPhone = phone ? phone.trim() : "";
-
-    const cleanName = name.trim().toLowerCase();
     const existingStudent = await Student.findOne({
       name: { $regex: new RegExp(`^${cleanName}$`, "i") },
       $or: [
@@ -910,27 +930,28 @@ export const bulkCreateStudents = async (req, res) => {
           throw new Error("Due Date is required for partial fee plan");
         }
 
+        const cleanEmail = email ? email.toLowerCase().trim() : "";
+        const cleanPhone = phone ? phone.trim() : "";
+        const cleanName = name.trim().toLowerCase();
+
         // Check if student is already enrolled in this exact batch at this institute
         const alreadyEnrolled = await Student.findOne({
           user: req.user._id,
+          name: { $regex: new RegExp(`^${cleanName}$`, "i") },
           batch: batchId,
           $or: [
-            ...(email ? [{ email }] : []),
-            ...(phone ? [{ phone }] : [])
+            ...(cleanEmail ? [{ email: cleanEmail }] : []),
+            ...(cleanPhone ? [{ phone: cleanPhone }] : [])
           ].filter(Boolean)
         });
         if (alreadyEnrolled) {
-          throw new Error(`Student is already enrolled in batch "${row.batchName}"`);
+          throw new Error(`Student "${name}" is already enrolled in batch "${row.batchName}"`);
         }
 
         // Find existing student by email/phone to reuse credentials
         let enrollmentNumberToUse;
         let hashedPasswordToUse;
 
-        const cleanEmail = email ? email.toLowerCase().trim() : "";
-        const cleanPhone = phone ? phone.trim() : "";
-
-        const cleanName = name.trim().toLowerCase();
         const existingStudent = await Student.findOne({
           name: { $regex: new RegExp(`^${cleanName}$`, "i") },
           $or: [
