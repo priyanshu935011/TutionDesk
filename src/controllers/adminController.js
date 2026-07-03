@@ -12,11 +12,25 @@ import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscrip
 import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
 
-const hydrateInstitute = async (institute) => {
+const getAdminEmails = async () => {
+  try {
+    const adminUsers = await User.find({ role: { $in: ["super_admin", "institute_admin"] } }).select("email");
+    const adminEmails = adminUsers.map(u => u.email.toLowerCase()).filter(Boolean);
+    if (process.env.SUPER_ADMIN_EMAIL) {
+      adminEmails.push(process.env.SUPER_ADMIN_EMAIL.toLowerCase());
+    }
+    return [...new Set(adminEmails)];
+  } catch (error) {
+    console.error("getAdminEmails error:", error);
+    return [];
+  }
+};
+
+const hydrateInstitute = async (institute, adminEmails) => {
   const matchUser = institute.adminUser ? (mongoose.Types.ObjectId.isValid(institute.adminUser) ? new mongoose.Types.ObjectId(institute.adminUser) : institute.adminUser) : null;
   const [studentCountResult, batchCount] = await Promise.all([
     Student.aggregate([
-      { $match: { user: matchUser } },
+      { $match: { user: matchUser, email: { $nin: adminEmails } } },
       { $group: { _id: "$enrollmentNumber" } },
       { $count: "count" }
     ]),
@@ -43,9 +57,12 @@ const getNextStartDate = (institute) => {
 
 export const getAdminOverview = async (req, res) => {
   try {
+    const adminEmails = await getAdminEmails();
+
     const [institutes, totalStudentsResult, totalTeachers, totalSolo, totalInstitutions] = await Promise.all([
       Institute.find().sort({ createdAt: -1 }),
       Student.aggregate([
+        { $match: { email: { $nin: adminEmails } } },
         { $group: { _id: "$enrollmentNumber" } },
         { $count: "count" }
       ]),
@@ -56,7 +73,7 @@ export const getAdminOverview = async (req, res) => {
 
     const totalStudents = totalStudentsResult[0]?.count || 0;
 
-    const hydrated = await Promise.all(institutes.map((institute) => hydrateInstitute(institute)));
+    const hydrated = await Promise.all(institutes.map((institute) => hydrateInstitute(institute, adminEmails)));
 
     const now = Date.now();
     const sevenDays = 1000 * 60 * 60 * 24 * 7;
@@ -77,7 +94,7 @@ export const getAdminOverview = async (req, res) => {
       const [activeUsersNow, activeStudentsNowResult] = await Promise.all([
         User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
         Student.aggregate([
-          { $match: { lastActiveAt: { $gte: fiveMinsAgo } } },
+          { $match: { lastActiveAt: { $gte: fiveMinsAgo }, email: { $nin: adminEmails } } },
           { $group: { _id: "$enrollmentNumber" } },
           { $count: "count" }
         ]),
@@ -92,7 +109,7 @@ export const getAdminOverview = async (req, res) => {
     const [activeUsersToday, activeStudentsTodayResult] = await Promise.all([
       User.countDocuments({ lastActiveAt: { $gte: startOfToday } }),
       Student.aggregate([
-        { $match: { lastActiveAt: { $gte: startOfToday } } },
+        { $match: { lastActiveAt: { $gte: startOfToday }, email: { $nin: adminEmails } } },
         { $group: { _id: "$enrollmentNumber" } },
         { $count: "count" }
       ]),
@@ -112,7 +129,7 @@ export const getAdminOverview = async (req, res) => {
 
     const [institutesSignups, studentsSignups] = await Promise.all([
       Institute.find({ createdAt: { $gte: sixMonthsAgo } }).select("createdAt"),
-      Student.find({ createdAt: { $gte: sixMonthsAgo } }).select("createdAt"),
+      Student.find({ createdAt: { $gte: sixMonthsAgo }, email: { $nin: adminEmails } }).select("createdAt"),
     ]);
 
     const months = [];
@@ -414,7 +431,8 @@ export const renewInstituteSubscription = async (req, res) => {
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
 
-    return res.json(await hydrateInstitute(institute));
+    const adminEmails = await getAdminEmails();
+    return res.json(await hydrateInstitute(institute, adminEmails));
   } catch (error) {
     return res.status(500).json({ message: "Could not renew subscription" });
   }
@@ -428,10 +446,11 @@ export const deleteInstitute = async (req, res) => {
       return res.status(404).json({ message: "Tution not found" });
     }
 
+    const adminEmails = await getAdminEmails();
     const [userCount, batchCount, studentCount] = await Promise.all([
       User.countDocuments({ institute: institute._id }),
       Batch.countDocuments({ user: institute.adminUser }),
-      Student.countDocuments({ user: institute.adminUser }),
+      Student.countDocuments({ user: institute.adminUser, email: { $nin: adminEmails } }),
     ]);
 
     await Promise.all([
@@ -487,6 +506,7 @@ export const getUptimeOverview = async (req, res) => {
 
 export const getAdminTeachers = async (req, res) => {
   try {
+    const adminEmails = await getAdminEmails();
     const teachers = await User.find({ role: "teacher" })
       .populate("institute", "name")
       .sort({ lastActiveAt: -1, createdAt: -1 });
@@ -499,7 +519,7 @@ export const getAdminTeachers = async (req, res) => {
         
         const batchesWithCounts = await Promise.all(
           teacherBatches.map(async (b) => {
-            const studentCount = await Student.countDocuments({ batch: b._id });
+            const studentCount = await Student.countDocuments({ batch: b._id, email: { $nin: adminEmails } });
             return {
               ...b.toObject(),
               studentCount,
@@ -523,7 +543,8 @@ export const getAdminTeachers = async (req, res) => {
 
 export const getAdminStudents = async (req, res) => {
   try {
-    const students = await Student.find()
+    const adminEmails = await getAdminEmails();
+    const students = await Student.find({ email: { $nin: adminEmails } })
       .populate({
         path: "batch",
         select: "name teacher",

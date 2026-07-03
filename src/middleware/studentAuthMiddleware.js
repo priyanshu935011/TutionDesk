@@ -15,14 +15,16 @@ const protectStudent = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.role !== "student" || !decoded.email) {
+    if (decoded.role !== "student" || (!decoded.email && !decoded.enrollmentNumber)) {
       return res.status(401).json({ message: "Invalid student token" });
     }
 
-    // Fetch all student records for this email
-    const students = await Student.find({
-      email: decoded.email.toLowerCase(),
-    }).populate({
+    // Fetch all student records for this student identity
+    const query = decoded.enrollmentNumber
+      ? { enrollmentNumber: decoded.enrollmentNumber }
+      : { email: decoded.email.toLowerCase() };
+
+    const students = await Student.find(query).populate({
       path: "batch",
       select: "name scheduleDays startTime endTime teacher",
       populate: {
@@ -37,7 +39,7 @@ const protectStudent = async (req, res, next) => {
 
     if (decoded.sessionId) {
       let sessionValid = true;
-      const cacheSessionKey = `active_session:student:${decoded.email.toLowerCase()}`;
+      const cacheSessionKey = `active_session:student:${decoded.enrollmentNumber || decoded.email.toLowerCase()}`;
       if (redisClient.isReady) {
         try {
           let activeSessionId = await redisClient.get(cacheSessionKey);

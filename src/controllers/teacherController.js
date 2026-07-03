@@ -69,12 +69,18 @@ export const getTeacherDashboard = async (req, res) => {
       
       batchQuery.teacher = req.user._id;
       studentQuery.batch = { $in: batchIds };
-      noteQuery.$or = [{ batch: { $in: batchIds } }, { batch: null }];
-      quizQuery.batches = { $in: batchIds };
-
+      
       const myStudents = await Student.find({ user: ownerId, batch: { $in: batchIds } }).select("_id");
       const studentIds = myStudents.map((s) => s._id);
       testQuery.student = { $in: studentIds };
+
+      noteQuery.$or = [
+        { targetType: "batch", batch: { $in: batchIds } },
+        { targetType: "batch", batch: null },
+        { targetType: "student", students: { $in: studentIds } },
+        { targetType: { $exists: false }, $or: [{ batch: { $in: batchIds } }, { batch: null }] }
+      ];
+      quizQuery.batches = { $in: batchIds };
     }
 
     const [students, batches, quizzes, notes, testResults] = await Promise.all([
@@ -86,7 +92,8 @@ export const getTeacherDashboard = async (req, res) => {
       Quiz.find(quizQuery).sort({ createdAt: -1 }),
       Note.find(noteQuery)
         .sort({ createdAt: -1 })
-        .populate("batch", "name"),
+        .populate("batch", "name")
+        .populate("students", "name enrollmentNumber"),
       TestResult.find(testQuery)
         .sort({ createdAt: -1 })
         .populate("student", "name enrollmentNumber email"),
@@ -377,7 +384,8 @@ export const getNotes = async (req, res) => {
     const instituteId = req.user.institute?._id || req.user.institute;
     const notes = await Note.find({ institute: instituteId })
       .sort({ createdAt: -1 })
-      .populate("batch", "name");
+      .populate("batch", "name")
+      .populate("students", "name enrollmentNumber");
     return res.json(notes);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch notes" });
@@ -436,7 +444,7 @@ export const downloadNote = async (req, res) => {
 export const uploadNote = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { title, batchId } = req.body;
+    const { title, batchId, targetType, studentIds } = req.body;
 
     if (!title || !req.file) {
       return res
@@ -464,20 +472,38 @@ export const uploadNote = async (req, res) => {
       return res.status(502).json({ message: "Cloudinary upload failed" });
     }
 
+    let resolvedStudentIds = [];
+    if (targetType === "student" && studentIds) {
+      if (Array.isArray(studentIds)) {
+        resolvedStudentIds = studentIds;
+      } else if (typeof studentIds === "string") {
+        try {
+          resolvedStudentIds = JSON.parse(studentIds);
+        } catch (e) {
+          resolvedStudentIds = studentIds.split(",").map(id => id.trim()).filter(Boolean);
+        }
+      }
+    }
+
     const note = await Note.create({
       institute: instituteId,
       createdBy: req.user._id,
       title,
       pdfUrl: result.secure_url,
       pdfPublicId: result.public_id,
-      batch: batchId || null,
+      targetType: targetType || "batch",
+      batch: targetType === "student" ? null : (batchId || null),
+      students: targetType === "student" ? resolvedStudentIds : [],
     });
 
     await deleteCache(`teacher:dashboard:${req.user._id}`);
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
 
-    return res.status(201).json(await note.populate("batch", "name"));
+    return res.status(201).json(await note.populate([
+      { path: "batch", select: "name" },
+      { path: "students", select: "name enrollmentNumber" }
+    ]));
   } catch (error) {
     return res.status(500).json({ message: error.message || error });
   }

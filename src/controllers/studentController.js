@@ -11,10 +11,7 @@ import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cac
 import cloudinary from "../utils/cloudinary.js";
 
 export const getInitialPassword = (name, phone) => {
-  const namePart = (name || "").replace(/\s+/g, "").substring(0, 4).toLowerCase();
-  const cleanPhone = (phone || "").replace(/\D/g, "");
-  const phonePart = cleanPhone.length >= 4 ? cleanPhone.slice(-4) : "1234";
-  return namePart + phonePart;
+  return "123456";
 };
 import {
   buildNoteDownloadFilename,
@@ -243,7 +240,9 @@ export const createStudent = async (req, res) => {
     const cleanEmail = email ? email.toLowerCase().trim() : "";
     const cleanPhone = phone ? phone.trim() : "";
 
+    const cleanName = name.trim().toLowerCase();
     const existingStudent = await Student.findOne({
+      name: { $regex: new RegExp(`^${cleanName}$`, "i") },
       $or: [
         ...(cleanEmail ? [{ email: cleanEmail }] : []),
         ...(cleanPhone ? [{ phone: cleanPhone }] : []),
@@ -291,8 +290,8 @@ export const createStudent = async (req, res) => {
       createdStudents.push(populatedStudent);
     }
     
-    if (cleanEmail) {
-      await deleteCache(`student:dashboard:${cleanEmail}`);
+    if (enrollmentNumberToUse) {
+      await deleteCache(`student:dashboard:${enrollmentNumberToUse}`);
     }
     await clearCachePattern("teacher:dashboard:*");
 
@@ -389,8 +388,8 @@ export const updateStudent = async (req, res) => {
     const originalEmail = student.email ? student.email.toLowerCase() : "";
     const newEmail = email ? email.toLowerCase() : "";
 
-    // Find all student records for this student by original email
-    const studentRecords = await Student.find({ email: originalEmail, user: req.user._id });
+    // Find all student records for this student by enrollment number
+    const studentRecords = await Student.find({ enrollmentNumber: student.enrollmentNumber, user: req.user._id });
 
     const currentBatches = studentRecords.map((s) => String(s.batch));
     const targetBatchIds = targetBatches.map(String);
@@ -401,7 +400,7 @@ export const updateStudent = async (req, res) => {
     // Remove unchecked batches
     if (batchesToRemove.length > 0) {
       await Student.deleteMany({
-        email: originalEmail,
+        enrollmentNumber: student.enrollmentNumber,
         user: req.user._id,
         batch: { $in: batchesToRemove },
       });
@@ -433,7 +432,7 @@ export const updateStudent = async (req, res) => {
 
     // Update remaining/existing records
     const remainingRecords = await Student.find({
-      email: originalEmail,
+      enrollmentNumber: student.enrollmentNumber,
       user: req.user._id,
       batch: { $in: targetBatchIds },
     });
@@ -461,11 +460,8 @@ export const updateStudent = async (req, res) => {
       await rec.save();
     }
 
-    if (originalEmail) {
-      await deleteCache(`student:dashboard:${originalEmail}`);
-    }
-    if (newEmail && newEmail !== originalEmail) {
-      await deleteCache(`student:dashboard:${newEmail}`);
+    if (student.enrollmentNumber) {
+      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
     }
     await clearCachePattern("teacher:dashboard:*");
 
@@ -507,8 +503,8 @@ export const deleteStudent = async (req, res) => {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    if (student.email) {
-      await deleteCache(`student:dashboard:${student.email.toLowerCase()}`);
+    if (student.enrollmentNumber) {
+      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
     }
     await clearCachePattern("teacher:dashboard:*");
 
@@ -559,8 +555,8 @@ export const addPayment = async (req, res) => {
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
-    if (student.email) {
-      await deleteCache(`student:dashboard:${student.email.toLowerCase()}`);
+    if (student.enrollmentNumber) {
+      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
     }
     await clearCachePattern("teacher:dashboard:*");
 
@@ -607,8 +603,8 @@ export const markAttendance = async (req, res) => {
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
-    if (student.email) {
-      await deleteCache(`student:dashboard:${student.email.toLowerCase()}`);
+    if (student.enrollmentNumber) {
+      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
     }
     await clearCachePattern("teacher:dashboard:*");
 
@@ -620,8 +616,8 @@ export const markAttendance = async (req, res) => {
 
 export const getStudentPortalData = async (req, res) => {
   try {
-    const studentEmail = req.studentEmail;
-    const cacheKey = `student:dashboard:${studentEmail}`;
+    const studentEnrollment = req.student?.enrollmentNumber || req.students[0]?.enrollmentNumber || req.studentEmail;
+    const cacheKey = `student:dashboard:${studentEnrollment}`;
     
     const cachedData = await getCache(cacheKey);
     if (cachedData) {
@@ -700,10 +696,15 @@ export const getStudentPortalData = async (req, res) => {
 
       const isQuizEnabled = institute.quizFeatureEnabled !== false;
 
-      const [notes, testResults, liveQuiz, rawQuizzes] = await Promise.all([
+       const [notes, testResults, liveQuiz, rawQuizzes] = await Promise.all([
         Note.find({
           institute: instituteId,
-          $or: [{ batch: batch?._id || batch }, { batch: null }],
+          $or: [
+            { targetType: "batch", batch: batch?._id || batch },
+            { targetType: "batch", batch: null },
+            { targetType: "student", students: student._id },
+            { targetType: { $exists: false }, $or: [{ batch: batch?._id || batch }, { batch: null }] }
+          ],
         })
           .sort({ createdAt: -1 })
           .populate("batch", "name"),
@@ -929,7 +930,9 @@ export const bulkCreateStudents = async (req, res) => {
         const cleanEmail = email ? email.toLowerCase().trim() : "";
         const cleanPhone = phone ? phone.trim() : "";
 
+        const cleanName = name.trim().toLowerCase();
         const existingStudent = await Student.findOne({
+          name: { $regex: new RegExp(`^${cleanName}$`, "i") },
           $or: [
             ...(cleanEmail ? [{ email: cleanEmail }] : []),
             ...(cleanPhone ? [{ phone: cleanPhone }] : []),

@@ -27,11 +27,22 @@ const noteSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    targetType: {
+      type: String,
+      enum: ["batch", "student"],
+      default: "batch",
+    },
     batch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Batch",
       default: null,
     },
+    students: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Student",
+      },
+    ],
   },
   { timestamps: true }
 );
