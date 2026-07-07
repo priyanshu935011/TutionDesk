@@ -69,8 +69,11 @@ const addOneMonth = (dateValue) => {
   return date;
 };
 
-const resolveDueDate = ({ feePlanType, joinedOn, dueDate }) => {
+const resolveDueDate = ({ feePlanType, joinedOn, dueDate, feeStatus = "paid" }) => {
   if (feePlanType === "monthly") {
+    if (feeStatus === "unpaid") {
+      return new Date(joinedOn);
+    }
     return addOneMonth(joinedOn);
   }
 
@@ -189,9 +192,12 @@ export const createStudent = async (req, res) => {
       totalFees,
       feePlanType,
       dueDate,
-      paymentHistory = [],
+      paymentHistory: initialPaymentHistory = [],
       attendanceRecords = [],
+      feeStatus = "paid",
     } = req.body;
+
+    const paymentHistory = feeStatus === "unpaid" ? [] : initialPaymentHistory;
 
     const targetBatches = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
 
@@ -300,7 +306,7 @@ export const createStudent = async (req, res) => {
         joinedOn,
         totalFees: currentTotalFees,
         feePlanType,
-        dueDate: i === 0 ? resolveDueDate({ feePlanType, joinedOn, dueDate }) : null,
+        dueDate: i === 0 ? resolveDueDate({ feePlanType, joinedOn, dueDate, feeStatus }) : null,
         paymentHistory: currentPaymentHistory,
         attendanceRecords: i === 0 ? attendanceRecords : [],
         password: hashedPasswordToUse,
@@ -570,6 +576,10 @@ export const addPayment = async (req, res) => {
       paymentType,
       note: note || "",
     });
+
+    if (student.feePlanType === "monthly") {
+      student.dueDate = addOneMonth(paymentDate);
+    }
 
     await student.save();
 
@@ -969,9 +979,12 @@ export const bulkCreateStudents = async (req, res) => {
           hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
         }
 
-        // Automatically mark the fee as fully collected by default to match client behavior
+        // Determine if fees are paid or unpaid (defaults to unpaid)
+        const rawFeeStatus = row.feeStatus ? String(row.feeStatus).toLowerCase().trim() : "unpaid";
+        const cleanFeeStatus = (rawFeeStatus === "paid" || rawFeeStatus === "yes" || rawFeeStatus === "true" || rawFeeStatus === "1") ? "paid" : "unpaid";
+
         const paymentHistory = [];
-        if (totalFees > 0) {
+        if (cleanFeeStatus === "paid" && totalFees > 0) {
           paymentHistory.push({
             amount: totalFees,
             paymentDate: new Date(joinedOn),
@@ -993,7 +1006,7 @@ export const bulkCreateStudents = async (req, res) => {
           joinedOn,
           totalFees,
           feePlanType,
-          dueDate: resolveDueDate({ feePlanType, joinedOn, dueDate }),
+          dueDate: resolveDueDate({ feePlanType, joinedOn, dueDate, feeStatus: cleanFeeStatus }),
           paymentHistory,
           attendanceRecords: [],
           password: hashedPasswordToUse,
