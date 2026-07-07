@@ -272,3 +272,75 @@ export const changeStudentPassword = async (req, res) => {
     return res.status(500).json({ message: "Could not change password." });
   }
 };
+
+export const switchProfile = async (req, res) => {
+  try {
+    const { targetEnrollmentNumber } = req.body;
+    if (!targetEnrollmentNumber) {
+      return res.status(400).json({ message: "Target enrollment number is required" });
+    }
+
+    const currentEmail = req.studentEmail; // from protectStudent
+    const currentPhone = req.student?.phone;
+
+    // Find all student records matching targetEnrollmentNumber
+    const siblingRecords = await Student.find({ enrollmentNumber: targetEnrollmentNumber });
+    if (!siblingRecords || siblingRecords.length === 0) {
+      return res.status(404).json({ message: "Profile not found" });
+    }
+
+    // Verify security: target student MUST share either the email or the phone with the current student
+    const firstSibling = siblingRecords[0];
+    const sharesContact =
+      (currentEmail && firstSibling.email && firstSibling.email.toLowerCase().trim() === currentEmail.trim()) ||
+      (currentPhone && firstSibling.phone && firstSibling.phone.trim() === currentPhone.trim());
+
+    if (!sharesContact) {
+      return res.status(403).json({ message: "Access denied. You can only switch to sibling profiles sharing your contact info." });
+    }
+
+    // Verify subscription status of target profile's institution
+    const inst = await Institute.findOne({ adminUser: firstSibling.user }).select("status subscriptionEnd");
+    if (!inst || inst.status !== "active" || new Date(inst.subscriptionEnd).getTime() < Date.now()) {
+      return res.status(403).json({ message: "The target profile's institute subscription has expired." });
+    }
+
+    // Issue new session ID and token
+    const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+    await Student.updateMany(
+      { enrollmentNumber: firstSibling.enrollmentNumber },
+      { currentSessionId: sessionId }
+    );
+
+    if (redisClient.isReady) {
+      try {
+        await redisClient.set(`active_session:student:${firstSibling.enrollmentNumber}`, sessionId);
+      } catch (redisError) {
+        console.error("Redis set student active session error:", redisError);
+      }
+    }
+
+    return res.json({
+      token: generateToken({
+        id: firstSibling._id,
+        role: "student",
+        studentId: firstSibling._id,
+        instituteId: firstSibling.user,
+        email: firstSibling.email,
+        phone: firstSibling.phone,
+        enrollmentNumber: firstSibling.enrollmentNumber,
+        sessionId,
+      }),
+      student: {
+        id: firstSibling._id,
+        name: firstSibling.name,
+        email: firstSibling.email,
+        phone: firstSibling.phone,
+        role: "student",
+        enrollmentNumber: firstSibling.enrollmentNumber,
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not switch profile", error: error.message });
+  }
+};

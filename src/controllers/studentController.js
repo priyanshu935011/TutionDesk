@@ -808,7 +808,30 @@ export const getStudentPortalData = async (req, res) => {
       });
     }
 
-    const responsePayload = { classes };
+    // Query all sibling profiles sharing same email or phone
+    const siblingProfilesQuery = [];
+    if (req.student?.email) siblingProfilesQuery.push({ email: req.student.email.toLowerCase() });
+    if (req.student?.phone) siblingProfilesQuery.push({ phone: req.student.phone });
+
+    let siblingProfiles = [];
+    if (siblingProfilesQuery.length > 0) {
+      const allSiblingStudents = await Student.find({
+        $or: siblingProfilesQuery
+      }).select("name enrollmentNumber email phone");
+
+      const profilesMap = new Map();
+      allSiblingStudents.forEach((s) => {
+        if (!profilesMap.has(s.enrollmentNumber)) {
+          profilesMap.set(s.enrollmentNumber, {
+            name: s.name,
+            enrollmentNumber: s.enrollmentNumber,
+          });
+        }
+      });
+      siblingProfiles = Array.from(profilesMap.values());
+    }
+
+    const responsePayload = { classes, siblingProfiles };
     await setCache(cacheKey, responsePayload, 3600); // Cache for 1 hour
 
     return res.json(responsePayload);
