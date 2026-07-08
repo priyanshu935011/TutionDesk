@@ -341,9 +341,7 @@ export const createStudent = async (req, res) => {
 
 export const updateStudent = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Teachers cannot modify students." });
-    }
+    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
 
     const {
       name,
@@ -396,26 +394,39 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "Due date is required for partial fee plan" });
     }
 
-    // Verify all target batches exist
-    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches }, user: req.user._id });
+    // Verify all target batches exist and belong to ownerId
+    const verifiedQuery = { _id: { $in: targetBatches }, user: ownerId };
+    if (req.user.role === "teacher") {
+      verifiedQuery.teacher = req.user._id;
+    }
+    const verifiedBatches = await Batch.find(verifiedQuery);
     if (verifiedBatches.length !== targetBatches.length) {
-      return res.status(400).json({ message: "One or more selected batches do not exist" });
+      return res.status(400).json({ message: "One or more selected batches do not exist or you do not have permission to assign to them" });
     }
 
     const student = await Student.findOne({
       _id: req.params.id,
-      user: req.user._id,
+      user: ownerId,
     });
 
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
 
+    // If teacher, verify they own at least one of the student's current batches
+    if (req.user.role === "teacher") {
+      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
+      const myBatchIds = myBatches.map(b => String(b._id));
+      if (!myBatchIds.includes(String(student.batch))) {
+        return res.status(403).json({ message: "Access denied. You can only modify students in your assigned batches." });
+      }
+    }
+
     const originalEmail = student.email ? student.email.toLowerCase() : "";
     const newEmail = email ? email.toLowerCase() : "";
 
     // Find all student records for this student by enrollment number
-    const studentRecords = await Student.find({ enrollmentNumber: student.enrollmentNumber, user: req.user._id });
+    const studentRecords = await Student.find({ enrollmentNumber: student.enrollmentNumber, user: ownerId });
 
     const currentBatches = studentRecords.map((s) => String(s.batch));
     const targetBatchIds = targetBatches.map(String);
@@ -427,7 +438,7 @@ export const updateStudent = async (req, res) => {
     if (batchesToRemove.length > 0) {
       await Student.deleteMany({
         enrollmentNumber: student.enrollmentNumber,
-        user: req.user._id,
+        user: ownerId,
         batch: { $in: batchesToRemove },
       });
     }
@@ -437,7 +448,7 @@ export const updateStudent = async (req, res) => {
     const enrollmentNumberToUse = student.enrollmentNumber;
     for (const newBatchId of batchesToAdd) {
       await Student.create({
-        user: req.user._id,
+        user: ownerId,
         name,
         phone,
         parentName,
@@ -459,7 +470,7 @@ export const updateStudent = async (req, res) => {
     // Update remaining/existing records
     const remainingRecords = await Student.find({
       enrollmentNumber: student.enrollmentNumber,
-      user: req.user._id,
+      user: ownerId,
       batch: { $in: targetBatchIds },
     });
 
