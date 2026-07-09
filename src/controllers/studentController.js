@@ -156,8 +156,16 @@ export const getStudentById = async (req, res) => {
       return res.status(404).json({ message: "Student not found" });
     }
 
+    const allRecords = await Student.find({
+      enrollmentNumber: student.enrollmentNumber,
+      user: ownerId,
+    }).select("batch");
+    const enrolledBatchIds = allRecords.map((r) => r.batch);
+
+    const obj = student.toJSON();
+    obj.enrolledBatchIds = enrolledBatchIds;
+
     if (req.user.role === "teacher") {
-      const obj = student.toJSON();
       delete obj.totalFees;
       delete obj.feePlanType;
       delete obj.paymentHistory;
@@ -167,7 +175,7 @@ export const getStudentById = async (req, res) => {
       return res.json(obj);
     }
 
-    return res.json(student);
+    return res.json(obj);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch student" });
   }
