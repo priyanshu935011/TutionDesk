@@ -333,7 +333,7 @@ const isStudentEligibleForSession = (student, session) => {
     return true;
   }
 
-  const studentBatchId = String(student.batch?._id || student.batch || "");
+  const studentBatchId = String(student.batch?._id || student.batch?.id || student.batch || "");
   return Boolean(studentBatchId) && quizBatchIds.includes(studentBatchId);
 };
 

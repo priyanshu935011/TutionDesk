@@ -18,6 +18,12 @@ import {
   getHiredTeachers,
   deleteHiredTeacher,
   getQuizLeaderboard,
+  uploadBrandingLogo,
+  updateBrandingSettings,
+  updateTestResult,
+  deleteTestResult,
+  updateGroupedTestResults,
+  deleteGroupedTestResults,
 } from "../controllers/teacherController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -49,10 +55,18 @@ router.delete("/notes/:id", deleteNote);
 router.get("/test-results", getTestResults);
 router.post("/test-results", createTestResult);
 router.post("/test-results/bulk", createTestResultsBulk);
+router.put("/test-results/:id", updateTestResult);
+router.delete("/test-results/:id", deleteTestResult);
+router.post("/test-results/grouped/update", updateGroupedTestResults);
+router.post("/test-results/grouped/delete", deleteGroupedTestResults);
 
 router.route("/hired-teachers")
   .get(getHiredTeachers)
   .post(createHiredTeacher);
 router.delete("/hired-teachers/:id", deleteHiredTeacher);
+
+// Branding endpoints
+router.post("/branding/logo", upload.single("logo"), uploadBrandingLogo);
+router.put("/branding", updateBrandingSettings);
 
 export default router;

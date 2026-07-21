@@ -53,7 +53,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     const instituteId = req.user.institute?._id || req.user.institute;
     const institute = await Institute.findById(instituteId).select(
-      "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled"
+      "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl"
     );
     const ownerId = req.user.role === "teacher" ? institute?.adminUser : req.user._id;
 
@@ -149,6 +149,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     return res.json(responsePayload);
   } catch (error) {
+    console.error("getTeacherDashboard error stack:", error);
     return res
       .status(500)
       .json({ message: "Could not load teacher dashboard" });
@@ -789,5 +790,165 @@ export const getQuizLeaderboard = async (req, res) => {
   } catch (error) {
     console.error("getQuizLeaderboard error:", error);
     return res.status(500).json({ message: "Could not fetch leaderboard" });
+  }
+};
+
+export const uploadBrandingLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    if (req.user?.role !== "institute_admin") {
+      return res.status(403).json({ message: "Only institute admins can update branding settings" });
+    }
+
+    const result = await uploadBufferToCloudinary(req.file.buffer, {
+      resource_type: "image",
+      folder: "tutiondesk/logos",
+    });
+
+    return res.json({ logoUrl: result.secure_url });
+  } catch (error) {
+    console.error("uploadBrandingLogo error:", error);
+    return res.status(500).json({ message: "Could not upload logo" });
+  }
+};
+
+export const updateBrandingSettings = async (req, res) => {
+  try {
+    if (req.user?.role !== "institute_admin") {
+      return res.status(403).json({ message: "Only institute admins can update branding settings" });
+    }
+
+    const { brandingEnabled, name, themeColor, logoUrl } = req.body;
+    const instituteId = req.user.institute?._id || req.user.institute;
+
+    const institute = await Institute.findByIdAndUpdate(
+      instituteId,
+      {
+        brandingEnabled: brandingEnabled !== false,
+        name: name ? name.trim() : "TutionDesk",
+        themeColor: themeColor || "#6366f1",
+        logoUrl: logoUrl || null,
+      },
+      { new: true }
+    );
+
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found" });
+    }
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({
+      message: "Branding settings updated successfully",
+      institute: {
+        id: institute._id,
+        name: institute.name,
+        brandingEnabled: institute.brandingEnabled !== false,
+        logoUrl: institute.logoUrl || null,
+        themeColor: institute.themeColor || "#6366f1",
+      }
+    });
+  } catch (error) {
+    console.error("updateBrandingSettings error:", error);
+    return res.status(500).json({ message: "Could not update branding settings" });
+  }
+};
+
+export const updateTestResult = async (req, res) => {
+  try {
+    const { score, totalMarks, remarks } = req.body;
+    const result = await TestResult.findById(req.params.id);
+    if (!result) {
+      return res.status(404).json({ message: "Test result not found" });
+    }
+
+    if (score !== undefined) result.score = Number(score);
+    if (totalMarks !== undefined) result.totalMarks = Number(totalMarks);
+    if (remarks !== undefined) result.remarks = remarks;
+
+    await result.save();
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Test result updated successfully", result });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not update test result" });
+  }
+};
+
+export const deleteTestResult = async (req, res) => {
+  try {
+    const result = await TestResult.findById(req.params.id);
+    if (!result) {
+      return res.status(404).json({ message: "Test result not found" });
+    }
+
+    await TestResult.deleteOne({ _id: req.params.id });
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Test result deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not delete test result" });
+  }
+};
+
+export const updateGroupedTestResults = async (req, res) => {
+  try {
+    const { batchId, oldTitle, oldExamDate, title, examDate, totalMarks } = req.body;
+    const instituteId = req.user.institute?._id || req.user.institute;
+    
+    const results = await TestResult.find({
+      institute: instituteId,
+      batch: batchId,
+      title: oldTitle,
+      examDate: oldExamDate
+    });
+
+    for (const r of results) {
+      if (title !== undefined) r.title = title.trim();
+      if (examDate !== undefined) r.examDate = examDate;
+      if (totalMarks !== undefined) r.totalMarks = Number(totalMarks);
+      await r.save();
+    }
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Grouped test details updated successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not update grouped test details" });
+  }
+};
+
+export const deleteGroupedTestResults = async (req, res) => {
+  try {
+    const { batchId, title, examDate } = req.body;
+    const instituteId = req.user.institute?._id || req.user.institute;
+
+    await TestResult.deleteMany({
+      institute: instituteId,
+      batch: batchId,
+      title: title,
+      examDate: examDate
+    });
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({ message: "Grouped test results deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not delete grouped test results" });
   }
 };

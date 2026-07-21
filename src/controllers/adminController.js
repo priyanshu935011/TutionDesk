@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import mongoose from "mongoose";
+import mongoose from "../utils/supabaseModel.js";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import TestResult from "../models/TestResult.js";
@@ -118,8 +118,15 @@ export const getAdminOverview = async (req, res) => {
     const activeToday = activeUsersToday + activeStudentsToday;
 
     // Peak Concurrent: read from SystemMetric
-    const peakMetric = await SystemMetric.findOne({ key: "highestConcurrentActiveUsers" });
-    const highestConcurrent = peakMetric ? Number(peakMetric.value || 0) : activeNow;
+    let highestConcurrent = activeNow;
+    try {
+      const peakMetric = await SystemMetric.findOne({ key: "highestConcurrentActiveUsers" });
+      if (peakMetric) {
+        highestConcurrent = Number(peakMetric.value || 0);
+      }
+    } catch (e) {
+      console.warn("Could not query highestConcurrentActiveUsers from system_metrics:", e.message);
+    }
 
     // Growth Analytics signup trends (last 6 months)
     const sixMonthsAgo = new Date();
@@ -238,6 +245,9 @@ export const createInstitute = async (req, res) => {
       subscriptionStart,
       tuitionType,
       quizFeatureEnabled,
+      brandingEnabled,
+      logoUrl,
+      themeColor,
     } = req.body;
 
     if (
@@ -283,6 +293,9 @@ export const createInstitute = async (req, res) => {
       status: "active",
       tuitionType: tuitionType || "solo",
       quizFeatureEnabled: quizFeatureEnabled !== false,
+      brandingEnabled: brandingEnabled !== false,
+      logoUrl: logoUrl || null,
+      themeColor: themeColor || "#6366f1",
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -339,6 +352,9 @@ export const updateInstitute = async (req, res) => {
       status,
       tuitionType,
       quizFeatureEnabled,
+      brandingEnabled,
+      logoUrl,
+      themeColor,
     } = req.body;
 
     if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
@@ -359,6 +375,9 @@ export const updateInstitute = async (req, res) => {
     if (status !== undefined) institute.status = status;
     if (tuitionType !== undefined) institute.tuitionType = tuitionType;
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
+    if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
+    if (logoUrl !== undefined) institute.logoUrl = logoUrl;
+    if (themeColor !== undefined) institute.themeColor = themeColor;
 
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
@@ -474,8 +493,14 @@ export const deleteInstitute = async (req, res) => {
 
 export const getUptimeOverview = async (req, res) => {
   try {
-    const events = await UptimeEvent.find().sort({ startedAt: -1 }).limit(20);
-    const downEvents = await UptimeEvent.find({ status: "down" }).sort({ startedAt: -1 }).limit(20);
+    let events = [];
+    let downEvents = [];
+    try {
+      events = await UptimeEvent.find().sort({ startedAt: -1 }).limit(20);
+      downEvents = await UptimeEvent.find({ status: "down" }).sort({ startedAt: -1 }).limit(20);
+    } catch (e) {
+      console.warn("Could not query uptime_events from database, using empty:", e.message);
+    }
 
     const totalDownMinutes = downEvents.reduce((sum, event) => {
       if (!event.endedAt) {
@@ -557,9 +582,8 @@ export const getAdminStudents = async (req, res) => {
 
     const studentsWithDetails = await Promise.all(
       students.map(async (student) => {
-        const adminUser = await User.findById(student.user);
-        const institute = adminUser
-          ? await Institute.findOne({ adminUser: adminUser._id }).select("name")
+        const institute = student.user
+          ? await Institute.findById(student.user).select("name")
           : null;
 
         return {
@@ -689,5 +713,40 @@ export const deleteAdminStudent = async (req, res) => {
     return res.json({ message: "Student deleted successfully" });
   } catch (error) {
     return res.status(500).json({ message: "Could not delete student" });
+  }
+};
+
+import cloudinary from "../utils/cloudinary.js";
+import { Readable } from "stream";
+
+const uploadBufferToCloudinary = (buffer, options = {}) =>
+  new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: "image",
+        folder: "tutiondesk/logos",
+        ...options,
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(result);
+      },
+    );
+    Readable.from(buffer).pipe(uploadStream);
+  });
+
+export const uploadInstituteLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const result = await uploadBufferToCloudinary(req.file.buffer);
+    return res.json({ logoUrl: result.secure_url });
+  } catch (error) {
+    console.error("uploadInstituteLogo error:", error);
+    return res.status(500).json({ message: "Could not upload logo" });
   }
 };

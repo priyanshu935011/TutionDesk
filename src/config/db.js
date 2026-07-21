@@ -1,18 +1,18 @@
-import mongoose from "mongoose";
+import { createClient } from "@supabase/supabase-js";
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
-    console.log("MongoDB connected");
-    // Drop unique index on enrollmentNumber to allow same student (enrollmentNumber) across multiple batches/institutions
-    try {
-      await mongoose.connection.db.collection("students").dropIndex("enrollmentNumber_1");
-      console.log("Dropped enrollmentNumber unique index");
-    } catch (e) {
-      // index might not exist or already dropped
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error("Missing SUPABASE_URL or SUPABASE_KEY in environment.");
     }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    console.log("Supabase Client initialized successfully.");
   } catch (error) {
-    console.error("MongoDB connection failed:", error.message);
+    console.error("Supabase initialization failed:", error.message);
     process.exit(1);
   }
 };

@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose from "../utils/supabaseModel.js";
 
 const uptimeEventSchema = new mongoose.Schema(
   {

@@ -712,11 +712,8 @@ export const getStudentPortalData = async (req, res) => {
     }
 
     for (const student of students) {
-      const academyAdmin = await User.findById(student.user).select("name email");
-      if (!academyAdmin) continue;
-
-      const institute = await Institute.findOne({ adminUser: student.user }).select(
-        "_id name status subscriptionEnd quizFeatureEnabled"
+      const institute = await Institute.findById(student.user).select(
+        "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser"
       );
       if (!institute) continue;
 
@@ -728,9 +725,13 @@ export const getStudentPortalData = async (req, res) => {
         continue; // skip expired institutes
       }
 
+      const academyAdmin = institute.adminUser
+        ? await User.findById(institute.adminUser).select("name email")
+        : null;
+
       const instituteId = institute._id;
       const batch = student.batch;
-      let teacherName = academyAdmin.name;
+      let teacherName = academyAdmin ? academyAdmin.name : institute.name;
 
       if (batch && batch.teacher) {
         if (batch.teacher.name) {
@@ -749,10 +750,11 @@ export const getStudentPortalData = async (req, res) => {
         Note.find({
           institute: instituteId,
           $or: [
-            { targetType: "batch", batch: batch?._id || batch },
+            { targetType: "batch", batch: batch?._id || batch?.id || batch },
             { targetType: "batch", batch: null },
             { targetType: "student", students: student._id },
-            { targetType: { $exists: false }, $or: [{ batch: batch?._id || batch }, { batch: null }] }
+            { targetType: null, batch: batch?._id || batch?.id || batch },
+            { targetType: null, batch: null }
           ],
         })
           .sort({ createdAt: -1 })
@@ -764,7 +766,7 @@ export const getStudentPortalData = async (req, res) => {
         isQuizEnabled ? Quiz.find({
           institute: instituteId,
           $or: [
-            { batches: batch?._id || batch },
+            { batches: batch?._id || batch?.id || batch },
             { batches: { $size: 0 } }
           ],
           status: { $ne: "archived" },
@@ -824,13 +826,20 @@ export const getStudentPortalData = async (req, res) => {
         liveQuiz,
         quizzes,
         quizFeatureEnabled: isQuizEnabled,
+        brandingEnabled: institute.brandingEnabled !== false,
+        logoUrl: institute.logoUrl || null,
+        themeColor: institute.themeColor || "#6366f1",
       });
     }
 
-    // Query all sibling profiles sharing same email or phone
+    // Query all sibling profiles sharing same email or phone (must be non-empty)
     const siblingProfilesQuery = [];
-    if (req.student?.email) siblingProfilesQuery.push({ email: req.student.email.toLowerCase() });
-    if (req.student?.phone) siblingProfilesQuery.push({ phone: req.student.phone });
+    if (req.student?.email && req.student.email.trim() !== "") {
+      siblingProfilesQuery.push({ email: req.student.email.toLowerCase().trim() });
+    }
+    if (req.student?.phone && req.student.phone.trim() !== "") {
+      siblingProfilesQuery.push({ phone: req.student.phone.trim() });
+    }
 
     let siblingProfiles = [];
     if (siblingProfilesQuery.length > 0) {
@@ -863,13 +872,13 @@ export const getStudentPortalData = async (req, res) => {
 export const downloadStudentNote = async (req, res) => {
   try {
     const student = req.student;
-    const institute = await Institute.findOne({ adminUser: student.user }).select("_id");
+    const institute = await Institute.findById(student.user).select("_id");
 
     if (!institute) {
       return res.status(404).json({ message: "Institute not found" });
     }
 
-    const studentBatchId = student.batch?._id || student.batch || null;
+    const studentBatchId = student.batch?._id || student.batch?.id || student.batch || null;
     const note = await Note.findOne({
       _id: req.params.id,
       institute: institute._id,

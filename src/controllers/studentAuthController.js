@@ -66,7 +66,7 @@ export const studentLogin = async (req, res) => {
     // Verify subscription status of at least one institution
     let hasActiveSubscription = false;
     for (const student of matchedStudents) {
-      const inst = await Institute.findOne({ adminUser: student.user }).select(
+      const inst = await Institute.findById(student.user).select(
         "status subscriptionEnd"
       );
       if (inst) {
@@ -117,7 +117,7 @@ export const studentLogin = async (req, res) => {
     }
 
     const matchedStudent = finalMatchedStudents[0];
-    const activeInstitute = await Institute.findOne({ adminUser: matchedStudent.user }).select("name");
+    const activeInstitute = await Institute.findById(matchedStudent.user).select("name brandingEnabled logoUrl themeColor");
 
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
 
@@ -156,6 +156,9 @@ export const studentLogin = async (req, res) => {
           ? {
               id: activeInstitute._id,
               name: activeInstitute.name,
+              brandingEnabled: activeInstitute.brandingEnabled !== false,
+              logoUrl: activeInstitute.logoUrl || null,
+              themeColor: activeInstitute.themeColor || "#6366f1",
             }
           : null,
       },
@@ -292,15 +295,15 @@ export const switchProfile = async (req, res) => {
     // Verify security: target student MUST share either the email or the phone with the current student
     const firstSibling = siblingRecords[0];
     const sharesContact =
-      (currentEmail && firstSibling.email && firstSibling.email.toLowerCase().trim() === currentEmail.trim()) ||
-      (currentPhone && firstSibling.phone && firstSibling.phone.trim() === currentPhone.trim());
+      (currentEmail && currentEmail.trim() !== "" && firstSibling.email && firstSibling.email.toLowerCase().trim() === currentEmail.toLowerCase().trim()) ||
+      (currentPhone && currentPhone.trim() !== "" && firstSibling.phone && firstSibling.phone.trim() === currentPhone.trim());
 
     if (!sharesContact) {
       return res.status(403).json({ message: "Access denied. You can only switch to sibling profiles sharing your contact info." });
     }
 
     // Verify subscription status of target profile's institution
-    const inst = await Institute.findOne({ adminUser: firstSibling.user }).select("status subscriptionEnd");
+    const inst = await Institute.findById(firstSibling.user).select("status subscriptionEnd");
     if (!inst || inst.status !== "active" || new Date(inst.subscriptionEnd).getTime() < Date.now()) {
       return res.status(403).json({ message: "The target profile's institute subscription has expired." });
     }

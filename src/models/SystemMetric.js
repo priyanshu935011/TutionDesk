@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose from "../utils/supabaseModel.js";
 
 const systemMetricSchema = new mongoose.Schema(
   {

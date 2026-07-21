@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose from "./supabaseModel.js";
 import User from "../models/User.js";
 import Student from "../models/Student.js";
 import SystemMetric from "../models/SystemMetric.js";

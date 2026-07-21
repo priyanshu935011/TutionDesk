@@ -17,7 +17,7 @@ const buildInstituteState = async (user) => {
   }
 
   const institute = await Institute.findById(user.institute).select(
-    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled"
+    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled brandingEnabled logoUrl themeColor"
   );
 
   if (!institute) {
@@ -35,6 +35,9 @@ const buildInstituteState = async (user) => {
     status: institute.status,
     tuitionType: institute.tuitionType || "solo",
     quizFeatureEnabled: institute.quizFeatureEnabled !== false,
+    brandingEnabled: institute.brandingEnabled !== false,
+    logoUrl: institute.logoUrl || null,
+    themeColor: institute.themeColor || "#6366f1",
   };
 };
 
