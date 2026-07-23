@@ -466,7 +466,7 @@ class SupabaseQuery {
     const studentIds = docs.map(d => d.id).filter(Boolean);
     if (studentIds.length === 0) return;
     
-    const includeAttendance = options.includeAttendance === true;
+    const includeAttendance = options.includeAttendance !== false;
 
     const promises = [
       this.model.supabase.from("payments").select("student_id, amount, payment_date, payment_type, note").in("student_id", studentIds)
