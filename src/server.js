@@ -3,6 +3,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import compression from "compression";
 import connectDB from "./config/db.js";
 import { initializeUptimeTracking } from "./middleware/authMiddleware.js";
 import { globalLimiter, authLimiter } from "./middleware/rateLimiter.js";
@@ -14,6 +15,11 @@ import studentAuthRoutes from "./routes/studentAuthRoutes.js";
 import studentPortalRoutes from "./routes/studentPortalRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import teacherRoutes from "./routes/teacherRoutes.js";
+import whatsappRoute from "./routes/whatsappRoute.js";
+import cronRoute from "./routes/cronRoute.js";
+import noticeRoutes from "./routes/noticeRoutes.js";
+import publicRoutes from "./routes/publicRoutes.js";
+import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 
 connectDB();
@@ -68,6 +74,7 @@ app.use(
     credentials: true,
   })
 );
+app.use(compression());
 app.use(express.json());
 app.use(globalLimiter);
 
@@ -83,11 +90,18 @@ app.use("/dashboard", dashboardRoutes);
 app.use("/teacher", teacherRoutes);
 app.use("/student-auth", authLimiter, studentAuthRoutes);
 app.use("/student", studentPortalRoutes);
+app.use("/whatsapp", whatsappRoute);
+app.use("/cron", cronRoute);
+app.use("/notices", noticeRoutes);
+app.use("/api/public", publicRoutes);
 
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  reconnectAllSessions().catch((err) => {
+    console.error("Failed to auto-resume WhatsApp sessions:", err);
+  });
 });
 
 initializeUptimeTracking();

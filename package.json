@@ -3,14 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "nodemonConfig": {
+    "ignore": [
+      "sessions/*",
+      "sessions"
+    ]
+  },
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.10.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
@@ -19,6 +27,7 @@
     "mongoose": "^8.9.2",
     "multer": "^2.1.1",
     "nodemailer": "^8.0.10",
+    "pino": "^10.3.1",
     "rate-limit-redis": "^5.0.0",
     "redis": "^6.0.0",
     "socket.io": "^4.8.3"

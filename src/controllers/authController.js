@@ -3,13 +3,13 @@ import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import redisClient from "../config/redis.js";
-import { sendResetEmail } from "../utils/mailer.js";
+import { sendResetEmail, sendDemoRequestEmail } from "../utils/mailer.js";
 
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@tutiondesk.com").toLowerCase();
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
 
 const generateToken = (payload) =>
-  jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
+  jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "30d" });
 
 const buildInstituteState = async (user) => {
   if (!user.institute) {
@@ -17,7 +17,7 @@ const buildInstituteState = async (user) => {
   }
 
   const institute = await Institute.findById(user.institute).select(
-    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled brandingEnabled logoUrl themeColor"
+    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings"
   );
 
   if (!institute) {
@@ -38,6 +38,8 @@ const buildInstituteState = async (user) => {
     brandingEnabled: institute.brandingEnabled !== false,
     logoUrl: institute.logoUrl || null,
     themeColor: institute.themeColor || "#6366f1",
+    allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+    whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
   };
 };
 
@@ -112,7 +114,8 @@ export const loginUser = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({ message: "Login failed" });
+    console.error("Login user error:", error);
+    return res.status(500).json({ message: "Login failed: " + error.message });
   }
 };
 
@@ -214,5 +217,33 @@ export const resetUserPassword = async (req, res) => {
   } catch (error) {
     console.error("Reset password error:", error);
     return res.status(500).json({ message: "Could not reset password." });
+  }
+};
+
+export const bookDemo = async (req, res) => {
+  try {
+    const { name, phone, email, instituteName, tuitionType, studentCount, preferredTime, notes } = req.body;
+
+    if (!name || !phone) {
+      return res.status(400).json({ message: "Full Name and Phone Number are required." });
+    }
+
+    await sendDemoRequestEmail({
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email ? email.trim() : "",
+      instituteName: instituteName ? instituteName.trim() : "",
+      tuitionType: tuitionType || "Solo / Academy",
+      studentCount: studentCount || "1-50",
+      preferredTime: preferredTime || "Anytime",
+      notes: notes ? notes.trim() : "",
+    });
+
+    return res.status(200).json({
+      message: "Thank you for booking a free demo! Our team will contact you shortly.",
+    });
+  } catch (error) {
+    console.error("Book demo error:", error);
+    return res.status(500).json({ message: "Could not submit demo request. Please try again." });
   }
 };

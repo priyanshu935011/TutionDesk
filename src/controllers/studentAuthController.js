@@ -7,7 +7,7 @@ import { sendResetEmail } from "../utils/mailer.js";
 import redisClient from "../config/redis.js";
 
 const generateToken = (payload) =>
-  jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
+  jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "30d" });
 
 export const studentLogin = async (req, res) => {
   try {

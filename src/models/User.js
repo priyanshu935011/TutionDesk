@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema(
       ref: "Institute",
       default: null,
     },
+    isDemoAccount: {
+      type: Boolean,
+      default: false,
+    },
     lastActiveAt: {
       type: Date,
       default: null,

@@ -8,6 +8,11 @@ import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import User from "../models/User.js";
 import SystemMetric from "../models/SystemMetric.js";
+import Note from "../models/Note.js";
+import Notice from "../models/Notice.js";
+import Quiz from "../models/Quiz.js";
+import SystemLog from "../models/SystemLog.js";
+import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
@@ -62,13 +67,13 @@ export const getAdminOverview = async (req, res) => {
     const [institutes, totalStudentsResult, totalTeachers, totalSolo, totalInstitutions] = await Promise.all([
       Institute.find().sort({ createdAt: -1 }),
       Student.aggregate([
-        { $match: { email: { $nin: adminEmails } } },
+        { $match: { email: { $nin: adminEmails }, isDemoAccount: { $ne: true } } },
         { $group: { _id: "$enrollmentNumber" } },
         { $count: "count" }
       ]),
-      User.countDocuments({ role: "teacher" }),
-      Institute.countDocuments({ tuitionType: "solo" }),
-      Institute.countDocuments({ tuitionType: "institution" }),
+      User.countDocuments({ role: "teacher", isDemoAccount: { $ne: true } }),
+      Institute.countDocuments({ tuitionType: "solo", isDemoAccount: { $ne: true } }),
+      Institute.countDocuments({ tuitionType: "institution", isDemoAccount: { $ne: true } }),
     ]);
 
     const totalStudents = totalStudentsResult[0]?.count || 0;
@@ -78,7 +83,7 @@ export const getAdminOverview = async (req, res) => {
     const now = Date.now();
     const sevenDays = 1000 * 60 * 60 * 24 * 7;
 
-    // Active Now: count users/students active in the last 5 minutes
+    // Active Now: count users/students active in the last 5 minutes (excluding demo)
     let activeNow = 0;
     if (redisClient.isReady) {
       let count = 0;
@@ -92,9 +97,9 @@ export const getAdminOverview = async (req, res) => {
     } else {
       const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
       const [activeUsersNow, activeStudentsNowResult] = await Promise.all([
-        User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo } }),
+        User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo }, isDemoAccount: { $ne: true } }),
         Student.aggregate([
-          { $match: { lastActiveAt: { $gte: fiveMinsAgo }, email: { $nin: adminEmails } } },
+          { $match: { lastActiveAt: { $gte: fiveMinsAgo }, email: { $nin: adminEmails }, isDemoAccount: { $ne: true } } },
           { $group: { _id: "$enrollmentNumber" } },
           { $count: "count" }
         ]),
@@ -103,13 +108,13 @@ export const getAdminOverview = async (req, res) => {
       activeNow = activeUsersNow + activeStudentsNow;
     }
 
-    // Active Today: count users/students active since midnight
+    // Active Today: count users/students active since midnight (excluding demo)
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const [activeUsersToday, activeStudentsTodayResult] = await Promise.all([
-      User.countDocuments({ lastActiveAt: { $gte: startOfToday } }),
+      User.countDocuments({ lastActiveAt: { $gte: startOfToday }, isDemoAccount: { $ne: true } }),
       Student.aggregate([
-        { $match: { lastActiveAt: { $gte: startOfToday }, email: { $nin: adminEmails } } },
+        { $match: { lastActiveAt: { $gte: startOfToday }, email: { $nin: adminEmails }, isDemoAccount: { $ne: true } } },
         { $group: { _id: "$enrollmentNumber" } },
         { $count: "count" }
       ]),
@@ -128,15 +133,15 @@ export const getAdminOverview = async (req, res) => {
       console.warn("Could not query highestConcurrentActiveUsers from system_metrics:", e.message);
     }
 
-    // Growth Analytics signup trends (last 6 months)
+    // Growth Analytics signup trends (last 6 months, excluding demo)
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
     sixMonthsAgo.setDate(1);
     sixMonthsAgo.setHours(0, 0, 0, 0);
 
     const [institutesSignups, studentsSignups] = await Promise.all([
-      Institute.find({ createdAt: { $gte: sixMonthsAgo } }).select("createdAt"),
-      Student.find({ createdAt: { $gte: sixMonthsAgo }, email: { $nin: adminEmails } }).select("createdAt"),
+      Institute.find({ createdAt: { $gte: sixMonthsAgo }, isDemoAccount: { $ne: true } }).select("createdAt"),
+      Student.find({ createdAt: { $gte: sixMonthsAgo }, email: { $nin: adminEmails }, isDemoAccount: { $ne: true } }).select("createdAt"),
     ]);
 
     const months = [];
@@ -161,8 +166,18 @@ export const getAdminOverview = async (req, res) => {
       if (bucket) bucket.studentsCount += 1;
     }
 
+    const isDemoAccountDoc = (inst) =>
+      Boolean(inst.isDemoAccount) === true ||
+      Boolean(inst.adminEmail && inst.adminEmail.toLowerCase().includes("demo"));
+
     const summary = hydrated.reduce(
       (totals, institute) => {
+        // Exclude Demo Accounts from Super Admin statistics completely
+        if (isDemoAccountDoc(institute)) {
+          totals.demoCount += 1;
+          return totals;
+        }
+
         totals.totalInstitutes += 1;
         totals.activeInstitutes += institute.subscriptionStatus === "active" ? 1 : 0;
         totals.expiredInstitutes += institute.subscriptionStatus === "expired" ? 1 : 0;
@@ -202,6 +217,7 @@ export const getAdminOverview = async (req, res) => {
         activeToday,
         highestConcurrent,
         registrationStats: months,
+        demoCount: 0,
       }
     );
 
@@ -248,6 +264,7 @@ export const createInstitute = async (req, res) => {
       brandingEnabled,
       logoUrl,
       themeColor,
+      allowedFeatures,
     } = req.body;
 
     if (
@@ -296,6 +313,7 @@ export const createInstitute = async (req, res) => {
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
       themeColor: themeColor || "#6366f1",
+      allowedFeatures: allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -355,6 +373,7 @@ export const updateInstitute = async (req, res) => {
       brandingEnabled,
       logoUrl,
       themeColor,
+      allowedFeatures,
     } = req.body;
 
     if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
@@ -378,6 +397,7 @@ export const updateInstitute = async (req, res) => {
     if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
     if (themeColor !== undefined) institute.themeColor = themeColor;
+    if (allowedFeatures !== undefined) institute.allowedFeatures = allowedFeatures;
 
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
@@ -569,7 +589,7 @@ export const getAdminTeachers = async (req, res) => {
 export const getAdminStudents = async (req, res) => {
   try {
     const adminEmails = await getAdminEmails();
-    const students = await Student.find({ email: { $nin: adminEmails } })
+    const allStudents = await Student.find({ email: { $nin: adminEmails } })
       .populate({
         path: "batch",
         select: "name teacher",
@@ -580,8 +600,22 @@ export const getAdminStudents = async (req, res) => {
       })
       .sort({ lastActiveAt: -1, createdAt: -1 });
 
+    const demoInstitutes = await Institute.find().select("_id isDemoAccount adminEmail");
+    const demoInstMap = (demoInstitutes || []).reduce((map, inst) => {
+      const isDemo = Boolean(inst.isDemoAccount) || Boolean(inst.adminEmail && inst.adminEmail.toLowerCase().includes("demo"));
+      map[String(inst._id)] = isDemo;
+      return map;
+    }, {});
+
+    const realStudents = allStudents.filter((student) => {
+      if (student.isDemoAccount) return false;
+      const instId = String(student.user);
+      if (demoInstMap[instId]) return false;
+      return true;
+    });
+
     const studentsWithDetails = await Promise.all(
-      students.map(async (student) => {
+      realStudents.map(async (student) => {
         const institute = student.user
           ? await Institute.findById(student.user).select("name")
           : null;
@@ -748,5 +782,433 @@ export const uploadInstituteLogo = async (req, res) => {
   } catch (error) {
     console.error("uploadInstituteLogo error:", error);
     return res.status(500).json({ message: "Could not upload logo" });
+  }
+};
+
+export const getDemoAccounts = async (req, res) => {
+  try {
+    const allInstitutes = await Institute.find().sort({ createdAt: -1 });
+    const demoInstitutes = allInstitutes.filter(
+      (inst) =>
+        Boolean(inst.isDemoAccount) === true ||
+        Boolean(inst.adminEmail && inst.adminEmail.toLowerCase().includes("demo"))
+    );
+    
+    const demoAccounts = await Promise.all(
+      demoInstitutes.map(async (inst) => {
+        const adminUser = inst.adminUser ? await User.findById(inst.adminUser).select("_id email name role") : null;
+        const teachers = await User.find({ institute: inst._id, role: "teacher" }).select("_id name email");
+        const students = await Student.find({ user: inst.adminUser }).select("_id name phone email enrollmentNumber");
+        return {
+          institute: inst,
+          adminUser,
+          teachers,
+          students,
+        };
+      })
+    );
+
+    return res.json(demoAccounts);
+  } catch (error) {
+    console.error("getDemoAccounts error:", error);
+    return res.status(500).json({ message: "Could not fetch demo accounts." });
+  }
+};
+
+export const createDemoAccount = async (req, res) => {
+  try {
+    const { name, ownerName, adminEmail, adminPhone, password } = req.body;
+
+    if (!name || !ownerName || !adminEmail || !password) {
+      return res.status(400).json({ message: "Institute name, owner name, admin email, and password are required." });
+    }
+
+    const existingUser = await User.findOne({ email: adminEmail.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({ message: "A user with this email already exists." });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const startDate = new Date();
+    const endDate = new Date(Date.now() + 3650 * 24 * 60 * 60 * 1000); // 10 years demo duration
+
+    const institute = await Institute.create({
+      name,
+      ownerName,
+      adminEmail: adminEmail.toLowerCase(),
+      adminPhone: adminPhone || "",
+      subscriptionPlan: "yearly",
+      subscriptionAmount: 0,
+      subscriptionStart: startDate,
+      subscriptionEnd: endDate,
+      status: "active",
+      tuitionType: "institution",
+      isDemoAccount: true,
+      allowedFeatures: ["attendance", "notes", "marks", "tests", "whatsapp", "notices", "quizzes"],
+      subscriptionHistory: [
+        {
+          plan: "yearly",
+          amount: 0,
+          startDate,
+          endDate,
+          note: "Demo Account Lifetime Access",
+        },
+      ],
+    });
+
+    const adminUser = await User.create({
+      email: adminEmail.toLowerCase(),
+      password: hashedPassword,
+      name: ownerName,
+      role: "institute_admin",
+      institute: institute._id,
+      isDemoAccount: true,
+    });
+
+    institute.adminUser = adminUser._id;
+    await institute.save();
+
+    // Create default demo batch and sample demo students
+    try {
+      const demoBatch = await Batch.create({
+        institute: institute._id,
+        user: adminUser._id,
+        name: "Demo Batch 10th",
+        scheduleDays: ["Mon", "Wed", "Fri"],
+        startTime: "16:00",
+        endTime: "17:30",
+      });
+
+      const todayStr = new Date();
+      const sampleStudents = [
+        { name: "Rohan Sharma", phone: "8888888888", parentName: "Suresh Sharma", parentPhone: "8888888888", email: "rohan.demo@gmail.com", enrollmentNumber: "ENR9001", totalFees: 2000, feePlanType: "monthly" },
+        { name: "Aarav Patel", phone: "9999999999", parentName: "Rajesh Patel", parentPhone: "9999999999", email: "aarav.demo@gmail.com", enrollmentNumber: "ENR9002", totalFees: 2000, feePlanType: "monthly" },
+        { name: "Priya Singh", phone: "9999999999", parentName: "Vikram Singh", parentPhone: "9999999999", email: "priya.demo@gmail.com", enrollmentNumber: "ENR9003", totalFees: 2500, feePlanType: "monthly" },
+        { name: "Ananya Verma", phone: "9999999999", parentName: "Amit Verma", parentPhone: "9999999999", email: "ananya.demo@gmail.com", enrollmentNumber: "ENR9004", totalFees: 2000, feePlanType: "monthly" },
+        { name: "Kabir Gupta", phone: "9999999999", parentName: "Sanjay Gupta", parentPhone: "9999999999", email: "kabir.demo@gmail.com", enrollmentNumber: "ENR9005", totalFees: 3000, feePlanType: "full_course" },
+      ];
+
+      for (const s of sampleStudents) {
+        await Student.create({
+          user: adminUser._id,
+          name: s.name,
+          phone: s.phone,
+          parentName: s.parentName,
+          parentPhone: s.parentPhone,
+          email: s.email,
+          enrollmentNumber: s.enrollmentNumber,
+          batch: demoBatch._id,
+          joinedOn: todayStr,
+          dueDate: todayStr,
+          totalFees: s.totalFees,
+          feePlanType: s.feePlanType,
+          isDemoAccount: true,
+        });
+      }
+    } catch (seedErr) {
+      console.warn("Could not seed initial demo batch/students:", seedErr.message);
+    }
+
+    await clearCachePattern("admin:*");
+    return res.status(201).json({ message: "Demo institute and credentials created successfully.", institute, adminUser });
+  } catch (error) {
+    console.error("createDemoAccount error:", error);
+    return res.status(500).json({ message: "Could not create demo account." });
+  }
+};
+
+export const updateDemoCredentials = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminEmail, password, name, ownerName, adminPhone } = req.body;
+
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    if (name) institute.name = name;
+    if (ownerName) institute.ownerName = ownerName;
+    if (adminPhone !== undefined) institute.adminPhone = adminPhone;
+
+    if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail.toLowerCase()) {
+      const existingUser = await User.findOne({ email: adminEmail.toLowerCase(), _id: { $ne: institute.adminUser } });
+      if (existingUser) {
+        return res.status(400).json({ message: "Another user already exists with this email." });
+      }
+      institute.adminEmail = adminEmail.toLowerCase();
+    }
+
+    await institute.save();
+
+    if (institute.adminUser) {
+      const user = await User.findById(institute.adminUser);
+      if (user) {
+        if (adminEmail) user.email = adminEmail.toLowerCase();
+        if (password) user.password = await bcrypt.hash(password, 10);
+        if (ownerName) user.name = ownerName;
+        user.isDemoAccount = true;
+        await user.save();
+      }
+    }
+
+    await clearCachePattern("admin:*");
+    return res.json({ message: "Demo account credentials updated successfully.", institute });
+  } catch (error) {
+    console.error("updateDemoCredentials error:", error);
+    return res.status(500).json({ message: "Could not update demo credentials." });
+  }
+};
+
+export const getInstituteFullAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition not found" });
+    }
+
+    const adminEmails = await getAdminEmails();
+    const adminUser = institute.adminUser ? await User.findById(institute.adminUser).select("_id email name role lastActiveAt createdAt") : null;
+    
+    // Find all teachers under this institute
+    const teachers = await User.find({ institute: institute._id, role: "teacher" }).select("_id name email lastActiveAt createdAt");
+
+    // Find all batches under this institute
+    const batches = await Batch.find({ user: institute.adminUser }).select("_id name scheduleDays startTime endTime teacher");
+
+    // Find all students under this institute
+    const students = await Student.find({ user: institute.adminUser, email: { $nin: adminEmails } })
+      .select("_id name phone parentName parentPhone email enrollmentNumber batch totalFees feePlanType paymentHistory attendanceRecords joinedOn lastActiveAt createdAt")
+      .populate("batch", "name");
+
+    // Compute financial totals
+    let totalExpectedFees = 0;
+    let totalCollectedFees = 0;
+    let totalPendingFees = 0;
+
+    const studentList = students.map((s) => {
+      const sObj = s.toObject ? s.toObject() : s;
+      const history = sObj.paymentHistory || [];
+      const paid = history.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const total = Number(sObj.totalFees || 0);
+      const pending = Math.max(0, total - paid);
+
+      totalExpectedFees += total;
+      totalCollectedFees += paid;
+      totalPendingFees += pending;
+
+      return {
+        ...sObj,
+        batchName: sObj.batch?.name || "Unassigned",
+        paidAmount: paid,
+        pendingAmount: pending,
+      };
+    });
+
+    // Compute Feature Usage
+    let notesCount = 0;
+    let latestNoteDate = null;
+    try {
+      const notes = await Note.find({ user: institute.adminUser }).sort({ createdAt: -1 });
+      notesCount = notes.length;
+      if (notes.length > 0) latestNoteDate = notes[0].createdAt;
+    } catch (e) {}
+
+    let noticesCount = 0;
+    try {
+      const notices = await Notice.find({ user: institute.adminUser });
+      noticesCount = notices.length;
+    } catch (e) {}
+
+    let testsCount = 0;
+    let totalTestMarksCount = 0;
+    let averageScorePercent = 0;
+    let latestTestDate = null;
+    try {
+      const tests = await TestResult.find({ institute: institute._id }).sort({ examDate: -1 });
+      testsCount = tests.length;
+      if (tests.length > 0) {
+        latestTestDate = tests[0].examDate || tests[0].createdAt;
+        let totalScoreSum = 0;
+        let totalMaxSum = 0;
+        for (const t of tests) {
+          totalTestMarksCount++;
+          if (t.totalMarks > 0) {
+            totalScoreSum += t.score || 0;
+            totalMaxSum += t.totalMarks || 100;
+          }
+        }
+        if (totalMaxSum > 0) {
+          averageScorePercent = Math.round((totalScoreSum / totalMaxSum) * 100);
+        }
+      }
+    } catch (e) {}
+
+    let quizzesCount = 0;
+    let quizAttemptsCount = 0;
+    try {
+      const quizzes = await Quiz.find({ institute: institute._id });
+      quizzesCount = quizzes.length;
+      const quizIds = quizzes.map((q) => q._id);
+      if (quizIds.length > 0) {
+        quizAttemptsCount = await QuizAttempt.countDocuments({ quiz: { $in: quizIds } });
+      }
+    } catch (e) {}
+
+    // Activity check
+    const now = Date.now();
+    const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+
+    const isAdminActiveNow = adminUser?.lastActiveAt && new Date(adminUser.lastActiveAt) >= fiveMinsAgo;
+    const activeTeachersCount = teachers.filter((t) => t.lastActiveAt && new Date(t.lastActiveAt) >= fiveMinsAgo).length;
+    const activeStudents7Days = students.filter((s) => s.lastActiveAt && new Date(s.lastActiveAt) >= sevenDaysAgo).length;
+
+    let activityScore = "Moderate Activity";
+    if (activeTeachersCount > 0 || notesCount > 5 || testsCount > 3 || activeStudents7Days > 5 || isAdminActiveNow) {
+      activityScore = "High Activity";
+    } else if (notesCount === 0 && testsCount === 0 && !isAdminActiveNow) {
+      activityScore = "Low / Inactive";
+    }
+
+    return res.json({
+      institute: institute.toObject ? institute.toObject() : institute,
+      adminUser,
+      teachers,
+      batches,
+      studentCount: students.length,
+      activeStudents7Days,
+      activeTeachersCount,
+      isAdminActiveNow,
+      activityScore,
+      financials: {
+        totalExpectedFees,
+        totalCollectedFees,
+        totalPendingFees,
+      },
+      featureUsage: {
+        batchesCount: batches.length,
+        notesCount,
+        latestNoteDate,
+        noticesCount,
+        testsCount,
+        latestTestDate,
+        totalTestMarksCount,
+        averageScorePercent,
+        quizzesCount,
+        quizAttemptsCount,
+      },
+      students: studentList,
+    });
+  } catch (error) {
+    console.error("getInstituteFullAnalytics error:", error);
+    return res.status(500).json({ message: "Could not fetch full institute analytics." });
+  }
+};
+
+export const getSystemLogs = async (req, res) => {
+  try {
+    let dbLogs = [];
+    try {
+      dbLogs = await SystemLog.find().sort({ createdAt: -1 }).limit(100);
+    } catch (e) {}
+
+    const combinedMap = new Map();
+    for (const log of [...inMemoryLogs, ...dbLogs]) {
+      const id = String(log._id || log.id || Math.random());
+      if (!combinedMap.has(id)) {
+        combinedMap.set(id, log);
+      }
+    }
+
+    const allLogs = Array.from(combinedMap.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    return res.json(allLogs);
+  } catch (error) {
+    console.error("getSystemLogs error:", error);
+    return res.status(500).json({ message: "Could not fetch system logs." });
+  }
+};
+
+export const clearSystemLogs = async (req, res) => {
+  try {
+    inMemoryLogs.length = 0;
+    try {
+      await SystemLog.deleteMany({});
+    } catch (e) {}
+
+    return res.json({ message: "System error logs cleared successfully." });
+  } catch (error) {
+    return res.status(500).json({ message: "Could not clear logs." });
+  }
+};
+
+export const updateTuitionWebsite = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { enabled, slug, headline, subheadline, aboutText, bannerUrl, contactAddress, contactPhone, netlifyToken } = req.body;
+
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition institute not found." });
+    }
+
+    let sanitizedSlug = (slug || institute.name)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-+/g, "-");
+
+    const { deployToNetlify, generateTuitionHTML } = await import("../services/netlifyService.js");
+
+    const htmlContent = generateTuitionHTML({
+      instituteName: institute.name,
+      ownerName: institute.ownerName,
+      slug: sanitizedSlug,
+      headline,
+      subheadline,
+      aboutText,
+      bannerUrl,
+      logoUrl: institute.logoUrl,
+      contactPhone: contactPhone || institute.adminPhone,
+      adminEmail: institute.adminEmail,
+      contactAddress,
+      clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
+    });
+
+    const deployResult = await deployToNetlify({
+      slug: sanitizedSlug,
+      htmlContent,
+      customToken: netlifyToken,
+    });
+
+    const updatedConfig = {
+      enabled: enabled !== false,
+      slug: sanitizedSlug,
+      headline: headline || `Welcome to ${institute.name}`,
+      subheadline: subheadline || "",
+      aboutText: aboutText || "",
+      bannerUrl: bannerUrl || "",
+      contactAddress: contactAddress || "",
+      contactPhone: contactPhone || institute.adminPhone || "",
+      netlifySiteId: deployResult.siteId || "",
+      netlifySubdomain: deployResult.subdomain || `${sanitizedSlug}.netlify.app`,
+      publishedUrl: deployResult.publishedUrl || `https://${sanitizedSlug}.netlify.app`,
+      lastDeployedAt: new Date(),
+    };
+
+    institute.websiteConfig = updatedConfig;
+    await institute.save();
+
+    return res.json({
+      message: deployResult.message || "Tuition website deployed successfully!",
+      websiteConfig: updatedConfig,
+      institute,
+    });
+  } catch (error) {
+    console.error("updateTuitionWebsite error:", error);
+    return res.status(500).json({ message: error.message || "Could not deploy tuition website." });
   }
 };

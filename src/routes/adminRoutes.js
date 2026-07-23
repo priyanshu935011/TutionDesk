@@ -15,6 +15,13 @@ import {
   updateAdminStudent,
   deleteAdminStudent,
   uploadInstituteLogo,
+  getDemoAccounts,
+  createDemoAccount,
+  updateDemoCredentials,
+  getInstituteFullAnalytics,
+  getSystemLogs,
+  clearSystemLogs,
+  updateTuitionWebsite,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import superAdminOnly from "../middleware/superAdminMiddleware.js";
@@ -26,6 +33,12 @@ router.use(protect, superAdminOnly);
 
 router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
+router.get("/system-logs", getSystemLogs);
+router.delete("/system-logs", clearSystemLogs);
+
+router.get("/demo-accounts", getDemoAccounts);
+router.post("/demo-accounts", createDemoAccount);
+router.put("/demo-accounts/:id", updateDemoCredentials);
 
 router.route("/teachers")
   .get(getAdminTeachers);
@@ -40,6 +53,8 @@ router.route("/students/:id")
   .delete(deleteAdminStudent);
 
 router.get("/institutes/:id", getInstituteDetail);
+router.get("/institutes/:id/analytics", getInstituteFullAnalytics);
+router.post("/institutes/:id/website", updateTuitionWebsite);
 router.post("/institutes", createInstitute);
 router.put("/institutes/:id", updateInstitute);
 router.post("/institutes/upload-logo", upload.single("logo"), uploadInstituteLogo);

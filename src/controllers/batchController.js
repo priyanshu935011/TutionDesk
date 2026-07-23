@@ -9,13 +9,37 @@ import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cac
 
 export const getBatches = async (req, res) => {
   try {
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    const cacheKey = `teacher:batches:${ownerId}:${req.user.role}`;
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const query = { user: ownerId };
     if (req.user.role === "teacher") {
       query.teacher = req.user._id;
     }
-    const batches = await Batch.find(query).sort({ createdAt: -1 }).populate("teacher", "name email");
-    return res.json(batches);
+    const [batches, students] = await Promise.all([
+      Batch.find(query).sort({ createdAt: -1 }).populate("teacher", "name email"),
+      Student.find({ user: ownerId }),
+    ]);
+
+    const processedBatches = batches.map((batch) => {
+      const count = students.filter(
+        (s) => s.batch && String(s.batch) === String(batch._id)
+      ).length;
+      return {
+        ...batch.toJSON(),
+        studentCount: count,
+      };
+    });
+
+    await setCache(cacheKey, processedBatches, 86400);
+    return res.json(processedBatches);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch batches" });
   }

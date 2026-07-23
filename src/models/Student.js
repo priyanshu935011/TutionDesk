@@ -126,6 +126,10 @@ const studentSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    isDemoAccount: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

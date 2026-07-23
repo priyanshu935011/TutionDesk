@@ -37,32 +37,10 @@ const protectStudent = async (req, res, next) => {
       return res.status(401).json({ message: "Student not found" });
     }
 
-    if (decoded.sessionId) {
-      let sessionValid = true;
-      const cacheSessionKey = `active_session:student:${decoded.enrollmentNumber || decoded.email.toLowerCase()}`;
-      if (redisClient.isReady) {
-        try {
-          let activeSessionId = await redisClient.get(cacheSessionKey);
-          if (!activeSessionId) {
-            activeSessionId = students[0].currentSessionId;
-            if (activeSessionId) {
-              await redisClient.set(cacheSessionKey, activeSessionId);
-            }
-          }
-          if (activeSessionId && activeSessionId !== decoded.sessionId) {
-            sessionValid = false;
-          }
-        } catch (redisErr) {
-          console.error("Redis student session lookup error:", redisErr);
-        }
-      } else {
-        if (students[0].currentSessionId && students[0].currentSessionId !== decoded.sessionId) {
-          sessionValid = false;
-        }
-      }
-
-      if (!sessionValid) {
-        return res.status(401).json({ message: "Session expired due to login on another device." });
+    if (students[0].lastActiveAt) {
+      const fourteenDaysInMs = 14 * 24 * 60 * 60 * 1000;
+      if (Date.now() - new Date(students[0].lastActiveAt).getTime() > fourteenDaysInMs) {
+        return res.status(401).json({ message: "Session expired due to 14 days of inactivity." });
       }
     }
 

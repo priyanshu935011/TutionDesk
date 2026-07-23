@@ -6,7 +6,9 @@ const redisClient = createClient({
   url: redisUrl,
   socket: {
     tls: redisUrl.startsWith("rediss://"),
-    rejectUnauthorized: false, // Prevents certificate chain verification errors on serverless endpoints
+    rejectUnauthorized: false,
+    connectTimeoutMs: 2000,
+    reconnectStrategy: (retries) => Math.min(retries * 50, 1000),
   },
 });
 

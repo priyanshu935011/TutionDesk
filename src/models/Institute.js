@@ -61,9 +61,91 @@ const instituteSchema = new mongoose.Schema(
       enum: ["institution", "solo"],
       default: "solo",
     },
+    isDemoAccount: {
+      type: Boolean,
+      default: false,
+    },
     quizFeatureEnabled: {
       type: Boolean,
       default: true,
+    },
+    allowedFeatures: {
+      type: [String],
+      default: ["attendance", "notes", "marks", "tests", "whatsapp"],
+    },
+    whatsappSettings: {
+      absentAlertsEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      feeRemindersEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      customMessageTemplate: {
+        type: String,
+        default: "Dear Parent, your child {studentName} was marked absent on {date}.",
+      },
+    },
+    websiteConfig: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      slug: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      headline: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      subheadline: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      aboutText: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      bannerUrl: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      contactAddress: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      contactPhone: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      netlifySiteId: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      netlifySubdomain: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      publishedUrl: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      lastDeployedAt: {
+        type: Date,
+        default: null,
+      },
     },
     subscriptionHistory: {
       type: [

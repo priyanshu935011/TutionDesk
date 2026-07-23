@@ -32,32 +32,10 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ message: "User not found" });
     }
 
-    if (decoded.role !== "super_admin" && decoded.sessionId) {
-      let sessionValid = true;
-      const cacheSessionKey = `active_session:user:${decoded.id}`;
-      if (redisClient.isReady) {
-        try {
-          let activeSessionId = await redisClient.get(cacheSessionKey);
-          if (!activeSessionId) {
-            activeSessionId = req.user.currentSessionId;
-            if (activeSessionId) {
-              await redisClient.set(cacheSessionKey, activeSessionId);
-            }
-          }
-          if (activeSessionId && activeSessionId !== decoded.sessionId) {
-            sessionValid = false;
-          }
-        } catch (redisErr) {
-          console.error("Redis session lookup error:", redisErr);
-        }
-      } else {
-        if (req.user.currentSessionId && req.user.currentSessionId !== decoded.sessionId) {
-          sessionValid = false;
-        }
-      }
-
-      if (!sessionValid) {
-        return res.status(401).json({ message: "Session expired due to login on another device." });
+    if (decoded.role !== "super_admin" && req.user.lastActiveAt) {
+      const fourteenDaysInMs = 14 * 24 * 60 * 60 * 1000;
+      if (Date.now() - new Date(req.user.lastActiveAt).getTime() > fourteenDaysInMs) {
+        return res.status(401).json({ message: "Session expired due to 14 days of inactivity." });
       }
     }
 

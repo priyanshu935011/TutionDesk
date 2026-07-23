@@ -8,6 +8,7 @@ import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
 import bcrypt from "bcryptjs";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
+import { sendMessage } from "../services/whatsappService.js";
 import cloudinary from "../utils/cloudinary.js";
 
 export const getInitialPassword = (name, phone) => {
@@ -102,7 +103,18 @@ const generateEnrollmentNumber = async (userId) => {
 
 export const getStudents = async (req, res) => {
   try {
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    const cacheKey = `teacher:students:${ownerId}:${req.user.role}`;
+    if (req.query.refresh !== "true") {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     const query = { user: ownerId };
 
     if (req.user.role === "teacher") {
@@ -117,8 +129,9 @@ export const getStudents = async (req, res) => {
       })
     );
 
+    let result = students;
     if (req.user.role === "teacher") {
-      const stripped = students.map((s) => {
+      result = students.map((s) => {
         const obj = s.toJSON();
         delete obj.totalFees;
         delete obj.feePlanType;
@@ -128,10 +141,10 @@ export const getStudents = async (req, res) => {
         delete obj.dueDate;
         return obj;
       });
-      return res.json(stripped);
     }
 
-    return res.json(students);
+    await setCache(cacheKey, result, 86400);
+    return res.json(result);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch students" });
   }
@@ -155,6 +168,10 @@ export const getStudentById = async (req, res) => {
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
+
+    try {
+      await student._model.populateStudentRecords([student], { includeAttendance: true });
+    } catch (e) {}
 
     const allRecords = await Student.find({
       enrollmentNumber: student.enrollmentNumber,
@@ -237,12 +254,16 @@ export const createStudent = async (req, res) => {
       return res.status(400).json({ message: "Invalid fee plan type" });
     }
 
+    const ownerId = req.user.role === "teacher"
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
     if (feePlanType === "partial" && !dueDate) {
       return res.status(400).json({ message: "Due date is required for partial fee plan" });
     }
 
     // Verify all target batches exist
-    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches }, user: req.user._id });
+    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
     if (verifiedBatches.length !== targetBatches.length) {
       return res.status(400).json({ message: "One or more selected batches do not exist" });
     }
@@ -254,7 +275,7 @@ export const createStudent = async (req, res) => {
     // Check if this exact student is already enrolled in any of the target batches
     for (const currentBatchId of targetBatches) {
       const alreadyEnrolled = await Student.findOne({
-        user: req.user._id,
+        user: ownerId,
         name: { $regex: new RegExp(`^${cleanName}$`, "i") },
         batch: currentBatchId,
         $or: [
@@ -276,6 +297,7 @@ export const createStudent = async (req, res) => {
     let hashedPasswordToUse;
 
     const existingStudent = await Student.findOne({
+      user: ownerId,
       name: { $regex: new RegExp(`^${cleanName}$`, "i") },
       $or: [
         ...(cleanEmail ? [{ email: cleanEmail }] : []),
@@ -287,7 +309,7 @@ export const createStudent = async (req, res) => {
       enrollmentNumberToUse = existingStudent.enrollmentNumber;
       hashedPasswordToUse = existingStudent.password;
     } else {
-      enrollmentNumberToUse = await generateEnrollmentNumber(req.user._id);
+      enrollmentNumberToUse = await generateEnrollmentNumber(ownerId);
       const initialPassword = getInitialPassword(name, phone);
       hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
     }
@@ -302,7 +324,7 @@ export const createStudent = async (req, res) => {
       const currentPaymentHistory = i === 0 ? paymentHistory : [];
 
       const student = await Student.create({
-        user: req.user._id,
+        user: ownerId,
         name,
         phone,
         parentName,
@@ -324,10 +346,14 @@ export const createStudent = async (req, res) => {
       createdStudents.push(populatedStudent);
     }
     
-    if (enrollmentNumberToUse) {
-      await deleteCache(`student:dashboard:${enrollmentNumberToUse}`);
+    try {
+      if (enrollmentNumberToUse) {
+        await deleteCache(`student:dashboard:${enrollmentNumberToUse}`);
+      }
+      await clearCachePattern("teacher:dashboard:*");
+    } catch (cacheErr) {
+      console.warn("Cache eviction warning during student enrollment:", cacheErr);
     }
-    await clearCachePattern("teacher:dashboard:*");
 
     // Return array if array requested, else single object for backward compatibility
     if (Array.isArray(req.body.batches) && req.body.batches.length > 0) {
@@ -336,6 +362,7 @@ export const createStudent = async (req, res) => {
       return res.status(201).json(createdStudents[0]);
     }
   } catch (error) {
+    console.error("Create student error details:", error);
     if (error?.code === 11000 && error?.keyPattern?.enrollmentNumber) {
       return res.status(409).json({
         message:
@@ -343,7 +370,7 @@ export const createStudent = async (req, res) => {
       });
     }
 
-    return res.status(500).json({ message: "Could not create student" });
+    return res.status(500).json({ message: error?.message || "Could not create student" });
   }
 };
 
@@ -539,22 +566,34 @@ export const deleteStudent = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot delete students." });
     }
 
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
     const student = await Student.findOneAndDelete({
       _id: req.params.id,
-      user: req.user._id,
+      user: ownerId,
     });
 
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    if (student.enrollmentNumber) {
-      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
-    }
-    await clearCachePattern("teacher:dashboard:*");
+    try {
+      await supabase.from("attendance").delete().eq("student_id", student._id);
+      await supabase.from("payments").delete().eq("student_id", student._id);
+    } catch (e) {}
+
+    try {
+      if (student.enrollmentNumber) {
+        await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+      }
+      await clearCachePattern("teacher:dashboard:*");
+    } catch (cErr) {}
 
     return res.json({ message: "Student deleted successfully" });
   } catch (error) {
+    console.error("deleteStudent error:", error);
     return res.status(500).json({ message: "Could not delete student" });
   }
 };
@@ -565,10 +604,14 @@ export const addPayment = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot record payments." });
     }
 
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
     const { amount, paymentDate, paymentType, note } = req.body;
     const student = await Student.findOne({
       _id: req.params.id,
-      user: req.user._id,
+      user: ownerId,
     });
 
     if (!student) {
@@ -600,17 +643,31 @@ export const addPayment = async (req, res) => {
       student.dueDate = addOneMonth(paymentDate);
     }
 
+    // Direct insert into Supabase payments table
+    try {
+      await supabase.from("payments").insert({
+        student_id: student._id,
+        amount: Number(amount),
+        payment_date: paymentDate,
+        payment_type: paymentType,
+        note: note || ""
+      });
+    } catch (payErr) {}
+
     await student.save();
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
-    if (student.enrollmentNumber) {
-      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
-    }
-    await clearCachePattern("teacher:dashboard:*");
+    try {
+      if (student.enrollmentNumber) {
+        await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+      }
+      await clearCachePattern("teacher:dashboard:*");
+    } catch (cErr) {}
 
     return res.json(populatedStudent);
   } catch (error) {
+    console.error("addPayment error:", error);
     return res.status(500).json({ message: "Could not add payment" });
   }
 };
@@ -618,7 +675,10 @@ export const addPayment = async (req, res) => {
 export const markAttendance = async (req, res) => {
   try {
     const { date, status } = req.body;
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
     const query = { _id: req.params.id, user: ownerId };
 
     if (req.user.role === "teacher") {
@@ -652,14 +712,196 @@ export const markAttendance = async (req, res) => {
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
-    if (student.enrollmentNumber) {
-      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
-    }
-    await clearCachePattern("teacher:dashboard:*");
+    try {
+      if (student.enrollmentNumber) {
+        await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+      }
+      await clearCachePattern("teacher:dashboard:*");
+    } catch (cErr) {}
 
-    return res.json(populatedStudent);
+    // Return response immediately
+    res.json(populatedStudent);
+
+    // Non-blocking background WhatsApp alert
+    if (status === "absent") {
+      setImmediate(async () => {
+        try {
+          let settings = await getCache(`institute:whatsapp_settings:${instituteId}`);
+          if (!settings) {
+            const inst = await Institute.findById(instituteId);
+            settings = inst?.whatsappSettings || {};
+          }
+          if (settings && settings.absentAlertsEnabled) {
+            const formattedDate = new Date(date).toLocaleDateString("en-IN", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            });
+            const template = settings.customMessageTemplate || "Dear Parent, your child {studentName} was marked absent on {date}.";
+            const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
+            if (recipientPhone) {
+              const messageText = template
+                .replace(/\{studentName\}/g, student.name)
+                .replace(/\{date\}/g, formattedDate);
+              await sendMessage(String(instituteId), recipientPhone, messageText);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to send WhatsApp absent alert:", err.message);
+        }
+      });
+    }
   } catch (error) {
     return res.status(500).json({ message: "Could not update attendance" });
+  }
+};
+
+export const markBatchAttendance = async (req, res) => {
+  try {
+    const { batchId, date, records } = req.body;
+    if (!batchId || !date || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ message: "Batch ID, date, and student attendance records are required." });
+    }
+
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    const batch = await Batch.findById(batchId);
+    if (!batch) {
+      return res.status(404).json({ message: "Batch not found." });
+    }
+
+    const batchStudents = await Student.find({ user: ownerId, batch: batchId });
+    if (batchStudents.length === 0) {
+      return res.status(400).json({ message: "No students found in this batch." });
+    }
+
+    const targetDate = new Date(date);
+    const targetDateStr = targetDate.toISOString().split("T")[0];
+
+    let isUpdate = false;
+    const absentStudents = [];
+    const studentMap = new Map(batchStudents.map(s => [String(s._id), s]));
+
+    for (const item of records) {
+      const student = studentMap.get(String(item.studentId));
+      if (!student) continue;
+
+      const newStatus = item.status === "present" ? "present" : "absent";
+      if (newStatus === "absent") {
+        absentStudents.push(student);
+      }
+
+      const existingRecord = (student.attendanceRecords || []).find((r) => {
+        if (!r.date) return false;
+        const rStr = typeof r.date === "string" ? r.date.substring(0, 10) : new Date(r.date).toISOString().substring(0, 10);
+        return rStr === targetDateStr;
+      });
+
+      if (existingRecord) {
+        isUpdate = true;
+        existingRecord.status = newStatus;
+      } else {
+        if (!student.attendanceRecords) student.attendanceRecords = [];
+        student.attendanceRecords.unshift({ date: targetDateStr, status: newStatus });
+      }
+
+      // Also sync to Supabase attendance table directly
+      try {
+        const { data: existingDbRec } = await supabase
+          .from("attendance")
+          .select("id")
+          .eq("student_id", student._id)
+          .eq("date", targetDateStr)
+          .maybeSingle();
+
+        if (existingDbRec && existingDbRec.id) {
+          isUpdate = true;
+          await supabase
+            .from("attendance")
+            .update({ status: newStatus })
+            .eq("id", existingDbRec.id);
+        } else {
+          await supabase
+            .from("attendance")
+            .insert({ student_id: student._id, date: targetDateStr, status: newStatus });
+        }
+      } catch (dbErr) {
+        console.error("Direct attendance table sync error:", dbErr.message);
+      }
+
+      try {
+        await student.save();
+      } catch (sErr) {}
+    }
+
+    // Clear dashboard & student cache
+    try {
+      await clearCachePattern("teacher:dashboard:*");
+      for (const s of batchStudents) {
+        if (s.enrollmentNumber) {
+          await deleteCache(`student:dashboard:${s.enrollmentNumber}`);
+        }
+      }
+    } catch (cErr) {}
+
+    const updatedStudents = await populateStudent(Student.find({ user: ownerId, batch: batchId }));
+
+    const message = isUpdate ? "Attendance updated successfully" : "Attendance marked successfully";
+
+    // RETURN RESPONSE IMMEDIATELY TO FRONTEND
+    res.json({
+      success: true,
+      message,
+      isUpdate,
+      students: updatedStudents
+    });
+
+    // ASYNCHRONOUS BACKGROUND WHATSAPP DISPATCH
+    setImmediate(async () => {
+      try {
+        let settings = await getCache(`institute:whatsapp_settings:${instituteId}`);
+        if (!settings) {
+          const inst = await Institute.findById(instituteId);
+          settings = inst?.whatsappSettings || {};
+        }
+
+        if (settings && settings.absentAlertsEnabled && absentStudents.length > 0) {
+          const formattedDate = targetDate.toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          });
+          const template = settings.customMessageTemplate || "Dear Parent, your child {studentName} was marked absent on {date}.";
+
+          for (const student of absentStudents) {
+            const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
+            if (!recipientPhone) continue;
+
+            const messageText = template
+              .replace(/\{studentName\}/g, student.name)
+              .replace(/\{date\}/g, formattedDate);
+
+            try {
+              console.log(`Sending background WhatsApp absent alert to ${student.name} at ${recipientPhone}...`);
+              await sendMessage(String(instituteId), recipientPhone, messageText);
+              console.log(`WhatsApp absent alert sent successfully for ${student.name}`);
+              await new Promise((r) => setTimeout(r, 500));
+            } catch (wErr) {
+              console.error(`Failed sending WhatsApp to ${student.name}:`, wErr.message);
+            }
+          }
+        }
+      } catch (bgErr) {
+        console.error("Background WhatsApp batch dispatch error:", bgErr.message);
+      }
+    });
+
+  } catch (error) {
+    console.error("markBatchAttendance error:", error);
+    return res.status(500).json({ message: "Could not submit attendance." });
   }
 };
 
@@ -713,7 +955,7 @@ export const getStudentPortalData = async (req, res) => {
 
     for (const student of students) {
       const institute = await Institute.findById(student.user).select(
-        "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser"
+        "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser allowedFeatures"
       );
       if (!institute) continue;
 
@@ -829,6 +1071,7 @@ export const getStudentPortalData = async (req, res) => {
         brandingEnabled: institute.brandingEnabled !== false,
         logoUrl: institute.logoUrl || null,
         themeColor: institute.themeColor || "#6366f1",
+        allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
       });
     }
 

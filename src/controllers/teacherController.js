@@ -21,6 +21,7 @@ import {
   startLiveQuiz,
 } from "../services/quizRuntime.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
+import { sendMessage, getSessionStatus } from "../services/whatsappService.js";
 
 const uploadBufferToCloudinary = (buffer, options = {}) =>
   new Promise((resolve, reject) => {
@@ -46,15 +47,23 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
 export const getTeacherDashboard = async (req, res) => {
   try {
     const cacheKey = `teacher:dashboard:${req.user._id}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    if (req.query.nocache !== "true") {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const instituteId = req.user.institute?._id || req.user.institute;
     const institute = await Institute.findById(instituteId).select(
-      "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl"
+      "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
     );
+    if (institute) {
+      const savedSettings = await getCache(`institute:whatsapp_settings:${instituteId}`);
+      if (savedSettings) {
+        institute.whatsappSettings = savedSettings;
+      }
+    }
     const ownerId = req.user.role === "teacher" ? institute?.adminUser : req.user._id;
 
     let studentQuery = { user: ownerId };
@@ -135,17 +144,27 @@ export const getTeacherDashboard = async (req, res) => {
       });
     }
 
+    const processedBatches = batches.map((batch) => {
+      const count = students.filter(
+        (s) => s.batch && String(s.batch._id || s.batch) === String(batch._id)
+      ).length;
+      return {
+        ...batch.toJSON(),
+        studentCount: count,
+      };
+    });
+
     const responsePayload = {
       summary,
       students: processedStudents,
-      batches,
+      batches: processedBatches,
       quizzes,
       notes,
       testResults,
       institute,
     };
 
-    await setCache(cacheKey, responsePayload, 1800);
+    await setCache(cacheKey, responsePayload, 86400);
 
     return res.json(responsePayload);
   } catch (error) {
@@ -610,7 +629,7 @@ export const createTestResult = async (req, res) => {
 export const createTestResultsBulk = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { batchId, title, examDate, totalMarks, entries = [] } = req.body;
+    const { batchId, title, examDate, totalMarks, entries = [], sendWhatsApp = false } = req.body;
 
     if (
       !batchId ||
@@ -670,6 +689,57 @@ export const createTestResultsBulk = async (req, res) => {
     await deleteCache(`teacher:dashboard:${req.user._id}`);
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+
+    // Asynchronous background WhatsApp test mark alerts
+    if (sendWhatsApp) {
+      setImmediate(async () => {
+        try {
+          const inst = await Institute.findById(instituteId);
+          const allowed = inst?.allowedFeatures || ["attendance", "whatsapp", "quizzes"];
+          if (!allowed.includes("whatsapp")) {
+            console.warn(`WhatsApp feature disabled for institute ${instituteId}. Skipping test mark alerts.`);
+            return;
+          }
+
+          const statusObj = getSessionStatus(String(instituteId));
+          if (statusObj.status !== "connected") {
+            console.warn(`WhatsApp session not connected for institute ${instituteId}.`);
+            return;
+          }
+
+          const fullStudents = await Student.find({ _id: { $in: studentIds } });
+          const studentMap = (fullStudents || []).reduce((map, s) => {
+            map[String(s._id)] = s;
+            return map;
+          }, {});
+
+          const formattedDate = new Date(examDate).toLocaleDateString("en-IN");
+          const totalNum = Number(totalMarks);
+
+          for (const entry of entries) {
+            const student = studentMap[String(entry.studentId)];
+            if (!student) continue;
+
+            const targetPhone = (student.parentPhone && student.parentPhone.trim()) ? student.parentPhone.trim() : student.phone;
+            if (!targetPhone) continue;
+
+            const scoreNum = Number(entry.score || 0);
+            const percentage = totalNum > 0 ? Math.round((scoreNum / totalNum) * 100) : 0;
+
+            const messageText = `📊 *Test Marks Alert - ${inst?.name || "TuitionDesk"}*\nStudent: *${student.name}*\nTest Title: *${title}*\nScore: *${scoreNum} / ${totalNum}* (${percentage}%)\nExam Date: *${formattedDate}*\n${entry.remarks ? `Remarks: ${entry.remarks}\n` : ""}Thank you!`;
+
+            try {
+              await sendMessage(String(instituteId), targetPhone, messageText);
+              await new Promise((r) => setTimeout(r, 500));
+            } catch (wErr) {
+              console.error(`Failed to send test marks WhatsApp alert for ${student.name}:`, wErr.message);
+            }
+          }
+        } catch (bgErr) {
+          console.error("Background test marks WhatsApp alert error:", bgErr);
+        }
+      });
+    }
 
     return res.status(201).json(populatedResults);
   } catch (error) {

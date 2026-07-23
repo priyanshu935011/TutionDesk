@@ -130,10 +130,17 @@ class SupabaseDocument {
           .select()
           .maybeSingle();
 
-        if (error && error.message && error.message.includes("does not exist")) {
-          const match = error.message.match(/column "([^"]+)"/);
-          if (match && match[1]) {
-            const badCol = match[1];
+        if (error && error.message) {
+          let badCol = null;
+          if (error.message.includes("does not exist")) {
+            const match = error.message.match(/column "([^"]+)"/);
+            if (match) badCol = match[1];
+          } else if (error.code === "PGRST204" || error.message.includes("Could not find the") || error.message.includes("schema cache")) {
+            const match = error.message.match(/Could not find the '([^']+)' column/);
+            if (match) badCol = match[1];
+          }
+
+          if (badCol) {
             console.warn(`Stripping missing column "${badCol}" from ${this._tableName} update payload.`);
             delete payload[badCol];
             attempt++;
@@ -156,10 +163,17 @@ class SupabaseDocument {
           .select()
           .maybeSingle();
 
-        if (error && error.message && error.message.includes("does not exist")) {
-          const match = error.message.match(/column "([^"]+)"/);
-          if (match && match[1]) {
-            const badCol = match[1];
+        if (error && error.message) {
+          let badCol = null;
+          if (error.message.includes("does not exist")) {
+            const match = error.message.match(/column "([^"]+)"/);
+            if (match) badCol = match[1];
+          } else if (error.code === "PGRST204" || error.message.includes("Could not find the") || error.message.includes("schema cache")) {
+            const match = error.message.match(/Could not find the '([^']+)' column/);
+            if (match) badCol = match[1];
+          }
+
+          if (badCol) {
             console.warn(`Stripping missing column "${badCol}" from ${this._tableName} insert payload.`);
             delete payload[badCol];
             attempt++;
@@ -448,21 +462,25 @@ class SupabaseQuery {
     }
   }
 
-  async populateStudentRecords(docs) {
+  async populateStudentRecords(docs, options = {}) {
     const studentIds = docs.map(d => d.id).filter(Boolean);
     if (studentIds.length === 0) return;
     
-    // 1. Fetch payments
-    const { data: paymentsData, error: paymentsError } = await this.model.supabase
-      .from("payments")
-      .select("*")
-      .in("student_id", studentIds);
-      
-    // 2. Fetch attendance
-    const { data: attendanceData, error: attendanceError } = await this.model.supabase
-      .from("attendance")
-      .select("*")
-      .in("student_id", studentIds);
+    const includeAttendance = options.includeAttendance === true;
+
+    const promises = [
+      this.model.supabase.from("payments").select("student_id, amount, payment_date, payment_type, note").in("student_id", studentIds)
+    ];
+
+    if (includeAttendance) {
+      promises.push(
+        this.model.supabase.from("attendance").select("student_id, date, status").in("student_id", studentIds)
+      );
+    }
+
+    const results = await Promise.all(promises);
+    const paymentsData = results[0]?.data || [];
+    const attendanceData = includeAttendance ? (results[1]?.data || []) : [];
 
     const paymentsByStudent = {};
     const attendanceByStudent = {};
@@ -472,28 +490,24 @@ class SupabaseQuery {
       attendanceByStudent[id] = [];
     }
 
-    if (!paymentsError && paymentsData) {
-      for (const p of paymentsData) {
-        if (!paymentsByStudent[p.student_id]) paymentsByStudent[p.student_id] = [];
-        paymentsByStudent[p.student_id].push({
-          _id: p.id,
-          amount: Number(p.amount || 0),
-          paymentDate: p.payment_date,
-          paymentType: p.payment_type,
-          note: p.note || ""
-        });
-      }
+    for (const p of paymentsData) {
+      if (!paymentsByStudent[p.student_id]) paymentsByStudent[p.student_id] = [];
+      paymentsByStudent[p.student_id].push({
+        _id: p.id,
+        amount: Number(p.amount || 0),
+        paymentDate: p.payment_date,
+        paymentType: p.payment_type,
+        note: p.note || ""
+      });
     }
 
-    if (!attendanceError && attendanceData) {
-      for (const a of attendanceData) {
-        if (!attendanceByStudent[a.student_id]) attendanceByStudent[a.student_id] = [];
-        attendanceByStudent[a.student_id].push({
-          _id: a.id,
-          date: a.date,
-          status: a.status
-        });
-      }
+    for (const a of attendanceData) {
+      if (!attendanceByStudent[a.student_id]) attendanceByStudent[a.student_id] = [];
+      attendanceByStudent[a.student_id].push({
+        _id: a.id,
+        date: a.date,
+        status: a.status
+      });
     }
 
     for (const doc of docs) {
@@ -626,17 +640,73 @@ class SupabaseModel {
 
     const payload = {};
     for (const [key, val] of Object.entries(doc)) {
+      if (key.startsWith("_")) continue;
       const dbKey = camelToSnake(key);
       payload[dbKey] = val;
     }
 
-    const { data, error } = await this.supabase
-      .from(this.tableName)
-      .insert(payload)
-      .select()
-      .single();
+    let attempt = 0;
+    let data = null;
 
-    if (error) throw error;
+    while (attempt < 5) {
+      const { data: insertedData, error } = await this.supabase
+        .from(this.tableName)
+        .insert(payload)
+        .select()
+        .maybeSingle();
+
+      if (error && error.message) {
+        let badCol = null;
+        if (error.message.includes("does not exist")) {
+          const match = error.message.match(/column "([^"]+)"/);
+          if (match) badCol = match[1];
+        } else if (error.code === "PGRST204" || error.message.includes("Could not find the") || error.message.includes("schema cache")) {
+          const match = error.message.match(/Could not find the '([^']+)' column/);
+          if (match) badCol = match[1];
+        }
+
+        if (badCol) {
+          console.warn(`Stripping missing column "${badCol}" from ${this.tableName} create payload.`);
+          delete payload[badCol];
+          attempt++;
+          continue;
+        }
+      }
+
+      if (error) throw error;
+      data = insertedData;
+      break;
+    }
+
+    // Save initial payment history or attendance records if creating student
+    if (data && this.tableName === "students") {
+      const studentId = data.id;
+      if (Array.isArray(doc.paymentHistory) && doc.paymentHistory.length > 0) {
+        for (const p of doc.paymentHistory) {
+          try {
+            await this.supabase.from("payments").insert({
+              student_id: studentId,
+              amount: p.amount,
+              payment_date: p.paymentDate || new Date(),
+              payment_type: p.paymentType || "monthly",
+              note: p.note || ""
+            });
+          } catch (e) {}
+        }
+      }
+      if (Array.isArray(doc.attendanceRecords) && doc.attendanceRecords.length > 0) {
+        for (const a of doc.attendanceRecords) {
+          try {
+            await this.supabase.from("attendance").insert({
+              student_id: studentId,
+              date: a.date || new Date(),
+              status: a.status || "present"
+            });
+          } catch (e) {}
+        }
+      }
+    }
+
     return new SupabaseDocument(this.tableName, data, this);
   }
 
@@ -755,6 +825,19 @@ class SupabaseModel {
     return data ? new SupabaseDocument(this.tableName, data, this) : null;
   }
 
+  async findOneAndDelete(filter = {}) {
+    let query = this.supabase.from(this.tableName).delete();
+    query = this.applyFilters(query, filter);
+    const { data, error } = await query.select().maybeSingle();
+
+    if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+      console.warn(`Table "${this.tableName}" does not exist in DB, ignoring findOneAndDelete.`);
+      return null;
+    }
+    if (error) throw error;
+    return data ? new SupabaseDocument(this.tableName, data, this) : null;
+  }
+
   async countDocuments(filter = {}) {
     let attempt = 0;
     const currentFilter = { ...filter };
@@ -777,9 +860,12 @@ class SupabaseModel {
 
       const { count, error } = await query;
       if (error && error.message && error.message.includes("does not exist")) {
-        const match = error.message.match(/column "([^"]+)"/);
+        const match = error.message.match(/column "?([^"\s]+)"?/i);
         if (match && match[1]) {
-          const badCol = match[1];
+          let badCol = match[1];
+          if (badCol.includes(".")) {
+            badCol = badCol.split(".")[1];
+          }
           const filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
           if (filterKey) {
             console.warn(`Stripping missing filter column "${filterKey}" from ${this.tableName} countDocuments query.`);
@@ -804,29 +890,73 @@ class SupabaseModel {
 
   async aggregate(pipeline = []) {
     let matchStage = (pipeline || []).find(stage => stage.$match);
-    let hasLastActive = matchStage?.$match?.lastActiveAt;
+    let filter = matchStage?.$match || {};
     
-    let query = this.supabase.from("students").select("enrollment_number");
-    
-    if (hasLastActive) {
-      let minTime = matchStage.$match.lastActiveAt.$gte || matchStage.$match.lastActiveAt;
-      query = query.gte("last_active_at", minTime instanceof Date ? minTime.toISOString() : minTime);
+    const { data: allInsts } = await this.supabase.from("institutes").select("id, admin_email");
+    const demoIds = (allInsts || [])
+      .filter(i => (i.admin_email && i.admin_email.toLowerCase().includes("demo")))
+      .map(i => i.id);
+
+    let query = this.supabase.from("students").select("enrollment_number, institute_id");
+
+    if (filter.user && typeof filter.user === "string") {
+      const matchId = filter.user;
+      const { data: userData } = await this.supabase.from("users").select("institute_id").eq("id", matchId).maybeSingle();
+      if (userData && userData.institute_id) {
+        query = query.eq("institute_id", userData.institute_id);
+      } else {
+        query = query.eq("institute_id", matchId);
+      }
     }
-    
+
+    if (filter.isDemoAccount === false || filter.isDemoAccount?.$ne === true) {
+      if (demoIds.length > 0) {
+        query = query.not("institute_id", "in", `(${demoIds.join(",")})`);
+      }
+    }
+
+    if (filter.lastActiveAt) {
+      let minTime = filter.lastActiveAt.$gte || filter.lastActiveAt;
+      if (minTime) {
+        query = query.gte("last_active_at", minTime instanceof Date ? minTime.toISOString() : minTime);
+      }
+    }
+
     let { data, error } = await query;
       
     if (error && error.message && error.message.includes("last_active_at")) {
-      console.warn("last_active_at missing in students, querying without filter.");
-      const retry = await this.supabase
-        .from("students")
-        .select("enrollment_number");
+      let retryQuery = this.supabase.from("students").select("enrollment_number, institute_id");
+      if (filter.user && typeof filter.user === "string") {
+        const matchId = filter.user;
+        const { data: userData } = await this.supabase.from("users").select("institute_id").eq("id", matchId).maybeSingle();
+        if (userData && userData.institute_id) {
+          retryQuery = retryQuery.eq("institute_id", userData.institute_id);
+        } else {
+          retryQuery = retryQuery.eq("institute_id", matchId);
+        }
+      }
+      if (filter.isDemoAccount === false || filter.isDemoAccount?.$ne === true) {
+        if (demoIds.length > 0) {
+          retryQuery = retryQuery.not("institute_id", "in", `(${demoIds.join(",")})`);
+        }
+      }
+      const retry = await retryQuery;
       data = retry.data;
       error = retry.error;
     }
       
     if (error) throw error;
     
-    const uniqueEnrollments = new Set((data || []).map(row => row.enrollment_number));
+    const uniqueEnrollments = new Set(
+      (data || [])
+        .filter(row => {
+          if (filter.isDemoAccount === false || filter.isDemoAccount?.$ne === true) {
+            if (demoIds.includes(row.institute_id)) return false;
+          }
+          return true;
+        })
+        .map(row => row.enrollment_number)
+    );
     return [{ count: uniqueEnrollments.size }];
   }
 }
@@ -869,6 +999,9 @@ const mockMongoose = {
     else if (modelName === "TestResult") tableName = "test_marks";
     else if (modelName === "UptimeEvent") tableName = "uptime_events";
     else if (modelName === "SystemMetric") tableName = "system_metrics";
+    else if (modelName === "Notice") tableName = "notices";
+    else if (modelName === "SystemLog") tableName = "system_logs";
+    else tableName = modelName.toLowerCase() + "s";
 
     return new SupabaseModel(tableName);
   },
