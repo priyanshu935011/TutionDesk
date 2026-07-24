@@ -9,6 +9,7 @@ import QuizAttempt from "../models/QuizAttempt.js";
 import bcrypt from "bcryptjs";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendMessage } from "../services/whatsappService.js";
+import { getCredentialsTemplate, formatCredentialsMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 
 export const getInitialPassword = (name, phone) => {
@@ -353,6 +354,37 @@ export const createStudent = async (req, res) => {
       await clearCachePattern("teacher:dashboard:*");
     } catch (cacheErr) {
       console.warn("Cache eviction warning during student enrollment:", cacheErr);
+    }
+
+    // Send WhatsApp login credentials if option requested
+    const plainPassword = req.body.password || getInitialPassword(name, phone);
+    if (req.body.sendWhatsApp) {
+      setImmediate(async () => {
+        try {
+          const instituteId = req.user.institute?._id || req.user.institute;
+          const inst = await Institute.findById(instituteId);
+          const instituteName = inst?.name || "TuitionDesk";
+          const recipientPhone = parentPhone?.trim() || phone?.trim();
+
+          if (recipientPhone) {
+            const template = await getCredentialsTemplate();
+            const messageText = formatCredentialsMessage({
+              template,
+              studentName: name,
+              enrollmentNumber: enrollmentNumberToUse,
+              password: plainPassword,
+              phone,
+              instituteName,
+              loginUrl: `${process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app"}/student/login`,
+            });
+
+            await sendMessage(String(instituteId), recipientPhone, messageText);
+            console.log(`WhatsApp login credentials sent successfully to ${name} (${recipientPhone})`);
+          }
+        } catch (wErr) {
+          console.error(`Failed to send WhatsApp credentials to ${name}:`, wErr.message);
+        }
+      });
     }
 
     // Return array if array requested, else single object for backward compatibility
@@ -1307,7 +1339,14 @@ export const bulkCreateStudents = async (req, res) => {
         });
 
         results.successCount++;
-        results.created.push({ id: student._id, name: student.name });
+        results.created.push({
+          id: student._id,
+          name: student.name,
+          phone: student.phone,
+          parentPhone: student.parentPhone,
+          enrollmentNumber: student.enrollmentNumber,
+          plainPassword: getInitialPassword(name, phone),
+        });
       } catch (err) {
         results.failCount++;
         results.errors.push({
@@ -1321,12 +1360,96 @@ export const bulkCreateStudents = async (req, res) => {
     if (results.successCount > 0) {
       await clearCachePattern("student:dashboard:*");
       await clearCachePattern("teacher:dashboard:*");
+
+      if (req.body.sendWhatsApp) {
+        const createdItems = [...results.created];
+        setImmediate(async () => {
+          try {
+            const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+            const inst = await Institute.findById(instituteId);
+            const instituteName = inst?.name || "TuitionDesk";
+            const template = await getCredentialsTemplate();
+            const loginUrl = `${process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app"}/student/login`;
+
+            for (const item of createdItems) {
+              const recipientPhone = item.parentPhone?.trim() || item.phone?.trim();
+              if (!recipientPhone) continue;
+
+              const messageText = formatCredentialsMessage({
+                template,
+                studentName: item.name,
+                enrollmentNumber: item.enrollmentNumber,
+                password: item.plainPassword,
+                phone: item.phone,
+                instituteName,
+                loginUrl,
+              });
+
+              try {
+                console.log(`Sending bulk WhatsApp login credentials to ${item.name} (${recipientPhone})...`);
+                await sendMessage(String(instituteId), recipientPhone, messageText);
+                await new Promise((r) => setTimeout(r, 600));
+              } catch (wErr) {
+                console.error(`Failed sending bulk WhatsApp credentials to ${item.name}:`, wErr.message);
+              }
+            }
+          } catch (bgErr) {
+            console.error("Bulk WhatsApp dispatch error:", bgErr.message);
+          }
+        });
+      }
     }
 
     return res.status(200).json(results);
   } catch (error) {
     console.error("bulkCreateStudents error:", error);
     return res.status(500).json({ message: "Could not bulk import students" });
+  }
+};
+
+export const sendStudentCredentialsWhatsApp = async (req, res) => {
+  try {
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    const student = await Student.findOne({ _id: req.params.id, user: ownerId });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+    const inst = await Institute.findById(instituteId);
+    const instituteName = inst?.name || "TuitionDesk";
+    const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
+
+    if (!recipientPhone) {
+      return res.status(400).json({ message: "Student or parent phone number is missing" });
+    }
+
+    const template = await getCredentialsTemplate();
+    const plainPassword = getInitialPassword(student.name, student.phone);
+    const loginUrl = `${process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app"}/student/login`;
+
+    const messageText = formatCredentialsMessage({
+      template,
+      studentName: student.name,
+      enrollmentNumber: student.enrollmentNumber,
+      password: plainPassword,
+      phone: student.phone,
+      instituteName,
+      loginUrl,
+    });
+
+    await sendMessage(String(instituteId), recipientPhone, messageText);
+
+    return res.json({
+      success: true,
+      message: `WhatsApp credentials sent to ${student.name} (${recipientPhone}) successfully!`,
+    });
+  } catch (error) {
+    console.error("sendStudentCredentialsWhatsApp error:", error);
+    return res.status(500).json({ message: error.message || "Could not send WhatsApp message. Please verify WhatsApp connection." });
   }
 };
 

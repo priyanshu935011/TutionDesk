@@ -22,6 +22,8 @@ import {
   getSystemLogs,
   clearSystemLogs,
   updateTuitionWebsite,
+  getWhatsAppCredentialsTemplate,
+  updateWhatsAppCredentialsTemplate,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import superAdminOnly from "../middleware/superAdminMiddleware.js";
@@ -35,6 +37,9 @@ router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
 router.get("/system-logs", getSystemLogs);
 router.delete("/system-logs", clearSystemLogs);
+
+router.get("/whatsapp-template", getWhatsAppCredentialsTemplate);
+router.put("/whatsapp-template", updateWhatsAppCredentialsTemplate);
 
 router.get("/demo-accounts", getDemoAccounts);
 router.post("/demo-accounts", createDemoAccount);

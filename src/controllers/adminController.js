@@ -11,7 +11,8 @@ import SystemMetric from "../models/SystemMetric.js";
 import Note from "../models/Note.js";
 import Notice from "../models/Notice.js";
 import Quiz from "../models/Quiz.js";
-import SystemLog from "../models/SystemLog.js";
+import SystemSetting from "../models/SystemSetting.js";
+import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE } from "../utils/whatsappTemplateHelper.js";
 import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 import redisClient from "../config/redis.js";
@@ -1212,3 +1213,54 @@ export const updateTuitionWebsite = async (req, res) => {
     return res.status(500).json({ message: error.message || "Could not deploy tuition website." });
   }
 };
+
+export const getWhatsAppCredentialsTemplate = async (req, res) => {
+  try {
+    const template = await getCredentialsTemplate();
+    return res.json({
+      template,
+      defaultTemplate: DEFAULT_CREDENTIALS_TEMPLATE,
+      availablePlaceholders: [
+        "{student_name}",
+        "{enrollment_number}",
+        "{password}",
+        "{login_url}",
+        "{institute_name}",
+        "{phone}"
+      ]
+    });
+  } catch (error) {
+    console.error("getWhatsAppCredentialsTemplate error:", error);
+    return res.status(500).json({ message: "Could not fetch WhatsApp template" });
+  }
+};
+
+export const updateWhatsAppCredentialsTemplate = async (req, res) => {
+  try {
+    const { template } = req.body;
+    if (typeof template !== "string" || !template.trim()) {
+      return res.status(400).json({ message: "Template text is required" });
+    }
+
+    let setting = await SystemSetting.findOne({ key: "whatsapp_credentials_template" });
+    if (setting) {
+      setting.value = template.trim();
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "whatsapp_credentials_template",
+        value: template.trim(),
+        description: "Super admin template for sending student login credentials via WhatsApp"
+      });
+    }
+
+    return res.json({
+      message: "WhatsApp credentials template updated successfully!",
+      template: setting.value,
+    });
+  } catch (error) {
+    console.error("updateWhatsAppCredentialsTemplate error:", error);
+    return res.status(500).json({ message: "Could not update WhatsApp template" });
+  }
+};
+
