@@ -71,7 +71,12 @@ const instituteSchema = new mongoose.Schema(
     },
     allowedFeatures: {
       type: [String],
-      default: ["attendance", "notes", "marks", "tests", "whatsapp"],
+      default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads"],
+    },
+    leadApiKey: {
+      type: String,
+      default: "",
+      trim: true,
     },
     whatsappSettings: {
       absentAlertsEnabled: {

@@ -19,6 +19,7 @@ import whatsappRoute from "./routes/whatsappRoute.js";
 import cronRoute from "./routes/cronRoute.js";
 import noticeRoutes from "./routes/noticeRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
+import leadRoutes from "./routes/leadRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 
@@ -94,6 +95,7 @@ app.use("/whatsapp", whatsappRoute);
 app.use("/cron", cronRoute);
 app.use("/notices", noticeRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/leads", leadRoutes);
 
 const PORT = process.env.PORT || 5000;
 
