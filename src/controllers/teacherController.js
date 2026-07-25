@@ -74,22 +74,29 @@ export const getTeacherDashboard = async (req, res) => {
 
     if (req.user.role === "teacher") {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => b._id);
-      
-      batchQuery.teacher = req.user._id;
-      studentQuery.batch = { $in: batchIds };
-      
-      const myStudents = await Student.find({ user: ownerId, batch: { $in: batchIds } }).select("_id");
-      const studentIds = myStudents.map((s) => s._id);
-      testQuery.student = { $in: studentIds };
+      const batchIds = myBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
-      noteQuery.$or = [
-        { targetType: "batch", batch: { $in: batchIds } },
-        { targetType: "batch", batch: null },
-        { targetType: "student", students: { $in: studentIds } },
-        { targetType: { $exists: false }, $or: [{ batch: { $in: batchIds } }, { batch: null }] }
-      ];
-      quizQuery.batches = { $in: batchIds };
+      batchQuery.teacher = req.user._id;
+
+      if (batchIds.length > 0) {
+        studentQuery.batch = { $in: batchIds };
+        const myStudents = await Student.find({ user: ownerId, batch: { $in: batchIds } }).select("_id");
+        const studentIds = myStudents.map((s) => String(s._id || s.id || s)).filter(Boolean);
+
+        testQuery.student = studentIds.length > 0 ? { $in: studentIds } : null;
+
+        noteQuery.$or = [
+          { batch: { $in: batchIds } },
+          { batch: null },
+          ...(studentIds.length > 0 ? [{ students: { $in: studentIds } }] : [])
+        ];
+        quizQuery.batches = { $in: batchIds };
+      } else {
+        studentQuery.batch = null;
+        testQuery.student = null;
+        noteQuery.batch = null;
+        quizQuery.batches = null;
+      }
     }
 
     const [students, batches, quizzes, notes, testResults] = await Promise.all([
