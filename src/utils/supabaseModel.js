@@ -531,11 +531,23 @@ class SupabaseModel {
 
   applyFilters(queryBuilder, filter = {}) {
     let q = queryBuilder;
-    for (const [key, val] of Object.entries(filter)) {
+    const cleanValue = (v) => {
+      if (v === null || v === undefined) return v;
+      if (typeof v === "object" && !(v instanceof Date) && !Array.isArray(v) && v.$in === undefined && v.$gte === undefined && v.$lte === undefined && v.$gt === undefined && v.$lt === undefined && v.$ne === undefined && v.$nin === undefined && v.$size === undefined) {
+        if (v._id) return String(v._id);
+        if (v.id) return String(v.id);
+        return String(v);
+      }
+      return v;
+    };
+
+    for (const [key, rawVal] of Object.entries(filter)) {
+      const val = cleanValue(rawVal);
+
       if (key === "$or" && Array.isArray(val)) {
         const orParts = [];
         for (const subFilter of val) {
-          for (const [subKey, subVal] of Object.entries(subFilter)) {
+          for (const [subKey, rawSubVal] of Object.entries(subFilter)) {
             let dbSubKey = camelToSnake(subKey);
             if (this.tableName === "test_marks") {
               if (dbSubKey === "title") dbSubKey = "test_name";
@@ -544,19 +556,47 @@ class SupabaseModel {
               else if (dbSubKey === "batch") dbSubKey = "batch_id";
               else if (dbSubKey === "institute") dbSubKey = "institute_id";
             }
+
+            let subVal = cleanValue(rawSubVal);
+            if (subVal && typeof subVal === "object" && subVal.$in !== undefined) {
+              subVal = subVal.$in;
+            }
+
+            const isIdArray = dbSubKey === "student_ids" || dbSubKey === "batch_ids";
+
             if (subVal !== undefined) {
               if (subVal === null) {
                 orParts.push(`${dbSubKey}.is.null`);
-              } else if (dbSubKey === "student_ids" || dbSubKey === "batch_ids") {
-                if (subVal && typeof subVal === "object" && subVal.$size === 0) {
+              } else if (isIdArray) {
+                if (Array.isArray(subVal)) {
+                  subVal.forEach(item => {
+                    const cleanItem = cleanValue(item);
+                    if (cleanItem && String(cleanItem) !== "[object Object]") {
+                      orParts.push(`${dbSubKey}.cs.{${cleanItem}}`);
+                    }
+                  });
+                } else if (typeof subVal === "object" && subVal.$size === 0) {
                   orParts.push(`${dbSubKey}.eq.{}`);
                 } else {
-                  orParts.push(`${dbSubKey}.cs.{${subVal}}`);
+                  const cleanItem = cleanValue(subVal);
+                  if (cleanItem && String(cleanItem) !== "[object Object]") {
+                    orParts.push(`${dbSubKey}.cs.{${cleanItem}}`);
+                  }
                 }
+              } else if (Array.isArray(subVal)) {
+                subVal.forEach(item => {
+                  const cleanItem = cleanValue(item);
+                  if (cleanItem && String(cleanItem) !== "[object Object]") {
+                    orParts.push(`${dbSubKey}.eq.${cleanItem}`);
+                  }
+                });
               } else if (subVal instanceof Date) {
                 orParts.push(`${dbSubKey}.eq.${subVal.toISOString()}`);
               } else {
-                orParts.push(`${dbSubKey}.eq.${subVal}`);
+                const cleanItem = cleanValue(subVal);
+                if (cleanItem && String(cleanItem) !== "[object Object]") {
+                  orParts.push(`${dbSubKey}.eq.${cleanItem}`);
+                }
               }
             }
           }
@@ -582,9 +622,14 @@ class SupabaseModel {
         q = q.eq(dbKey, val.toISOString());
       } else if ((dbKey === "student_ids" || dbKey === "batch_ids") && typeof val === "string") {
         q = q.contains(dbKey, [val]);
-      } else if (typeof val === "object" && val !== null && val.$size === undefined) {
+      } else if (typeof val === "object" && val !== null && val.$size === undefined && val._id === undefined && val.id === undefined) {
         for (const [op, opVal] of Object.entries(val)) {
-          const formattedVal = opVal instanceof Date ? opVal.toISOString() : opVal;
+          let formattedVal = opVal instanceof Date ? opVal.toISOString() : opVal;
+          if (Array.isArray(formattedVal)) {
+            formattedVal = formattedVal.map(v => cleanValue(v));
+          } else {
+            formattedVal = cleanValue(formattedVal);
+          }
           if (op === "$in") {
             q = q.in(dbKey, formattedVal);
           } else if (op === "$gte") {
@@ -606,10 +651,11 @@ class SupabaseModel {
           if (val && typeof val === "object" && val.$size === 0) {
             q = q.eq(dbKey, "{}");
           } else {
-            q = q.contains(dbKey, Array.isArray(val) ? val : [val]);
+            const arr = Array.isArray(val) ? val.map(v => cleanValue(v)) : [cleanValue(val)];
+            q = q.contains(dbKey, arr);
           }
         } else {
-          q = q.eq(dbKey, val);
+          q = q.eq(dbKey, cleanValue(val));
         }
       }
     }
