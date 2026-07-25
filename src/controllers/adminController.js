@@ -54,11 +54,12 @@ const hydrateInstitute = async (institute, adminEmails) => {
 };
 
 const getNextStartDate = (institute) => {
-  const lastHistory = (institute.subscriptionHistory || []).slice().sort(
-    (a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime()
+  const history = Array.isArray(institute?.subscriptionHistory) ? institute.subscriptionHistory : [];
+  const lastHistory = history.slice().sort(
+    (a, b) => new Date(b?.endDate).getTime() - new Date(a?.endDate).getTime()
   )[0];
 
-  const lastEndDate = lastHistory ? new Date(lastHistory.endDate) : (institute.subscriptionStart ? new Date(institute.subscriptionStart) : new Date());
+  const lastEndDate = lastHistory ? new Date(lastHistory.endDate) : (institute?.subscriptionStart ? new Date(institute.subscriptionStart) : new Date());
 
   if (!lastEndDate || isNaN(lastEndDate.getTime()) || lastEndDate.getTime() < Date.now()) {
     return new Date();
@@ -445,7 +446,7 @@ export const renewInstituteSubscription = async (req, res) => {
 
     const { plan, amount, trialDays, customEndDate, note } = req.body;
 
-    if (!plan || amount === undefined) {
+    if (!plan || amount === undefined || amount === "") {
       return res.status(400).json({ message: "Plan and amount are required" });
     }
 
@@ -457,8 +458,8 @@ export const renewInstituteSubscription = async (req, res) => {
       customEndDate,
     });
 
-    if (!nextEnd) {
-      return res.status(400).json({ message: "Invalid subscription plan or date" });
+    if (!nextEnd || isNaN(new Date(nextEnd).getTime())) {
+      return res.status(400).json({ message: "Invalid subscription plan or expiration date" });
     }
 
     institute.subscriptionPlan = plan;
@@ -467,6 +468,11 @@ export const renewInstituteSubscription = async (req, res) => {
     institute.subscriptionStart = nextStart;
     institute.subscriptionEnd = nextEnd;
     institute.status = "active";
+
+    if (!Array.isArray(institute.subscriptionHistory)) {
+      institute.subscriptionHistory = [];
+    }
+
     institute.subscriptionHistory.unshift({
       plan,
       amount: Number(amount),
@@ -486,7 +492,8 @@ export const renewInstituteSubscription = async (req, res) => {
     const adminEmails = await getAdminEmails();
     return res.json(await hydrateInstitute(institute, adminEmails));
   } catch (error) {
-    return res.status(500).json({ message: "Could not renew subscription" });
+    console.error("renewInstituteSubscription error:", error);
+    return res.status(500).json({ message: error.message || "Could not renew subscription" });
   }
 };
 
