@@ -133,7 +133,7 @@ export const getTeacherDashboard = async (req, res) => {
     let processedStudents = students;
     if (req.user.role === "teacher") {
       processedStudents = students.map((s) => {
-        const obj = s.toJSON();
+        const obj = typeof s?.toJSON === "function" ? s.toJSON() : (typeof s?.toObject === "function" ? s.toObject() : { ...s });
         delete obj.totalFees;
         delete obj.feePlanType;
         delete obj.paymentHistory;
@@ -148,8 +148,9 @@ export const getTeacherDashboard = async (req, res) => {
       const count = students.filter(
         (s) => s.batch && String(s.batch._id || s.batch) === String(batch._id)
       ).length;
+      const bObj = typeof batch?.toJSON === "function" ? batch.toJSON() : (typeof batch?.toObject === "function" ? batch.toObject() : { ...batch });
       return {
-        ...batch.toJSON(),
+        ...bObj,
         studentCount: count,
       };
     });
@@ -171,7 +172,7 @@ export const getTeacherDashboard = async (req, res) => {
     console.error("getTeacherDashboard error stack:", error);
     return res
       .status(500)
-      .json({ message: "Could not load teacher dashboard" });
+      .json({ message: error.message || "Could not load teacher dashboard" });
   }
 };
 
