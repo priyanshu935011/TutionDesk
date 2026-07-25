@@ -58,7 +58,12 @@ const getNextStartDate = (institute) => {
     (a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime()
   )[0];
 
-  return lastHistory ? new Date(lastHistory.endDate) : new Date(institute.subscriptionStart);
+  const lastEndDate = lastHistory ? new Date(lastHistory.endDate) : (institute.subscriptionStart ? new Date(institute.subscriptionStart) : new Date());
+
+  if (!lastEndDate || isNaN(lastEndDate.getTime()) || lastEndDate.getTime() < Date.now()) {
+    return new Date();
+  }
+  return lastEndDate;
 };
 
 export const getAdminOverview = async (req, res) => {
@@ -260,6 +265,7 @@ export const createInstitute = async (req, res) => {
       subscriptionAmount,
       trialDays,
       subscriptionStart,
+      customEndDate,
       tuitionType,
       quizFeatureEnabled,
       brandingEnabled,
@@ -292,6 +298,7 @@ export const createInstitute = async (req, res) => {
       subscriptionPlan,
       subscriptionStart: startDate,
       trialDays,
+      customEndDate,
     });
 
     if (!endDate) {
@@ -368,6 +375,7 @@ export const updateInstitute = async (req, res) => {
       subscriptionAmount,
       trialDays,
       subscriptionStart,
+      customEndDate,
       status,
       tuitionType,
       quizFeatureEnabled,
@@ -404,6 +412,7 @@ export const updateInstitute = async (req, res) => {
       subscriptionPlan: institute.subscriptionPlan,
       subscriptionStart: institute.subscriptionStart,
       trialDays: institute.trialDays,
+      customEndDate,
     });
 
     await institute.save();
@@ -434,7 +443,7 @@ export const renewInstituteSubscription = async (req, res) => {
       return res.status(404).json({ message: "Tution not found" });
     }
 
-    const { plan, amount, trialDays, note } = req.body;
+    const { plan, amount, trialDays, customEndDate, note } = req.body;
 
     if (!plan || amount === undefined) {
       return res.status(400).json({ message: "Plan and amount are required" });
@@ -445,10 +454,11 @@ export const renewInstituteSubscription = async (req, res) => {
       subscriptionPlan: plan,
       subscriptionStart: nextStart,
       trialDays,
+      customEndDate,
     });
 
     if (!nextEnd) {
-      return res.status(400).json({ message: "Invalid subscription plan" });
+      return res.status(400).json({ message: "Invalid subscription plan or date" });
     }
 
     institute.subscriptionPlan = plan;
@@ -468,8 +478,10 @@ export const renewInstituteSubscription = async (req, res) => {
 
     await institute.save();
 
-    await clearCachePattern("teacher:dashboard:*");
-    await clearCachePattern("student:dashboard:*");
+    try {
+      await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("student:dashboard:*");
+    } catch (cErr) {}
 
     const adminEmails = await getAdminEmails();
     return res.json(await hydrateInstitute(institute, adminEmails));

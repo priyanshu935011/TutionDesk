@@ -24,18 +24,28 @@ export const subscriptionPlans = {
     endDate.setFullYear(endDate.getFullYear() + 1);
     return endDate;
   },
+  lifetime: () => {
+    return new Date("2099-12-31T23:59:59.999Z");
+  },
+  custom: (_, __, customEndDate) => {
+    return customEndDate ? new Date(customEndDate) : null;
+  },
 };
 
-export const resolveSubscriptionEnd = ({ subscriptionPlan, subscriptionStart, trialDays }) => {
+export const resolveSubscriptionEnd = ({ subscriptionPlan, subscriptionStart, trialDays, customEndDate }) => {
   const calculator = subscriptionPlans[subscriptionPlan];
 
   if (!calculator) {
     return null;
   }
 
-  return subscriptionPlan === "trial"
-    ? calculator(subscriptionStart, trialDays)
-    : calculator(subscriptionStart);
+  if (subscriptionPlan === "trial") {
+    return calculator(subscriptionStart, trialDays);
+  }
+  if (subscriptionPlan === "custom") {
+    return calculator(subscriptionStart, trialDays, customEndDate);
+  }
+  return calculator(subscriptionStart);
 };
 
 export const isSubscriptionExpired = (institute) =>

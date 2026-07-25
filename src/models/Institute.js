@@ -25,7 +25,7 @@ const instituteSchema = new mongoose.Schema(
     },
     subscriptionPlan: {
       type: String,
-      enum: ["trial", "monthly", "quarterly", "half_yearly", "yearly"],
+      enum: ["trial", "monthly", "quarterly", "half_yearly", "yearly", "custom", "lifetime"],
       required: true,
     },
     subscriptionAmount: {
@@ -157,7 +157,7 @@ const instituteSchema = new mongoose.Schema(
         {
           plan: {
             type: String,
-            enum: ["trial", "monthly", "quarterly", "half_yearly", "yearly"],
+            enum: ["trial", "monthly", "quarterly", "half_yearly", "yearly", "custom", "lifetime"],
             required: true,
           },
           amount: {
