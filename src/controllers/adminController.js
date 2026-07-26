@@ -303,7 +303,7 @@ export const createInstitute = async (req, res) => {
     });
 
     if (!endDate) {
-      return res.status(400).json({ message: "Invalid subscription plan" });
+      return res.status(400).json({ message: "Invalid subscription plan or date" });
     }
 
     const institute = await Institute.create({
@@ -337,6 +337,7 @@ export const createInstitute = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
     const user = await User.create({
+      name: ownerName,
       email: normalizedEmail,
       password: hashedPassword,
       role: "institute_admin",
@@ -346,15 +347,19 @@ export const createInstitute = async (req, res) => {
     institute.adminUser = user._id;
     await institute.save();
 
+    const adminEmails = await getAdminEmails();
+    const hydrated = await hydrateInstitute(institute, adminEmails);
+
     return res.status(201).json({
-      institute: await hydrateInstitute(institute),
+      institute: hydrated,
       adminCredentials: {
         email: normalizedEmail,
         password: adminPassword,
       },
     });
   } catch (error) {
-    return res.status(500).json({ message: "Could not create tution" });
+    console.error("createInstitute error:", error);
+    return res.status(500).json({ message: error.message || "Could not create tution" });
   }
 };
 
