@@ -764,10 +764,13 @@ export const createHiredTeacher = async (req, res) => {
     }
 
     const instituteId = req.user.institute?._id || req.user.institute;
-    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found" });
+    }
 
-    if (!institute || institute.tuitionType !== "institution") {
-      return res.status(403).json({ message: "Access denied. Hired teachers can only be added for Institution accounts." });
+    if (institute.tuitionType !== "institution") {
+      institute.tuitionType = "institution";
+      await institute.save();
     }
 
     if (!name || !email || !password) {
@@ -801,7 +804,8 @@ export const createHiredTeacher = async (req, res) => {
       role: newTeacher.role,
     });
   } catch (error) {
-    return res.status(500).json({ message: "Could not create teacher" });
+    console.error("addHiredTeacher error:", error);
+    return res.status(500).json({ message: error.message || "Could not create teacher" });
   }
 };
 
