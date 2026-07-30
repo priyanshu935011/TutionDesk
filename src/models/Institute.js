@@ -73,6 +73,10 @@ const instituteSchema = new mongoose.Schema(
       type: [String],
       default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads"],
     },
+    flexibleDueDate: {
+      type: Boolean,
+      default: false,
+    },
     leadApiKey: {
       type: String,
       default: "",

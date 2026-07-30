@@ -672,7 +672,15 @@ export const addPayment = async (req, res) => {
     });
 
     if (student.feePlanType === "monthly") {
-      student.dueDate = addOneMonth(paymentDate);
+      const instId = req.user.institute?._id || req.user.institute || student.user;
+      const institute = await Institute.findById(instId).select("flexibleDueDate");
+      const isFlexible = institute?.flexibleDueDate === true;
+
+      if (isFlexible) {
+        student.dueDate = addOneMonth(paymentDate);
+      } else {
+        student.dueDate = addOneMonth(student.dueDate || paymentDate);
+      }
     }
 
     // Direct insert into Supabase payments table

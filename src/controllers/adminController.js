@@ -268,6 +268,7 @@ export const createInstitute = async (req, res) => {
       subscriptionStart,
       customEndDate,
       tuitionType,
+      flexibleDueDate,
       quizFeatureEnabled,
       brandingEnabled,
       logoUrl,
@@ -318,6 +319,7 @@ export const createInstitute = async (req, res) => {
       subscriptionEnd: endDate,
       status: "active",
       tuitionType: tuitionType || "solo",
+      flexibleDueDate: Boolean(flexibleDueDate),
       quizFeatureEnabled: quizFeatureEnabled !== false,
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
@@ -384,6 +386,7 @@ export const updateInstitute = async (req, res) => {
       customEndDate,
       status,
       tuitionType,
+      flexibleDueDate,
       quizFeatureEnabled,
       brandingEnabled,
       logoUrl,
@@ -408,6 +411,7 @@ export const updateInstitute = async (req, res) => {
     if (subscriptionStart !== undefined) institute.subscriptionStart = new Date(subscriptionStart);
     if (status !== undefined) institute.status = status;
     if (tuitionType !== undefined) institute.tuitionType = tuitionType;
+    if (flexibleDueDate !== undefined) institute.flexibleDueDate = Boolean(flexibleDueDate);
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
     if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
