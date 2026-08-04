@@ -39,6 +39,12 @@ const testResultSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    subject: {
+      type: String,
+      required: true,
+      trim: true,
+      default: "General",
+    },
   },
   { timestamps: true }
 );

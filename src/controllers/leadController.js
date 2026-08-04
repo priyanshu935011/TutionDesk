@@ -2,6 +2,7 @@ import crypto from "crypto";
 import Lead from "../models/Lead.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
+import LeadForm from "../models/LeadForm.js";
 import { sendMessage } from "../services/whatsappService.js";
 
 const generateApiKey = () => {
@@ -198,5 +199,157 @@ export const regenerateLeadApiKey = async (req, res) => {
   } catch (error) {
     console.error("regenerateLeadApiKey error:", error);
     return res.status(500).json({ message: "Could not regenerate lead API key" });
+  }
+};
+
+export const getLeadForms = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const forms = await LeadForm.find({ institute: instituteId }).sort({ createdAt: -1 });
+    return res.json(forms);
+  } catch (error) {
+    console.error("getLeadForms error:", error);
+    return res.status(500).json({ message: "Could not fetch lead forms" });
+  }
+};
+
+export const createLeadForm = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const { name, title, description, fields } = req.body;
+
+    if (!name || !title) {
+      return res.status(400).json({ message: "Form name and display title are required" });
+    }
+
+    const form = await LeadForm.create({
+      institute: instituteId,
+      name: name.trim(),
+      title: title.trim(),
+      description: description ? description.trim() : "",
+      fields: Array.isArray(fields) && fields.length > 0 ? fields : undefined,
+    });
+
+    return res.status(201).json(form);
+  } catch (error) {
+    console.error("createLeadForm error:", error);
+    return res.status(500).json({ message: "Could not create lead form" });
+  }
+};
+
+export const updateLeadForm = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const { name, title, description, fields } = req.body;
+
+    const form = await LeadForm.findOne({ _id: req.params.id, institute: instituteId });
+    if (!form) {
+      return res.status(404).json({ message: "Lead form not found" });
+    }
+
+    if (name) form.name = name.trim();
+    if (title) form.title = title.trim();
+    if (description !== undefined) form.description = description.trim();
+    if (fields) form.fields = fields;
+
+    await form.save();
+    return res.json(form);
+  } catch (error) {
+    console.error("updateLeadForm error:", error);
+    return res.status(500).json({ message: "Could not update lead form" });
+  }
+};
+
+export const deleteLeadForm = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const form = await LeadForm.findOneAndDelete({ _id: req.params.id, institute: instituteId });
+    if (!form) {
+      return res.status(404).json({ message: "Lead form not found" });
+    }
+
+    // Clean up associated leads form link
+    await Lead.updateMany({ leadFormId: req.params.id }, { $set: { leadFormId: "" } });
+
+    return res.json({ message: "Lead form deleted successfully" });
+  } catch (error) {
+    console.error("deleteLeadForm error:", error);
+    return res.status(500).json({ message: "Could not delete lead form" });
+  }
+};
+
+export const getPublicLeadForm = async (req, res) => {
+  try {
+    const form = await LeadForm.findById(req.params.id).populate("institute", "name logoUrl themeColor");
+    if (!form) {
+      return res.status(404).json({ message: "Lead form not found" });
+    }
+    return res.json(form);
+  } catch (error) {
+    console.error("getPublicLeadForm error:", error);
+    return res.status(500).json({ message: "Could not fetch public lead form details" });
+  }
+};
+
+export const submitPublicLead = async (req, res) => {
+  try {
+    const form = await LeadForm.findById(req.params.id).populate("institute");
+    if (!form) {
+      return res.status(404).json({ message: "Lead form not found" });
+    }
+
+    const { name, phone, email, course, message } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Name is required." });
+    }
+    if (!phone || !phone.trim()) {
+      return res.status(400).json({ message: "Phone number is required." });
+    }
+
+    const lead = await Lead.create({
+      institute: form.institute._id,
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email ? email.trim().toLowerCase() : "",
+      course: course ? course.trim() : "",
+      message: message ? message.trim() : "",
+      source: form.name,
+      leadFormId: form._id,
+      status: "new",
+    });
+
+    // Send WhatsApp notification alert
+    setImmediate(async () => {
+      try {
+        let adminPhone = form.institute.adminPhone?.trim();
+        if (!adminPhone && form.institute.adminUser) {
+          const adminUser = await User.findById(form.institute.adminUser).select("phone");
+          adminPhone = adminUser?.phone?.trim();
+        }
+
+        if (adminPhone) {
+          const alertMessage = `🔥 *New Form Lead Scan Received!*
+          
+👤 *Name:* ${lead.name}
+📱 *Phone:* ${lead.phone}
+${lead.email ? `📧 *Email:* ${lead.email}\n` : ""}${lead.course ? `📚 *Course:* ${lead.course}\n` : ""}${lead.message ? `💬 *Message:* ${lead.message}\n` : ""}🌐 *QR Form Source:* ${form.name}
+
+Log in to your dashboard to review this lead.`;
+
+          await sendMessage(String(form.institute._id), adminPhone, alertMessage);
+        }
+      } catch (wErr) {
+        console.error("WhatsApp public lead notification alert error:", wErr.message);
+      }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Lead submitted successfully!",
+    });
+  } catch (error) {
+    console.error("submitPublicLead error:", error);
+    return res.status(500).json({ message: "Could not submit inquiry." });
   }
 };

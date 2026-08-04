@@ -1,6 +1,7 @@
 import express from "express";
 import Institute from "../models/Institute.js";
 import { generateTuitionHTML } from "../services/netlifyService.js";
+import { getPublicLeadForm, submitPublicLead } from "../controllers/leadController.js";
 
 const router = express.Router();
 
@@ -62,5 +63,9 @@ router.get("/website/:slug", async (req, res) => {
     return res.status(500).json({ message: "Could not fetch public website." });
   }
 });
+
+// Public lead form routes
+router.get("/lead-forms/:id", getPublicLeadForm);
+router.post("/lead-forms/:id/submit", submitPublicLead);
 
 export default router;

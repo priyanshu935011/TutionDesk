@@ -63,13 +63,19 @@ export const studentLogin = async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    // Verify subscription status of at least one institution
+    // Verify subscription status of at least one institution and check portal toggle
     let hasActiveSubscription = false;
+    let portalDisabled = false;
+
     for (const student of matchedStudents) {
       const inst = await Institute.findById(student.user).select(
-        "status subscriptionEnd"
+        "status subscriptionEnd studentPortalEnabled"
       );
       if (inst) {
+        if (inst.studentPortalEnabled === false) {
+          portalDisabled = true;
+          continue;
+        }
         const isExpired =
           inst.status !== "active" ||
           new Date(inst.subscriptionEnd).getTime() < Date.now();
@@ -78,6 +84,12 @@ export const studentLogin = async (req, res) => {
           break;
         }
       }
+    }
+
+    if (portalDisabled && !hasActiveSubscription) {
+      return res.status(403).json({
+        message: "Student portal is disabled for this institute",
+      });
     }
 
     if (!hasActiveSubscription) {

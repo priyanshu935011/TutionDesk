@@ -127,6 +127,27 @@ export const sendMessage = async (instituteId, to, text) => {
   return { success: true };
 };
 
+export const sendDocument = async (instituteId, to, fileBuffer, fileName, caption = "") => {
+  const session = activeSessions.get(instituteId);
+  if (!session || session.status !== "connected") {
+    throw new Error("WhatsApp not connected for this tuition.");
+  }
+
+  let cleanNumber = String(to).replace(/\D/g, "");
+  if (!cleanNumber.startsWith("91") && cleanNumber.length === 10) {
+    cleanNumber = "91" + cleanNumber;
+  }
+  const jid = `${cleanNumber}@s.whatsapp.net`;
+
+  await session.sock.sendMessage(jid, {
+    document: fileBuffer,
+    mimetype: "application/pdf",
+    fileName: fileName,
+    caption: caption
+  });
+  return { success: true };
+};
+
 export const reconnectAllSessions = async () => {
   const sessionsParent = path.join(process.cwd(), "sessions");
   if (!fs.existsSync(sessionsParent)) {

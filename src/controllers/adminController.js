@@ -32,23 +32,43 @@ const getAdminEmails = async () => {
   }
 };
 
-const hydrateInstitute = async (institute, adminEmails) => {
+const hydrateInstitute = async (institute, adminEmails = []) => {
   const matchUser = institute.adminUser ? (mongoose.Types.ObjectId.isValid(institute.adminUser) ? new mongoose.Types.ObjectId(institute.adminUser) : institute.adminUser) : null;
-  const [studentCountResult, batchCount] = await Promise.all([
-    Student.aggregate([
-      { $match: { user: matchUser, email: { $nin: adminEmails } } },
-      { $group: { _id: "$enrollmentNumber" } },
-      { $count: "count" }
-    ]),
-    Batch.countDocuments({ user: institute.adminUser }),
-  ]);
+  
+  const allBatches = await Batch.find({ user: institute.adminUser || institute._id });
+  const archivedBatchIds = allBatches.filter(b => b.status === "archived").map(b => String(b._id));
 
-  const studentCount = studentCountResult[0]?.count || 0;
+  const allStudents = await Student.find({ user: matchUser, email: { $nin: adminEmails } });
+  
+  // Group unique students by enrollmentNumber
+  const uniqueStudentsMap = {};
+  allStudents.forEach(student => {
+    const isArchived = student.batch && archivedBatchIds.includes(String(student.batch));
+    const key = student.enrollmentNumber;
+    if (!uniqueStudentsMap[key]) {
+      uniqueStudentsMap[key] = { isArchived: true };
+    }
+    if (!isArchived) {
+      uniqueStudentsMap[key].isArchived = false;
+    }
+  });
+
+  let activeStudentCount = 0;
+  let archivedStudentCount = 0;
+  Object.values(uniqueStudentsMap).forEach(s => {
+    if (s.isArchived) {
+      archivedStudentCount++;
+    } else {
+      activeStudentCount++;
+    }
+  });
 
   return {
     ...institute.toObject(),
-    studentCount,
-    batchCount,
+    studentCount: activeStudentCount,
+    activeStudentCount,
+    archivedStudentCount,
+    batchCount: allBatches.length,
     subscriptionStatus: isSubscriptionExpired(institute) ? "expired" : "active",
   };
 };
@@ -274,6 +294,8 @@ export const createInstitute = async (req, res) => {
       logoUrl,
       themeColor,
       allowedFeatures,
+      studentCustomFields,
+      studentPortalEnabled,
     } = req.body;
 
     if (
@@ -320,6 +342,8 @@ export const createInstitute = async (req, res) => {
       status: "active",
       tuitionType: tuitionType || "solo",
       flexibleDueDate: Boolean(flexibleDueDate),
+      studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
+      studentPortalEnabled: studentPortalEnabled !== false,
       quizFeatureEnabled: quizFeatureEnabled !== false,
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
@@ -392,6 +416,8 @@ export const updateInstitute = async (req, res) => {
       logoUrl,
       themeColor,
       allowedFeatures,
+      studentCustomFields,
+      studentPortalEnabled,
     } = req.body;
 
     if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
@@ -412,6 +438,8 @@ export const updateInstitute = async (req, res) => {
     if (status !== undefined) institute.status = status;
     if (tuitionType !== undefined) institute.tuitionType = tuitionType;
     if (flexibleDueDate !== undefined) institute.flexibleDueDate = Boolean(flexibleDueDate);
+    if (studentCustomFields !== undefined) institute.studentCustomFields = Array.isArray(studentCustomFields) ? studentCustomFields : [];
+    if (studentPortalEnabled !== undefined) institute.studentPortalEnabled = Boolean(studentPortalEnabled);
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
     if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
@@ -499,7 +527,8 @@ export const renewInstituteSubscription = async (req, res) => {
     } catch (cErr) {}
 
     const adminEmails = await getAdminEmails();
-    return res.json(await hydrateInstitute(institute, adminEmails));
+    const hydratedInst = await hydrateInstitute(institute, adminEmails);
+    return res.json(hydratedInst);
   } catch (error) {
     console.error("renewInstituteSubscription error:", error);
     return res.status(500).json({ message: error.message || "Could not renew subscription" });
@@ -1177,7 +1206,7 @@ export const clearSystemLogs = async (req, res) => {
 export const updateTuitionWebsite = async (req, res) => {
   try {
     const { id } = req.params;
-    const { enabled, slug, headline, subheadline, aboutText, bannerUrl, contactAddress, contactPhone, netlifyToken } = req.body;
+    const { enabled, slug, headline, subheadline, aboutText, bannerUrl, contactAddress, contactPhone } = req.body;
 
     const institute = await Institute.findById(id);
     if (!institute) {
@@ -1190,29 +1219,6 @@ export const updateTuitionWebsite = async (req, res) => {
       .replace(/[^a-z0-9-]/g, "-")
       .replace(/-+/g, "-");
 
-    const { deployToNetlify, generateTuitionHTML } = await import("../services/netlifyService.js");
-
-    const htmlContent = generateTuitionHTML({
-      instituteName: institute.name,
-      ownerName: institute.ownerName,
-      slug: sanitizedSlug,
-      headline,
-      subheadline,
-      aboutText,
-      bannerUrl,
-      logoUrl: institute.logoUrl,
-      contactPhone: contactPhone || institute.adminPhone,
-      adminEmail: institute.adminEmail,
-      contactAddress,
-      clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
-    });
-
-    const deployResult = await deployToNetlify({
-      slug: sanitizedSlug,
-      htmlContent,
-      customToken: netlifyToken,
-    });
-
     const updatedConfig = {
       enabled: enabled !== false,
       slug: sanitizedSlug,
@@ -1222,9 +1228,6 @@ export const updateTuitionWebsite = async (req, res) => {
       bannerUrl: bannerUrl || "",
       contactAddress: contactAddress || "",
       contactPhone: contactPhone || institute.adminPhone || "",
-      netlifySiteId: deployResult.siteId || "",
-      netlifySubdomain: deployResult.subdomain || `${sanitizedSlug}.netlify.app`,
-      publishedUrl: deployResult.publishedUrl || `https://${sanitizedSlug}.netlify.app`,
       lastDeployedAt: new Date(),
     };
 
@@ -1232,13 +1235,13 @@ export const updateTuitionWebsite = async (req, res) => {
     await institute.save();
 
     return res.json({
-      message: deployResult.message || "Tuition website deployed successfully!",
+      message: "Tuition landing page configuration updated successfully!",
       websiteConfig: updatedConfig,
       institute,
     });
   } catch (error) {
     console.error("updateTuitionWebsite error:", error);
-    return res.status(500).json({ message: error.message || "Could not deploy tuition website." });
+    return res.status(500).json({ message: error.message || "Could not save tuition website configuration." });
   }
 };
 

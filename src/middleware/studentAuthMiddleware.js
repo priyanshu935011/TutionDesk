@@ -37,6 +37,12 @@ const protectStudent = async (req, res, next) => {
       return res.status(401).json({ message: "Student not found" });
     }
 
+    // Verify student portal is enabled for this institute
+    const inst = await Institute.findById(students[0].user).select("studentPortalEnabled");
+    if (inst && inst.studentPortalEnabled === false) {
+      return res.status(403).json({ message: "Student portal is disabled for this institute" });
+    }
+
     if (students[0].lastActiveAt) {
       const fourteenDaysInMs = 14 * 24 * 60 * 60 * 1000;
       if (Date.now() - new Date(students[0].lastActiveAt).getTime() > fourteenDaysInMs) {

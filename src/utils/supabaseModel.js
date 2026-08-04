@@ -1,9 +1,223 @@
 import { createClient } from "@supabase/supabase-js";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_KEY || "";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
+
+const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms"]);
+const FALLBACK_DIR = "c:/Users/priya/priyanshu/projects/tutions_crm/scratch/data";
+const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
+const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
+const BATCHES_METADATA_FILE = path.join(FALLBACK_DIR, "batches_metadata.json");
+
+function readBatchesMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(BATCHES_METADATA_FILE)) {
+      fs.writeFileSync(BATCHES_METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(BATCHES_METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeBatchesMetadata(metadata) {
+  try {
+    fs.writeFileSync(BATCHES_METADATA_FILE, JSON.stringify(metadata, null, 2));
+  } catch (e) {}
+}
+
+function readStudentMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(STUDENT_METADATA_FILE)) {
+      fs.writeFileSync(STUDENT_METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(STUDENT_METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeStudentMetadata(metadata) {
+  try {
+    fs.writeFileSync(STUDENT_METADATA_FILE, JSON.stringify(metadata, null, 2));
+  } catch (e) {}
+}
+
+function readInstitutesMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(METADATA_FILE)) {
+      fs.writeFileSync(METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeInstitutesMetadata(metadata) {
+  try {
+    fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2));
+  } catch (e) {}
+}
+
+function getFallbackFile(tableName) {
+  if (!fs.existsSync(FALLBACK_DIR)) {
+    fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+  }
+  const filePath = path.join(FALLBACK_DIR, `${tableName}.json`);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify([], null, 2));
+  }
+  return filePath;
+}
+
+function readFallbackData(tableName) {
+  try {
+    const filePath = getFallbackFile(tableName);
+    const content = fs.readFileSync(filePath, "utf8");
+    return JSON.parse(content);
+  } catch (err) {
+    console.error(`Error reading fallback data for ${tableName}:`, err);
+    return [];
+  }
+}
+
+function writeFallbackData(tableName, data) {
+  try {
+    const filePath = getFallbackFile(tableName);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error(`Error writing fallback data for ${tableName}:`, err);
+  }
+}
+
+function matchFilter(doc, filter) {
+  if (!filter || Object.keys(filter).length === 0) return true;
+  
+  const cleanValue = (v) => {
+    if (v === null || v === undefined) return v;
+    if (typeof v === "object" && !(v instanceof Date) && !Array.isArray(v)) {
+      if (v._id) return String(v._id);
+      if (v.id) return String(v.id);
+      return String(v);
+    }
+    return v;
+  };
+
+  for (const [key, rawVal] of Object.entries(filter)) {
+    const val = cleanValue(rawVal);
+
+    if (key === "$or" && Array.isArray(val)) {
+      let matched = false;
+      for (const subFilter of val) {
+        if (matchFilter(doc, subFilter)) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) return false;
+      continue;
+    }
+
+    let docVal = doc[key];
+    if (docVal === undefined) {
+      if (key === "user" || key === "institute") {
+        docVal = doc.institute_id || doc.institute || doc.user;
+      } else if (key === "batch") {
+        docVal = doc.batch_id || doc.batch;
+      } else if (key === "student") {
+        docVal = doc.student_id || doc.student;
+      } else if (key === "batches") {
+        docVal = doc.batch_ids || doc.batches;
+      } else if (key === "students") {
+        docVal = doc.student_ids || doc.students;
+      }
+    }
+
+    docVal = cleanValue(docVal);
+
+    if (val === null) {
+      if (docVal !== null && docVal !== undefined) return false;
+    } else if (val instanceof Date) {
+      if (!docVal || new Date(docVal).getTime() !== val.getTime()) return false;
+    } else if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+      for (const [op, opVal] of Object.entries(val)) {
+        const cleanOpVal = cleanValue(opVal);
+        if (op === "$in" && Array.isArray(cleanOpVal)) {
+          if (Array.isArray(docVal)) {
+            const intersected = docVal.some(item => cleanOpVal.map(String).includes(String(cleanValue(item))));
+            if (!intersected) return false;
+          } else {
+            if (!cleanOpVal.map(String).includes(String(docVal))) return false;
+          }
+        } else if (op === "$nin" && Array.isArray(cleanOpVal)) {
+          if (Array.isArray(docVal)) {
+            const intersected = docVal.some(item => cleanOpVal.map(String).includes(String(cleanValue(item))));
+            if (intersected) return false;
+          } else {
+            if (cleanOpVal.map(String).includes(String(docVal))) return false;
+          }
+        } else if (op === "$gte") {
+          if (!(docVal >= cleanOpVal)) return false;
+        } else if (op === "$lte") {
+          if (!(docVal <= cleanOpVal)) return false;
+        } else if (op === "$gt") {
+          if (!(docVal > cleanOpVal)) return false;
+        } else if (op === "$lt") {
+          if (!(docVal < cleanOpVal)) return false;
+        } else if (op === "$ne") {
+          if (String(docVal) === String(cleanOpVal)) return false;
+        }
+      }
+    } else if (Array.isArray(val)) {
+      if (Array.isArray(docVal)) {
+        const intersected = docVal.some(item => val.map(String).includes(String(cleanValue(item))));
+        if (!intersected) return false;
+      } else {
+        if (!val.map(String).includes(String(docVal))) return false;
+      }
+    } else {
+      if (Array.isArray(docVal)) {
+        if (!docVal.map(item => String(cleanValue(item))).includes(String(val))) return false;
+      } else {
+        if (String(docVal) !== String(val)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function applyUpdateJson(doc, update) {
+  const payload = update.$set ? update.$set : update;
+  for (const [key, val] of Object.entries(payload)) {
+    if (key.startsWith("$")) continue;
+    doc[key] = val;
+    if (key === "institute_id") {
+      doc.user = val;
+      doc.institute = val;
+    }
+    if (key === "batch_id") doc.batch = val;
+    if (key === "teacher_id") doc.teacher = val;
+    if (key === "student_id") doc.student = val;
+  }
+  doc.updatedAt = new Date().toISOString();
+  if (doc.updated_at) doc.updated_at = doc.updatedAt;
+  return doc;
+}
 
 const camelToSnake = (str) => {
   if (str === "_id") return "id";
@@ -72,9 +286,50 @@ class SupabaseDocument {
     if (data.file_url !== undefined) this.pdfUrl = data.file_url;
     if (data.student_ids !== undefined) this.students = data.student_ids;
     if (data.batch_ids !== undefined) this.batches = data.batch_ids;
+
+    if (tableName === "institutes" && this._id) {
+      const metadata = readInstitutesMetadata();
+      const meta = metadata[this._id] || {};
+      this.flexibleDueDate = meta.flexibleDueDate ?? this.flexibleDueDate ?? false;
+      this.flexible_due_date = this.flexibleDueDate;
+      this.leadApiKey = meta.leadApiKey ?? this.leadApiKey ?? "";
+      this.lead_api_key = this.leadApiKey;
+      this.subscriptionHistory = meta.subscriptionHistory ?? this.subscriptionHistory ?? [];
+      this.subscription_history = this.subscriptionHistory;
+      this.studentCustomFields = meta.studentCustomFields ?? this.studentCustomFields ?? [];
+      this.student_custom_fields = this.studentCustomFields;
+      this.studentPortalEnabled = meta.studentPortalEnabled ?? this.studentPortalEnabled ?? true;
+      this.student_portal_enabled = this.studentPortalEnabled;
+    }
+
+    if (tableName === "students" && this._id) {
+      const metadata = readStudentMetadata();
+      const meta = metadata[this._id] || {};
+      this.customFields = meta.customFields ?? this.customFields ?? {};
+      this.custom_fields = this.customFields;
+    }
+
+    if (tableName === "batches" && this._id) {
+      const metadata = readBatchesMetadata();
+      const meta = metadata[this._id] || {};
+      this.status = meta.status ?? this.status ?? "active";
+    }
   }
 
   async save() {
+    if (MISSING_TABLES.has(this._tableName)) {
+      const fallbackData = readFallbackData(this._tableName);
+      const index = fallbackData.findIndex(doc => String(doc.id) === String(this._id) || String(doc._id) === String(this._id));
+      const plainObj = this.toObject();
+      if (index !== -1) {
+        fallbackData[index] = { ...fallbackData[index], ...plainObj };
+      } else {
+        fallbackData.push(plainObj);
+      }
+      writeFallbackData(this._tableName, fallbackData);
+      return this;
+    }
+
     if (this._tableName === "test_marks") {
       const realId = String(this.id).split("_")[0];
       const studentUuid = this.student || String(this.id).split("_")[1];
@@ -115,6 +370,23 @@ class SupabaseDocument {
       payload[dbKey] = this[key];
     }
 
+    if (this._tableName === "institutes") {
+      delete payload.flexible_due_date;
+      delete payload.lead_api_key;
+      delete payload.subscription_history;
+      delete payload.student_custom_fields;
+      delete payload.student_portal_enabled;
+    }
+
+    if (this._tableName === "students") {
+      delete payload.custom_fields;
+      delete payload.customFields;
+    }
+
+    if (this._tableName === "batches") {
+      delete payload.status;
+    }
+
     if (this._id) {
       payload.id = this._id;
     }
@@ -152,6 +424,31 @@ class SupabaseDocument {
         if (data) Object.assign(this, data);
         break;
       }
+      if (this._tableName === "institutes" && this._id) {
+        const metadata = readInstitutesMetadata();
+        metadata[this._id] = {
+          flexibleDueDate: this.flexibleDueDate ?? false,
+          leadApiKey: this.leadApiKey ?? "",
+          subscriptionHistory: this.subscriptionHistory ?? [],
+          studentCustomFields: this.studentCustomFields ?? [],
+          studentPortalEnabled: this.studentPortalEnabled ?? true
+        };
+        writeInstitutesMetadata(metadata);
+      }
+      if (this._tableName === "students" && this._id) {
+        const metadata = readStudentMetadata();
+        metadata[this._id] = {
+          customFields: this.customFields ?? {}
+        };
+        writeStudentMetadata(metadata);
+      }
+      if (this._tableName === "batches" && this._id) {
+        const metadata = readBatchesMetadata();
+        metadata[this._id] = {
+          status: this.status ?? "active"
+        };
+        writeBatchesMetadata(metadata);
+      }
       return this;
     } else {
       // Insert
@@ -187,6 +484,31 @@ class SupabaseDocument {
           this._id = data.id;
         }
         break;
+      }
+      if (this._tableName === "institutes" && this._id) {
+        const metadata = readInstitutesMetadata();
+        metadata[this._id] = {
+          flexibleDueDate: this.flexibleDueDate ?? false,
+          leadApiKey: this.leadApiKey ?? "",
+          subscriptionHistory: this.subscriptionHistory ?? [],
+          studentCustomFields: this.studentCustomFields ?? [],
+          studentPortalEnabled: this.studentPortalEnabled ?? true
+        };
+        writeInstitutesMetadata(metadata);
+      }
+      if (this._tableName === "students" && this._id) {
+        const metadata = readStudentMetadata();
+        metadata[this._id] = {
+          customFields: this.customFields ?? {}
+        };
+        writeStudentMetadata(metadata);
+      }
+      if (this._tableName === "batches" && this._id) {
+        const metadata = readBatchesMetadata();
+        metadata[this._id] = {
+          status: this.status ?? "active"
+        };
+        writeBatchesMetadata(metadata);
       }
       return this;
     }
@@ -237,8 +559,55 @@ class SupabaseQuery {
 
   async exec() {
     const tableName = this.model.tableName;
+
+    if (MISSING_TABLES.has(tableName)) {
+      const fallbackData = readFallbackData(tableName);
+      const currentFilter = { ...(this.args[0] || {}) };
+      let filtered = fallbackData.filter(doc => matchFilter(doc, currentFilter));
+
+      // Sort
+      if (this.sortFields) {
+        let field = typeof this.sortFields === "string" ? this.sortFields.replace(/^-/, "") : Object.keys(this.sortFields)[0];
+        if (field === "createdAt") field = "created_at";
+        if (field === "updatedAt") field = "updated_at";
+        
+        const desc = typeof this.sortFields === "string" ? this.sortFields.startsWith("-") : this.sortFields[field] === -1;
+        filtered.sort((a, b) => {
+          const valA = a[field] !== undefined ? a[field] : a._id;
+          const valB = b[field] !== undefined ? b[field] : b._id;
+          if (valA < valB) return desc ? 1 : -1;
+          if (valA > valB) return desc ? -1 : 1;
+          return 0;
+        });
+      }
+
+      // Limit
+      if (this.limitVal !== null) {
+        filtered = filtered.slice(0, this.limitVal);
+      }
+
+      const docs = filtered.map(row => new SupabaseDocument(tableName, row, this.model));
+      await this.resolvePopulations(docs);
+
+      if (this.queryType === "findOne" || this.queryType === "findById") {
+        return docs[0] || null;
+      }
+      return docs;
+    }
+
     let attempt = 0;
     const currentFilter = { ...(this.args[0] || {}) };
+
+    if (tableName === "institutes" && (currentFilter.leadApiKey || currentFilter.lead_api_key)) {
+      const keyToFind = currentFilter.leadApiKey || currentFilter.lead_api_key;
+      const metadata = readInstitutesMetadata();
+      const instId = Object.keys(metadata).find(id => metadata[id].leadApiKey === keyToFind);
+      if (instId) {
+        currentFilter.id = instId;
+        delete currentFilter.leadApiKey;
+        delete currentFilter.lead_api_key;
+      }
+    }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {
       if (currentFilter[key] && typeof currentFilter[key] === "string" && currentFilter[key].length === 36) {
@@ -643,7 +1012,7 @@ class SupabaseModel {
           } else if (op === "$ne") {
             q = q.neq(dbKey, formattedVal);
           } else if (op === "$nin") {
-            q = q.not(dbKey, "in", `(${formattedVal.map(v => typeof v === 'string' ? `'${v}'` : v).join(",")})`);
+            q = q.not(dbKey, "in", `(${formattedVal.map(v => String(v)).join(",")})`);
           }
         }
       } else {
@@ -675,6 +1044,38 @@ class SupabaseModel {
   }
 
   async create(doc) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const data = Array.isArray(doc) ? doc : [doc];
+      const fallbackData = readFallbackData(this.tableName);
+      const createdDocs = [];
+
+      for (const item of data) {
+        const docId = crypto.randomUUID();
+        const newItem = {
+          id: docId,
+          _id: docId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...item
+        };
+        if (newItem.institute_id) {
+          newItem.user = newItem.institute_id;
+          newItem.institute = newItem.institute_id;
+        }
+        if (newItem.user) {
+          newItem.institute_id = newItem.user;
+          newItem.institute = newItem.user;
+        }
+        fallbackData.push(newItem);
+        createdDocs.push(new SupabaseDocument(this.tableName, newItem, this));
+      }
+
+      writeFallbackData(this.tableName, fallbackData);
+      return Array.isArray(doc) ? createdDocs : createdDocs[0];
+    }
+
     if (Array.isArray(doc)) {
       const results = [];
       for (const item of doc) {
@@ -689,6 +1090,19 @@ class SupabaseModel {
       if (key.startsWith("_")) continue;
       const dbKey = camelToSnake(key);
       payload[dbKey] = val;
+    }
+
+    if (this.tableName === "institutes") {
+      delete payload.flexible_due_date;
+      delete payload.lead_api_key;
+      delete payload.subscription_history;
+      delete payload.student_custom_fields;
+      delete payload.student_portal_enabled;
+    }
+
+    if (this.tableName === "students") {
+      delete payload.custom_fields;
+      delete payload.customFields;
     }
 
     let attempt = 0;
@@ -753,6 +1167,26 @@ class SupabaseModel {
       }
     }
 
+    if (this.tableName === "institutes" && data) {
+      const metadata = readInstitutesMetadata();
+      metadata[data.id] = {
+        flexibleDueDate: doc.flexibleDueDate ?? false,
+        leadApiKey: doc.leadApiKey ?? "",
+        subscriptionHistory: doc.subscriptionHistory ?? [],
+        studentCustomFields: doc.studentCustomFields ?? [],
+        studentPortalEnabled: doc.studentPortalEnabled ?? true
+      };
+      writeInstitutesMetadata(metadata);
+    }
+
+    if (this.tableName === "students" && data) {
+      const metadata = readStudentMetadata();
+      metadata[data.id] = {
+        customFields: doc.customFields ?? {}
+      };
+      writeStudentMetadata(metadata);
+    }
+
     return new SupabaseDocument(this.tableName, data, this);
   }
 
@@ -761,6 +1195,25 @@ class SupabaseModel {
   }
 
   async updateOne(filter = {}, update = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      let matchedCount = 0;
+      let modifiedCount = 0;
+
+      for (const doc of fallbackData) {
+        if (matchFilter(doc, filter)) {
+          applyUpdateJson(doc, update);
+          matchedCount++;
+          modifiedCount++;
+        }
+      }
+
+      if (modifiedCount > 0) {
+        writeFallbackData(this.tableName, fallbackData);
+      }
+      return { matchedCount, modifiedCount };
+    }
+
     const payload = update.$set ? update.$set : update;
     const dbPayload = {};
     for (const [key, val] of Object.entries(payload)) {
@@ -782,6 +1235,25 @@ class SupabaseModel {
   }
 
   async deleteOne(filter = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      const remaining = [];
+      let deletedCount = 0;
+
+      for (const doc of fallbackData) {
+        if (matchFilter(doc, filter)) {
+          deletedCount++;
+        } else {
+          remaining.push(doc);
+        }
+      }
+
+      if (deletedCount > 0) {
+        writeFallbackData(this.tableName, remaining);
+      }
+      return { deletedCount };
+    }
+
     if (this.tableName === "test_marks" && filter._id && String(filter._id).includes("_")) {
       const [realId, studentUuid] = String(filter._id).split("_");
       
@@ -833,6 +1305,16 @@ class SupabaseModel {
   }
 
   async findByIdAndUpdate(id, update = {}, options = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      const index = fallbackData.findIndex(doc => String(doc.id) === String(id) || String(doc._id) === String(id));
+      if (index === -1) return null;
+
+      const updated = applyUpdateJson(fallbackData[index], update);
+      writeFallbackData(this.tableName, fallbackData);
+      return new SupabaseDocument(this.tableName, updated, this);
+    }
+
     const payload = update.$set ? update.$set : update;
     const dbPayload = {};
     for (const [key, val] of Object.entries(payload)) {
@@ -856,6 +1338,16 @@ class SupabaseModel {
   }
 
   async findByIdAndDelete(id) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      const index = fallbackData.findIndex(doc => String(doc.id) === String(id) || String(doc._id) === String(id));
+      if (index === -1) return null;
+
+      const [deleted] = fallbackData.splice(index, 1);
+      writeFallbackData(this.tableName, fallbackData);
+      return new SupabaseDocument(this.tableName, deleted, this);
+    }
+
     const { data, error } = await this.supabase
       .from(this.tableName)
       .delete()
@@ -872,6 +1364,16 @@ class SupabaseModel {
   }
 
   async findOneAndDelete(filter = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      const index = fallbackData.findIndex(doc => matchFilter(doc, filter));
+      if (index === -1) return null;
+
+      const [deleted] = fallbackData.splice(index, 1);
+      writeFallbackData(this.tableName, fallbackData);
+      return new SupabaseDocument(this.tableName, deleted, this);
+    }
+
     let query = this.supabase.from(this.tableName).delete();
     query = this.applyFilters(query, filter);
     const { data, error } = await query.select().maybeSingle();
@@ -885,8 +1387,25 @@ class SupabaseModel {
   }
 
   async countDocuments(filter = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      const filtered = fallbackData.filter(doc => matchFilter(doc, filter));
+      return filtered.length;
+    }
+
     let attempt = 0;
     const currentFilter = { ...filter };
+
+    if (this.tableName === "institutes" && (currentFilter.leadApiKey || currentFilter.lead_api_key)) {
+      const keyToFind = currentFilter.leadApiKey || currentFilter.lead_api_key;
+      const metadata = readInstitutesMetadata();
+      const instId = Object.keys(metadata).find(id => metadata[id].leadApiKey === keyToFind);
+      if (instId) {
+        currentFilter.id = instId;
+        delete currentFilter.leadApiKey;
+        delete currentFilter.lead_api_key;
+      }
+    }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {
       if (currentFilter[key] && typeof currentFilter[key] === "string" && currentFilter[key].length === 36) {
@@ -1047,19 +1566,31 @@ const mockMongoose = {
     else if (modelName === "SystemMetric") tableName = "system_metrics";
     else if (modelName === "Notice") tableName = "notices";
     else if (modelName === "SystemLog") tableName = "system_logs";
+    else if (modelName === "Lead") tableName = "leads";
+    else if (modelName === "LeadForm") tableName = "lead_forms";
     else tableName = modelName.toLowerCase() + "s";
 
     return new SupabaseModel(tableName);
   },
   Types: {
-    ObjectId: class ObjectId {
-      constructor(val) {
-        return val;
+    ObjectId: (function() {
+      function ObjectId(val) {
+        if (!(this instanceof ObjectId)) {
+          return val;
+        }
+        this.value = val;
       }
-      static isValid(val) {
+      ObjectId.prototype.toString = function() {
+        return this.value;
+      };
+      ObjectId.prototype.valueOf = function() {
+        return this.value;
+      };
+      ObjectId.isValid = function(val) {
         return typeof val === "string" && val.length > 0;
-      }
-    }
+      };
+      return ObjectId;
+    })()
   }
 };
 

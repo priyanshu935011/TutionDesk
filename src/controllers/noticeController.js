@@ -138,10 +138,15 @@ export const getNotices = async (req, res) => {
 
 export const getStudentNotices = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const studentBatchId = req.user.batch?._id || req.user.batch;
+    const student = req.student || req.user;
+    if (!student) {
+      return res.status(401).json({ message: "Student not authorized" });
+    }
+    const instituteId = student.institute?._id || student.institute || student.user;
+    const studentBatchId = student.batch?._id || student.batch;
 
-    const cacheKey = `student:notices:${req.user._id}`;
+    const studentId = student._id || student.id;
+    const cacheKey = `student:notices:${studentId}`;
     const cached = await getCache(cacheKey);
     if (cached && req.query.nocache !== "true") {
       return res.json(cached);
@@ -161,6 +166,7 @@ export const getStudentNotices = async (req, res) => {
     await setCache(cacheKey, relevantNotices, 86400);
     return res.json(relevantNotices);
   } catch (error) {
+    console.error("getStudentNotices error:", error);
     return res.status(500).json({ message: "Could not fetch student notices" });
   }
 };

@@ -118,8 +118,19 @@ export const getTeacherDashboard = async (req, res) => {
     let totalCollectedFees = 0;
     let totalPendingFees = 0;
     if (req.user.role === "institute_admin") {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth();
+
       for (const student of students) {
-        totalCollectedFees += Number(student.paidAmount || 0);
+        let collectedThisMonth = 0;
+        for (const payment of student.paymentHistory || []) {
+          const pDate = new Date(payment.paymentDate);
+          if (pDate.getFullYear() === currentYear && pDate.getMonth() === currentMonth) {
+            collectedThisMonth += Number(payment.amount || 0);
+          }
+        }
+        totalCollectedFees += collectedThisMonth;
         const pending = Number(student.pendingAmount ?? (Number(student.totalFees || 0) - Number(student.paidAmount || 0)));
         totalPendingFees += pending > 0 ? pending : 0;
       }
@@ -585,7 +596,11 @@ export const deleteNote = async (req, res) => {
 export const getTestResults = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const results = await TestResult.find({ institute: instituteId })
+    const query = { institute: instituteId };
+    if (req.query.studentId) {
+      query.student = req.query.studentId;
+    }
+    const results = await TestResult.find(query)
       .sort({ createdAt: -1 })
       .populate("student", "name enrollmentNumber email");
     return res.json(results);
@@ -597,18 +612,19 @@ export const getTestResults = async (req, res) => {
 export const createTestResult = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { studentId, title, score, totalMarks, examDate, remarks } = req.body;
+    const { studentId, title, score, totalMarks, examDate, remarks, subject } = req.body;
 
     if (
       !studentId ||
       !title ||
       score === undefined ||
       totalMarks === undefined ||
-      !examDate
+      !examDate ||
+      !subject
     ) {
       return res
         .status(400)
-        .json({ message: "All test result fields are required" });
+        .json({ message: "All test result fields are required, including subject" });
     }
 
     const result = await TestResult.create({
@@ -620,6 +636,7 @@ export const createTestResult = async (req, res) => {
       totalMarks: Number(totalMarks),
       examDate,
       remarks: remarks || "",
+      subject: subject.trim(),
     });
 
     await deleteCache(`teacher:dashboard:${req.user._id}`);
@@ -637,7 +654,7 @@ export const createTestResult = async (req, res) => {
 export const createTestResultsBulk = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { batchId, title, examDate, totalMarks, entries = [], sendWhatsApp = false } = req.body;
+    const { batchId, title, examDate, totalMarks, entries = [], sendWhatsApp = false, subject } = req.body;
 
     if (
       !batchId ||
@@ -645,11 +662,12 @@ export const createTestResultsBulk = async (req, res) => {
       !examDate ||
       totalMarks === undefined ||
       !Array.isArray(entries) ||
-      !entries.length
+      !entries.length ||
+      !subject
     ) {
       return res.status(400).json({
         message:
-          "Batch, title, date, total marks, and at least one student mark are required",
+          "Batch, title, date, total marks, subject, and at least one student mark are required",
       });
     }
 
@@ -685,6 +703,7 @@ export const createTestResultsBulk = async (req, res) => {
       totalMarks: Number(totalMarks),
       examDate,
       remarks: entry.remarks || "",
+      subject: subject.trim(),
     }));
 
     const createdResults = await TestResult.insertMany(payload);
@@ -764,6 +783,8 @@ export const createHiredTeacher = async (req, res) => {
     }
 
     const instituteId = req.user.institute?._id || req.user.institute;
+    const institute = await Institute.findById(instituteId);
+
     if (!institute) {
       return res.status(404).json({ message: "Institute not found" });
     }

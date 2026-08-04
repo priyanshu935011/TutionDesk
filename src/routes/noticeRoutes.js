@@ -1,5 +1,6 @@
 import express from "express";
 import protect from "../middleware/authMiddleware.js";
+import protectStudent from "../middleware/studentAuthMiddleware.js";
 import {
   createNotice,
   getNotices,
@@ -9,11 +10,12 @@ import {
 
 const router = express.Router();
 
-router.use(protect);
+// Teacher / Admin routes
+router.get("/", protect, getNotices);
+router.post("/", protect, createNotice);
+router.delete("/:id", protect, deleteNotice);
 
-router.get("/", getNotices);
-router.post("/", createNotice);
-router.get("/student", getStudentNotices);
-router.delete("/:id", deleteNotice);
+// Student route
+router.get("/student", protectStudent, getStudentNotices);
 
 export default router;

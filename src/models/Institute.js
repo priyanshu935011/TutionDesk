@@ -77,6 +77,14 @@ const instituteSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    studentCustomFields: {
+      type: Array,
+      default: [],
+    },
+    studentPortalEnabled: {
+      type: Boolean,
+      default: true,
+    },
     leadApiKey: {
       type: String,
       default: "",

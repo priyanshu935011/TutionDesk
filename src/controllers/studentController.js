@@ -8,7 +8,7 @@ import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
 import bcrypt from "bcryptjs";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
-import { sendMessage } from "../services/whatsappService.js";
+import { sendMessage, sendDocument } from "../services/whatsappService.js";
 import { getCredentialsTemplate, formatCredentialsMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 
@@ -118,10 +118,22 @@ export const getStudents = async (req, res) => {
 
     const query = { user: ownerId };
 
+    // Fetch all batches for this institute and filter by status in-memory
+    // NOTE: 'status' is stored in local batches_metadata.json (not in DB), so DB-level
+    // filtering on 'status' silently strips the filter and returns ALL batches. We must
+    // fetch all and then filter after the status field is hydrated from metadata.
+    const allBatches = await Batch.find({ user: ownerId }).select("_id status teacher");
+    const archivedBatchIds = allBatches.filter((b) => b.status === "archived").map((b) => b._id);
+
     if (req.user.role === "teacher") {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => b._id);
+      const batchIds = allBatches
+        .filter((b) => b.status !== "archived" && String(b.teacher) === String(req.user._id))
+        .map((b) => b._id);
       query.batch = { $in: batchIds };
+    } else {
+      if (archivedBatchIds.length > 0) {
+        query.batch = { $nin: archivedBatchIds };
+      }
     }
 
     const students = await populateStudent(
@@ -147,6 +159,7 @@ export const getStudents = async (req, res) => {
     await setCache(cacheKey, result, 86400);
     return res.json(result);
   } catch (error) {
+    console.error("getStudents catch block error:", error);
     return res.status(500).json({ message: "Could not fetch students" });
   }
 };
@@ -293,6 +306,9 @@ export const createStudent = async (req, res) => {
       }
     }
 
+    const inst = await Institute.findById(ownerId);
+    const portalEnabled = inst?.studentPortalEnabled !== false;
+
     // Find existing student by email/phone to reuse password and enrollmentNumber
     let enrollmentNumberToUse;
     let hashedPasswordToUse;
@@ -308,11 +324,23 @@ export const createStudent = async (req, res) => {
 
     if (existingStudent) {
       enrollmentNumberToUse = existingStudent.enrollmentNumber;
-      hashedPasswordToUse = existingStudent.password;
+      hashedPasswordToUse = portalEnabled ? existingStudent.password : "";
     } else {
       enrollmentNumberToUse = await generateEnrollmentNumber(ownerId);
-      const initialPassword = getInitialPassword(name, phone);
-      hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
+      if (portalEnabled) {
+        const initialPassword = getInitialPassword(name, phone);
+        hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
+      } else {
+        hashedPasswordToUse = "";
+      }
+    }
+
+    const customFields = req.body.customFields || {};
+    const customFieldConfigs = inst?.studentCustomFields || [];
+    for (const field of customFieldConfigs) {
+      if (req.body[field.name] !== undefined) {
+        customFields[field.name] = req.body[field.name];
+      }
     }
 
     const createdStudents = [];
@@ -341,6 +369,7 @@ export const createStudent = async (req, res) => {
         paymentHistory: currentPaymentHistory,
         attendanceRecords: i === 0 ? attendanceRecords : [],
         password: hashedPasswordToUse,
+        customFields: i === 0 ? customFields : {},
       });
 
       const populatedStudent = await populateStudent(Student.findById(student._id));
@@ -358,7 +387,7 @@ export const createStudent = async (req, res) => {
 
     // Send WhatsApp login credentials if option requested
     const plainPassword = req.body.password || getInitialPassword(name, phone);
-    if (req.body.sendWhatsApp) {
+    if (req.body.sendWhatsApp && portalEnabled) {
       setImmediate(async () => {
         try {
           const instituteId = req.user.institute?._id || req.user.institute;
@@ -425,6 +454,7 @@ export const updateStudent = async (req, res) => {
       dueDate,
       paymentHistory = [],
       attendanceRecords = [],
+      customFields,
     } = req.body;
 
     const targetBatches = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
@@ -531,6 +561,7 @@ export const updateStudent = async (req, res) => {
         paymentHistory: [],
         attendanceRecords: [],
         password: initialPassword,
+        customFields: {},
       });
     }
 
@@ -540,6 +571,15 @@ export const updateStudent = async (req, res) => {
       user: ownerId,
       batch: { $in: targetBatchIds },
     });
+
+    const inst = await Institute.findById(ownerId);
+    const customFieldsObj = customFields || {};
+    const customFieldConfigs = inst?.studentCustomFields || [];
+    for (const field of customFieldConfigs) {
+      if (req.body[field.name] !== undefined) {
+        customFieldsObj[field.name] = req.body[field.name];
+      }
+    }
 
     for (let i = 0; i < remainingRecords.length; i++) {
       const rec = remainingRecords[i];
@@ -556,10 +596,12 @@ export const updateStudent = async (req, res) => {
         rec.totalFees = total;
         rec.paymentHistory = paymentHistory;
         rec.dueDate = resolveDueDate({ feePlanType, joinedOn, dueDate });
+        rec.customFields = customFieldsObj;
       } else {
         rec.totalFees = 0;
         rec.paymentHistory = [];
         rec.dueDate = null;
+        rec.customFields = {};
       }
       await rec.save();
     }
@@ -1226,8 +1268,13 @@ export const bulkCreateStudents = async (req, res) => {
       created: []
     };
 
+    const ownerId = req.user.institute?._id || req.user.institute || req.user._id;
+    const inst = await Institute.findById(ownerId);
+    const portalEnabled = inst?.studentPortalEnabled !== false;
+    const customFieldConfigs = inst?.studentCustomFields || [];
+
     // Cache batches for this user to avoid excessive DB queries
-    const userBatches = await Batch.find({ user: req.user._id });
+    const userBatches = await Batch.find({ user: ownerId });
     const batchMap = new Map();
     userBatches.forEach(b => {
       batchMap.set(b.name.toLowerCase().trim(), b._id);
@@ -1280,7 +1327,7 @@ export const bulkCreateStudents = async (req, res) => {
 
         // Check if student is already enrolled in this exact batch at this institute
         const alreadyEnrolled = await Student.findOne({
-          user: req.user._id,
+          user: ownerId,
           name: { $regex: new RegExp(`^${cleanName}$`, "i") },
           batch: batchId,
           $or: [
@@ -1306,11 +1353,24 @@ export const bulkCreateStudents = async (req, res) => {
 
         if (existingStudent) {
           enrollmentNumberToUse = existingStudent.enrollmentNumber;
-          hashedPasswordToUse = existingStudent.password;
+          hashedPasswordToUse = portalEnabled ? existingStudent.password : "";
         } else {
-          enrollmentNumberToUse = await generateEnrollmentNumber(req.user._id);
-          const initialPassword = getInitialPassword(name, phone);
-          hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
+          enrollmentNumberToUse = await generateEnrollmentNumber(ownerId);
+          if (portalEnabled) {
+            const initialPassword = getInitialPassword(name, phone);
+            hashedPasswordToUse = await bcrypt.hash(initialPassword, 10);
+          } else {
+            hashedPasswordToUse = "";
+          }
+        }
+
+        // Extract custom fields values
+        const customFields = {};
+        for (const field of customFieldConfigs) {
+          let val = row[field.name] ?? row[field.label] ?? undefined;
+          if (val !== undefined) {
+            customFields[field.name] = String(val).trim();
+          }
         }
 
         // Determine if fees are paid or unpaid (defaults to unpaid)
@@ -1328,7 +1388,7 @@ export const bulkCreateStudents = async (req, res) => {
         }
 
         const student = await Student.create({
-          user: req.user._id,
+          user: ownerId,
           name,
           phone,
           parentName,
@@ -1344,6 +1404,7 @@ export const bulkCreateStudents = async (req, res) => {
           paymentHistory,
           attendanceRecords: [],
           password: hashedPasswordToUse,
+          customFields,
         });
 
         results.successCount++;
@@ -1353,7 +1414,7 @@ export const bulkCreateStudents = async (req, res) => {
           phone: student.phone,
           parentPhone: student.parentPhone,
           enrollmentNumber: student.enrollmentNumber,
-          plainPassword: getInitialPassword(name, phone),
+          plainPassword: portalEnabled ? getInitialPassword(name, phone) : "",
         });
       } catch (err) {
         results.failCount++;
@@ -1487,6 +1548,40 @@ export const getQuizLeaderboard = async (req, res) => {
   } catch (error) {
     console.error("getQuizLeaderboard error:", error);
     return res.status(500).json({ message: "Could not fetch leaderboard" });
+  }
+};
+
+export const sendPaymentReceiptWhatsApp = async (req, res) => {
+  try {
+    const { id, paymentId } = req.params;
+    const instituteId = req.user.institute?._id || req.user.institute;
+
+    if (!req.file) {
+      return res.status(400).json({ message: "PDF document file is required" });
+    }
+
+    const student = await Student.findOne({ _id: id, user: req.user._id });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const targetPhone = (student.parentPhone && student.parentPhone.trim()) ? student.parentPhone.trim() : student.phone;
+    if (!targetPhone) {
+      return res.status(400).json({ message: "Student has no phone number configured" });
+    }
+
+    const inst = await Institute.findById(instituteId);
+    const instName = inst?.name || "TuitionDesk";
+
+    const fileName = `Fee_Receipt_${paymentId.substring(0, 8)}.pdf`;
+    const caption = `📄 *Fee Receipt Sent - ${instName}*\nDear Parent/Student, please find attached the fee receipt for your recorded payment.\n\nThank you!`;
+
+    await sendDocument(String(instituteId), targetPhone, req.file.buffer, fileName, caption);
+
+    return res.json({ success: true, message: "Receipt PDF sent successfully via WhatsApp!" });
+  } catch (error) {
+    console.error("sendPaymentReceiptWhatsApp error:", error);
+    return res.status(500).json({ message: error.message || "Could not send receipt PDF via WhatsApp" });
   }
 };
 

@@ -49,6 +49,10 @@ const leadSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    leadFormId: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,

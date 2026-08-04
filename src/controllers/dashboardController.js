@@ -3,9 +3,19 @@ import Batch from "../models/Batch.js";
 
 export const getDashboard = async (req, res) => {
   try {
-    const [students, totalBatches] = await Promise.all([
-      Student.find({ user: req.user._id }).populate("batch", "name"),
-      Batch.countDocuments({ user: req.user._id }),
+    // NOTE: 'status' is NOT a real DB column — it's stored in local batches_metadata.json.
+    // DB-level filters on 'status' get silently stripped. Fetch all and filter in-memory.
+    const allBatches = await Batch.find({ user: req.user._id }).select("_id status");
+    const archivedBatchIds = allBatches.filter((b) => b.status === "archived").map((b) => b._id);
+    const activeBatchCount = allBatches.filter((b) => b.status !== "archived").length;
+
+    const studentQuery = { user: req.user._id };
+    if (archivedBatchIds.length > 0) {
+      studentQuery.batch = { $nin: archivedBatchIds };
+    }
+
+    const [students] = await Promise.all([
+      Student.find(studentQuery).populate("batch", "name"),
     ]);
 
     const summary = students.reduce(
@@ -32,7 +42,7 @@ export const getDashboard = async (req, res) => {
       }
     );
 
-    summary.totalBatches = totalBatches;
+    summary.totalBatches = activeBatchCount;
     summary.attendanceRate = summary.totalAttendanceMarked
       ? Math.round((summary.totalPresent / summary.totalAttendanceMarked) * 100)
       : 0;

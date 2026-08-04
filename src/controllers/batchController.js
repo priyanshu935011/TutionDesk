@@ -57,8 +57,10 @@ export const createBatch = async (req, res) => {
       return res.status(400).json({ message: "Batch name and schedule time are required" });
     }
 
+    // Use institute ID (not user ID) to satisfy the institute_id FK constraint in Supabase
+    const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
     const batch = await Batch.create({
-      user: req.user._id,
+      user: instituteId,
       name,
       scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
       startTime,
@@ -69,9 +71,11 @@ export const createBatch = async (req, res) => {
     const populated = await Batch.findById(batch._id).populate("teacher", "name email");
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("teacher:batches:*");
     return res.status(201).json(populated);
   } catch (error) {
-    return res.status(500).json({ message: "Could not create batch" });
+    console.error("createBatch error:", error);
+    return res.status(500).json({ message: error.message || "Could not create batch" });
   }
 };
 
@@ -81,16 +85,23 @@ export const updateBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot modify batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, status } = req.body;
+    
+    const updateData = {
+      name,
+      scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
+      startTime,
+      endTime,
+      teacher: (teacher && teacher !== "") ? teacher : null,
+    };
+    
+    if (status !== undefined) {
+      updateData.status = status;
+    }
+
     const batch = await Batch.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id },
-      {
-        name,
-        scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
-        startTime,
-        endTime,
-        teacher: (teacher && teacher !== "") ? teacher : null,
-      },
+      updateData,
       { new: true, runValidators: true }
     ).populate("teacher", "name email");
 
@@ -100,7 +111,7 @@ export const updateBatch = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
-
+    await clearCachePattern("teacher:batches:*");
     return res.json(batch);
   } catch (error) {
     return res.status(500).json({ message: "Could not update batch" });
@@ -184,6 +195,7 @@ export const deleteBatch = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("teacher:batches:*");
 
     return res.json({ message: "Batch and associated student records deleted successfully" });
   } catch (error) {
@@ -191,4 +203,3 @@ export const deleteBatch = async (req, res) => {
     return res.status(500).json({ message: "Could not delete batch" });
   }
 };
-
