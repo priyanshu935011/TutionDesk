@@ -24,6 +24,8 @@ import {
   updateTuitionWebsite,
   getWhatsAppCredentialsTemplate,
   updateWhatsAppCredentialsTemplate,
+  getMetaWhatsAppSettings,
+  updateMetaWhatsAppSettings,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import superAdminOnly from "../middleware/superAdminMiddleware.js";
@@ -40,6 +42,9 @@ router.delete("/system-logs", clearSystemLogs);
 
 router.get("/whatsapp-template", getWhatsAppCredentialsTemplate);
 router.put("/whatsapp-template", updateWhatsAppCredentialsTemplate);
+
+router.get("/whatsapp-settings", getMetaWhatsAppSettings);
+router.put("/whatsapp-settings", updateMetaWhatsAppSettings);
 
 router.get("/demo-accounts", getDemoAccounts);
 router.post("/demo-accounts", createDemoAccount);

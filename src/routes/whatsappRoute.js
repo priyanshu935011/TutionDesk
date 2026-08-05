@@ -70,7 +70,7 @@ router.post("/settings", async (req, res) => {
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
-    const { absentAlertsEnabled, feeRemindersEnabled, feeReminderDaysBefore, customMessageTemplate, feeReminderTemplate } = req.body;
+    const { absentAlertsEnabled, feeRemindersEnabled, feeReminderDaysBefore, customMessageTemplate, feeReminderTemplate, sendCredentialsEnabled } = req.body;
     const inst = await Institute.findById(instituteId);
     if (!inst) {
       return res.status(404).json({ message: "Institute not found." });
@@ -82,6 +82,7 @@ router.post("/settings", async (req, res) => {
       feeReminderDaysBefore: feeReminderDaysBefore !== undefined ? Number(feeReminderDaysBefore) : Number(inst.whatsappSettings?.feeReminderDaysBefore ?? 3),
       customMessageTemplate: customMessageTemplate !== undefined ? String(customMessageTemplate) : (inst.whatsappSettings?.customMessageTemplate || ""),
       feeReminderTemplate: feeReminderTemplate !== undefined ? String(feeReminderTemplate) : (inst.whatsappSettings?.feeReminderTemplate || "Dear {parentName}, this is a friendly reminder that INR {pendingAmount} is outstanding for student {studentName}'s tuition fee. Due date: {dueDate}. Thank you!"),
+      sendCredentialsEnabled: typeof sendCredentialsEnabled === "boolean" ? sendCredentialsEnabled : Boolean(inst.whatsappSettings?.sendCredentialsEnabled),
     };
 
     inst.whatsappSettings = updatedSettings;

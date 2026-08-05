@@ -5,7 +5,7 @@ import User from "../models/User.js";
 import redisClient from "../config/redis.js";
 import { sendResetEmail, sendDemoRequestEmail } from "../utils/mailer.js";
 
-const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@tutiondesk.com").toLowerCase();
+const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@classtech.com").toLowerCase();
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
 
 const generateToken = (payload) =>

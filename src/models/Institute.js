@@ -103,6 +103,18 @@ const instituteSchema = new mongoose.Schema(
         type: String,
         default: "Dear Parent, your child {studentName} was marked absent on {date}.",
       },
+      feeReminderTemplate: {
+        type: String,
+        default: "Dear {parentName}, this is a friendly reminder that INR {pendingAmount} is outstanding for student {studentName}'s tuition fee. Due date: {dueDate}. Thank you!",
+      },
+      feeReminderDaysBefore: {
+        type: Number,
+        default: 3,
+      },
+      sendCredentialsEnabled: {
+        type: Boolean,
+        default: false,
+      }
     },
     websiteConfig: {
       enabled: {

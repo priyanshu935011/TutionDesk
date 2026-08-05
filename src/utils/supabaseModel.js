@@ -1563,7 +1563,7 @@ const mockMongoose = {
     else if (modelName === "QuizAttempt") tableName = "quiz_attempts";
     else if (modelName === "TestResult") tableName = "test_marks";
     else if (modelName === "UptimeEvent") tableName = "uptime_events";
-    else if (modelName === "SystemMetric") tableName = "system_metrics";
+    else if (modelName === "SystemMetric" || modelName === "SystemSetting") tableName = "system_metrics";
     else if (modelName === "Notice") tableName = "notices";
     else if (modelName === "SystemLog") tableName = "system_logs";
     else if (modelName === "Lead") tableName = "leads";

@@ -2,7 +2,7 @@ import SystemSetting from "../models/SystemSetting.js";
 
 export const DEFAULT_CREDENTIALS_TEMPLATE = `Welcome to {institute_name}! 🎓
 
-Here are your login credentials for TuitionDesk Student Portal:
+Here are your login credentials for Classtech Student Portal:
 
 👤 *Student Name:* {student_name}
 🆔 *Login ID / Enrollment No:* {enrollment_number}
@@ -29,11 +29,11 @@ export const formatCredentialsMessage = ({
   enrollmentNumber = "",
   password = "",
   phone = "",
-  instituteName = "TuitionDesk",
+  instituteName = "Classtech",
   loginUrl = "",
 }) => {
   const tpl = template || DEFAULT_CREDENTIALS_TEMPLATE;
-  const baseUrl = loginUrl || process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app/student/login";
+  const baseUrl = loginUrl || process.env.FRONTEND_URL || "https://classtech.vercel.app/student/login";
 
   return tpl
     .replace(/\{student_name\}/gi, studentName)

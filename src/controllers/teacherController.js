@@ -28,7 +28,7 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         resource_type: "raw",
-        folder: "tutiondesk/notes",
+        folder: "classtech/notes",
         ...options,
       },
       (error, result) => {
@@ -753,7 +753,7 @@ export const createTestResultsBulk = async (req, res) => {
             const scoreNum = Number(entry.score || 0);
             const percentage = totalNum > 0 ? Math.round((scoreNum / totalNum) * 100) : 0;
 
-            const messageText = `📊 *Test Marks Alert - ${inst?.name || "TuitionDesk"}*\nStudent: *${student.name}*\nTest Title: *${title}*\nScore: *${scoreNum} / ${totalNum}* (${percentage}%)\nExam Date: *${formattedDate}*\n${entry.remarks ? `Remarks: ${entry.remarks}\n` : ""}Thank you!`;
+            const messageText = `📊 *Test Marks Alert - ${inst?.name || "Classtech"}*\nStudent: *${student.name}*\nTest Title: *${title}*\nScore: *${scoreNum} / ${totalNum}* (${percentage}%)\nExam Date: *${formattedDate}*\n${entry.remarks ? `Remarks: ${entry.remarks}\n` : ""}Thank you!`;
 
             try {
               await sendMessage(String(instituteId), targetPhone, messageText);
@@ -908,7 +908,7 @@ export const uploadBrandingLogo = async (req, res) => {
 
     const result = await uploadBufferToCloudinary(req.file.buffer, {
       resource_type: "image",
-      folder: "tutiondesk/logos",
+      folder: "classtech/logos",
     });
 
     return res.json({ logoUrl: result.secure_url });
@@ -931,7 +931,7 @@ export const updateBrandingSettings = async (req, res) => {
       instituteId,
       {
         brandingEnabled: brandingEnabled !== false,
-        name: name ? name.trim() : "TutionDesk",
+        name: name ? name.trim() : "Classtech",
         themeColor: themeColor || "#6366f1",
         logoUrl: logoUrl || null,
       },

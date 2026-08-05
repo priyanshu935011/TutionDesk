@@ -79,7 +79,7 @@ export const submitLead = async (req, res) => {
 📱 *Phone:* ${lead.phone}
 ${lead.email ? `📧 *Email:* ${lead.email}\n` : ""}${lead.course ? `📚 *Course Interest:* ${lead.course}\n` : ""}${lead.message ? `💬 *Message:* ${lead.message}\n` : ""}🌐 *Source:* ${lead.source}
 
-Log in to your TuitionDesk dashboard to view and follow up on this lead.`;
+Log in to your Classtech dashboard to view and follow up on this lead.`;
 
           await sendMessage(String(institute._id), adminPhone, alertMessage);
           console.log(`WhatsApp lead alert sent to institute (${adminPhone}) for lead ${lead.name}`);

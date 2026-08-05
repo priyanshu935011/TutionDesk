@@ -816,7 +816,7 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         resource_type: "image",
-        folder: "tutiondesk/logos",
+        folder: "classtech/logos",
         ...options,
       },
       (error, result) => {
@@ -1292,6 +1292,53 @@ export const updateWhatsAppCredentialsTemplate = async (req, res) => {
   } catch (error) {
     console.error("updateWhatsAppCredentialsTemplate error:", error);
     return res.status(500).json({ message: "Could not update WhatsApp template" });
+  }
+};
+
+export const getMetaWhatsAppSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "meta_whatsapp_settings" });
+    const settings = setting?.value || {
+      accessToken: "",
+      phoneNumberId: "",
+      businessAccountId: "",
+    };
+    return res.json(settings);
+  } catch (error) {
+    console.error("getMetaWhatsAppSettings error:", error);
+    return res.status(500).json({ message: "Could not fetch Meta WhatsApp settings" });
+  }
+};
+
+export const updateMetaWhatsAppSettings = async (req, res) => {
+  try {
+    const { accessToken, phoneNumberId, businessAccountId } = req.body;
+    
+    let setting = await SystemSetting.findOne({ key: "meta_whatsapp_settings" });
+    const updatedValue = {
+      accessToken: (accessToken || "").trim(),
+      phoneNumberId: (phoneNumberId || "").trim(),
+      businessAccountId: (businessAccountId || "").trim(),
+    };
+
+    if (setting) {
+      setting.value = updatedValue;
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "meta_whatsapp_settings",
+        value: updatedValue,
+        description: "Meta Cloud API credentials for sending WhatsApp notifications centrally"
+      });
+    }
+
+    return res.json({
+      message: "Meta WhatsApp settings updated successfully!",
+      settings: setting.value,
+    });
+  } catch (error) {
+    console.error("updateMetaWhatsAppSettings error:", error);
+    return res.status(500).json({ message: "Could not update Meta WhatsApp settings" });
   }
 };
 

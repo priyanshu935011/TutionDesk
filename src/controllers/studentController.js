@@ -7,6 +7,7 @@ import User from "../models/User.js";
 import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendMessage, sendDocument } from "../services/whatsappService.js";
 import { getCredentialsTemplate, formatCredentialsMessage } from "../utils/whatsappTemplateHelper.js";
@@ -350,7 +351,13 @@ export const createStudent = async (req, res) => {
       
       // Store full fees/payment on the first batch, 0 on the rest to maintain collective fee total
       const currentTotalFees = i === 0 ? total : 0;
-      const currentPaymentHistory = i === 0 ? paymentHistory : [];
+      const currentPaymentHistory = i === 0 ? paymentHistory.map(p => ({
+        _id: p._id || crypto.randomUUID(),
+        amount: Number(p.amount),
+        paymentDate: p.paymentDate,
+        paymentType: p.paymentType,
+        note: p.note || ""
+      })) : [];
 
       const student = await Student.create({
         user: ownerId,
@@ -392,7 +399,7 @@ export const createStudent = async (req, res) => {
         try {
           const instituteId = req.user.institute?._id || req.user.institute;
           const inst = await Institute.findById(instituteId);
-          const instituteName = inst?.name || "TuitionDesk";
+          const instituteName = inst?.name || "Classtech";
           const recipientPhone = parentPhone?.trim() || phone?.trim();
 
           if (recipientPhone) {
@@ -404,7 +411,7 @@ export const createStudent = async (req, res) => {
               password: plainPassword,
               phone,
               instituteName,
-              loginUrl: `${process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app"}/student/login`,
+              loginUrl: `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`,
             });
 
             await sendMessage(String(instituteId), recipientPhone, messageText);
@@ -594,7 +601,13 @@ export const updateStudent = async (req, res) => {
 
       if (i === 0) {
         rec.totalFees = total;
-        rec.paymentHistory = paymentHistory;
+        rec.paymentHistory = paymentHistory.map(p => ({
+          _id: p._id || crypto.randomUUID(),
+          amount: Number(p.amount),
+          paymentDate: p.paymentDate,
+          paymentType: p.paymentType,
+          note: p.note || ""
+        }));
         rec.dueDate = resolveDueDate({ feePlanType, joinedOn, dueDate });
         rec.customFields = customFieldsObj;
       } else {
@@ -706,7 +719,9 @@ export const addPayment = async (req, res) => {
       return res.status(400).json({ message: "Paid amount cannot be more than total fees" });
     }
 
+    const paymentId = crypto.randomUUID();
     student.paymentHistory.unshift({
+      _id: paymentId,
       amount: Number(amount),
       paymentDate,
       paymentType,
@@ -728,6 +743,7 @@ export const addPayment = async (req, res) => {
     // Direct insert into Supabase payments table
     try {
       await supabase.from("payments").insert({
+        id: paymentId,
         student_id: student._id,
         amount: Number(amount),
         payment_date: paymentDate,
@@ -1380,6 +1396,7 @@ export const bulkCreateStudents = async (req, res) => {
         const paymentHistory = [];
         if (cleanFeeStatus === "paid" && totalFees > 0) {
           paymentHistory.push({
+            _id: crypto.randomUUID(),
             amount: totalFees,
             paymentDate: new Date(joinedOn),
             paymentType: feePlanType,
@@ -1436,9 +1453,9 @@ export const bulkCreateStudents = async (req, res) => {
           try {
             const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
             const inst = await Institute.findById(instituteId);
-            const instituteName = inst?.name || "TuitionDesk";
+            const instituteName = inst?.name || "Classtech";
             const template = await getCredentialsTemplate();
-            const loginUrl = `${process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app"}/student/login`;
+            const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
 
             for (const item of createdItems) {
               const recipientPhone = item.parentPhone?.trim() || item.phone?.trim();
@@ -1489,7 +1506,7 @@ export const sendStudentCredentialsWhatsApp = async (req, res) => {
 
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
     const inst = await Institute.findById(instituteId);
-    const instituteName = inst?.name || "TuitionDesk";
+    const instituteName = inst?.name || "Classtech";
     const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
 
     if (!recipientPhone) {
@@ -1498,7 +1515,7 @@ export const sendStudentCredentialsWhatsApp = async (req, res) => {
 
     const template = await getCredentialsTemplate();
     const plainPassword = getInitialPassword(student.name, student.phone);
-    const loginUrl = `${process.env.FRONTEND_URL || "https://tuitiondesk.vercel.app"}/student/login`;
+    const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
 
     const messageText = formatCredentialsMessage({
       template,
@@ -1571,7 +1588,7 @@ export const sendPaymentReceiptWhatsApp = async (req, res) => {
     }
 
     const inst = await Institute.findById(instituteId);
-    const instName = inst?.name || "TuitionDesk";
+    const instName = inst?.name || "Classtech";
 
     const fileName = `Fee_Receipt_${paymentId.substring(0, 8)}.pdf`;
     const caption = `📄 *Fee Receipt Sent - ${instName}*\nDear Parent/Student, please find attached the fee receipt for your recorded payment.\n\nThank you!`;

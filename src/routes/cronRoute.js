@@ -58,7 +58,7 @@ router.post("/fee-reminders", async (req, res) => {
             .replace(/\{parentName\}/g, student.parentName || "Parent")
             .replace(/\{pendingAmount\}/g, String(pending))
             .replace(/\{dueDate\}/g, formattedDueDate)
-            .replace(/\{instituteName\}/g, inst.name || "TuitionDesk");
+            .replace(/\{instituteName\}/g, inst.name || "Classtech");
 
           try {
             await sendMessage(instId, targetPhone, text);

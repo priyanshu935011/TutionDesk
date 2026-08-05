@@ -5,9 +5,9 @@ export const sendResetEmail = async (email, name, resetLink) => {
   const port = process.env.SMTP_PORT || 587;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  let from = process.env.SMTP_FROM || `"TutionDesk" <support@tutiondesk.in>`;
-  if (from.includes("tuitiondesk.in")) {
-    from = from.replace("tuitiondesk.in", "tutiondesk.in");
+  let from = process.env.SMTP_FROM || `"Classtech" <support@classtech.in>`;
+  if (from.includes("classtech.in")) {
+    from = from.replace("classtech.in", "classtech.in");
   }
 
   console.log(`\n==================================================`);
@@ -21,8 +21,8 @@ export const sendResetEmail = async (email, name, resetLink) => {
   }
 
   // Parse sender name and email from the "from" string
-  let senderName = "TutionDesk";
-  let senderEmail = "support@tutiondesk.in";
+  let senderName = "Classtech";
+  let senderEmail = "support@classtech.in";
   const fromMatch = from.match(/^"([^"]+)"\s*<([^>]+)>$/);
   if (fromMatch) {
     senderName = fromMatch[1];
@@ -38,9 +38,9 @@ export const sendResetEmail = async (email, name, resetLink) => {
 
   const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px;">
-      <h2 style="color: #4f46e5; margin-bottom: 20px;">TutionDesk Password Reset</h2>
+      <h2 style="color: #4f46e5; margin-bottom: 20px;">Classtech Password Reset</h2>
       <p>Hello ${name},</p>
-      <p>You requested a password reset for your account at TutionDesk.</p>
+      <p>You requested a password reset for your account at Classtech.</p>
       <p>Please click the button below to reset your password. This link is valid for 1 hour.</p>
       <div style="margin: 30px 0; text-align: center;">
         <a href="${resetLink}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">Reset Password</a>
@@ -73,7 +73,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
             name: name,
           },
         ],
-        subject: "Reset your TutionDesk Password",
+        subject: "Reset your Classtech Password",
         htmlContent: emailHtml,
       }),
     });
@@ -103,7 +103,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
     const mailOptions = {
       from,
       to: email,
-      subject: "Reset your TutionDesk Password",
+      subject: "Reset your Classtech Password",
       html: emailHtml,
     };
 
@@ -126,9 +126,9 @@ export const sendDemoRequestEmail = async ({
   const port = process.env.SMTP_PORT || 587;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  let from = process.env.SMTP_FROM || `"TutionDesk" <support@tutiondesk.in>`;
-  if (from.includes("tuitiondesk.in")) {
-    from = from.replace("tuitiondesk.in", "tutiondesk.in");
+  let from = process.env.SMTP_FROM || `"Classtech" <support@classtech.in>`;
+  if (from.includes("classtech.in")) {
+    from = from.replace("classtech.in", "classtech.in");
   }
 
   const targetRecipientEmail = "priyanshugiri63@gmail.com";
@@ -138,8 +138,8 @@ export const sendDemoRequestEmail = async ({
   console.log(`Institute: ${instituteName || "-"} | Students: ${studentCount || "-"}`);
   console.log(`==================================================\n`);
 
-  let senderName = "TutionDesk Demo Request";
-  let senderEmail = "support@tutiondesk.in";
+  let senderName = "Classtech Demo Request";
+  let senderEmail = "support@classtech.in";
   const fromMatch = from.match(/^"([^"]+)"\s*<([^>]+)>$/);
   if (fromMatch) {
     senderName = fromMatch[1];
@@ -151,7 +151,7 @@ export const sendDemoRequestEmail = async ({
   const emailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 20px; background-color: #ffffff;">
       <h2 style="color: #4f46e5; margin-bottom: 8px; font-size: 20px;">🚀 New Free Demo Request</h2>
-      <p style="color: #64748b; font-size: 14px; margin-bottom: 20px;">A user has submitted a live demo request on TuitionDesk!</p>
+      <p style="color: #64748b; font-size: 14px; margin-bottom: 20px;">A user has submitted a live demo request on Classtech!</p>
       
       <div style="background-color: #f8fafc; padding: 20px; border-radius: 14px; margin-bottom: 20px; border: 1px solid #f1f5f9; font-size: 14px; color: #334155; line-height: 1.6;">
         <p style="margin: 4px 0;"><strong>Full Name:</strong> ${name}</p>
@@ -164,7 +164,7 @@ export const sendDemoRequestEmail = async ({
         ${notes ? `<p style="margin: 4px 0;"><strong>Notes / Requests:</strong> ${notes}</p>` : ""}
       </div>
 
-      <p style="font-size: 12px; color: #94a3b8;">Submitted via TuitionDesk Free Demo Request Form.</p>
+      <p style="font-size: 12px; color: #94a3b8;">Submitted via Classtech Free Demo Request Form.</p>
     </div>
   `;
 

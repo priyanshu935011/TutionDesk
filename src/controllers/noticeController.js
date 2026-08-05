@@ -83,11 +83,11 @@ export const createNotice = async (req, res) => {
 
           let whatsappText = "";
           if (noticeType === "holiday") {
-            whatsappText = `🏖️ *Holiday Announcement - ${inst?.name || "TuitionDesk"}*\nTitle: *${title}*\nDate of Holiday: *${formatDate(holidayDate)}*\n${content ? `Details: ${content}\n` : ""}Thank you!`;
+            whatsappText = `🏖️ *Holiday Announcement - ${inst?.name || "Classtech"}*\nTitle: *${title}*\nDate of Holiday: *${formatDate(holidayDate)}*\n${content ? `Details: ${content}\n` : ""}Thank you!`;
           } else if (noticeType === "reschedule") {
             whatsappText = `⏰ *Class Reschedule Alert - ${batchName}*\nTitle: *${title}*\nOriginal Time: *${originalTime || "-"}*\nRescheduled Date: *${formatDate(rescheduledDate)}*\nNew Time: *${rescheduledTime || "-"}*\n${content ? `Note: ${content}\n` : ""}Thank you!`;
           } else {
-            whatsappText = `📢 *Announcement - ${inst?.name || "TuitionDesk"}*\n*${title}*\n${content || ""}\nThank you!`;
+            whatsappText = `📢 *Announcement - ${inst?.name || "Classtech"}*\n*${title}*\n${content || ""}\nThank you!`;
           }
 
           // Individual staggered dispatch with 500ms delay

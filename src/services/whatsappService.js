@@ -1,171 +1,168 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
-import pino from "pino";
-import fs from "fs";
-import path from "path";
+import SystemSetting from "../models/SystemSetting.js";
 
-const logger = pino({ level: "silent" });
-const activeSessions = new Map();
-const qrCodes = new Map();
-
-export const initializeSession = async (instituteId) => {
-  if (activeSessions.has(instituteId)) {
-    const existing = activeSessions.get(instituteId);
-    if (existing.status === "connected") {
-      return { status: "connected" };
-    }
-    if (existing.status === "connecting") {
-      return { status: "connecting", qr: qrCodes.get(instituteId) || null };
-    }
+// Helper to format phone number to E.164 format without '+' or special characters
+const formatPhoneNumber = (to) => {
+  let cleanNumber = String(to).replace(/\D/g, "");
+  if (!cleanNumber.startsWith("91") && cleanNumber.length === 10) {
+    cleanNumber = "91" + cleanNumber;
   }
-
-  const sessionFolder = path.join(process.cwd(), "sessions", `whatsapp_${instituteId}`);
-  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
-
-  const initFunc = typeof makeWASocket === "function" ? makeWASocket : makeWASocket.default;
-  const sock = initFunc({
-    auth: state,
-    logger,
-    printQRInTerminal: false,
-    defaultQueryTimeoutMs: undefined,
-  });
-
-  const sessionObj = {
-    sock,
-    status: "connecting",
-    qr: null,
-  };
-  activeSessions.set(instituteId, sessionObj);
-
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      sessionObj.qr = qr;
-      qrCodes.set(instituteId, qr);
-    }
-
-    if (connection === "close") {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log(`WhatsApp connection closed for ${instituteId}. Reconnecting: ${shouldReconnect}`);
-
-      if (shouldReconnect) {
-        sessionObj.status = "connecting";
-        sessionObj.qr = null;
-        activeSessions.delete(instituteId);
-        setTimeout(() => initializeSession(instituteId), 1500);
-      } else {
-        sessionObj.status = "disconnected";
-        sessionObj.qr = null;
-        qrCodes.delete(instituteId);
-        activeSessions.delete(instituteId);
-        try {
-          fs.rmSync(sessionFolder, { recursive: true, force: true });
-        } catch (e) {
-          console.error("Failed to delete session folder:", e);
-        }
-      }
-    } else if (connection === "open") {
-      console.log(`WhatsApp connection opened successfully for ${instituteId}`);
-      sessionObj.status = "connected";
-      sessionObj.qr = null;
-      qrCodes.delete(instituteId);
-    }
-  });
-
-  return { status: "connecting", qr: null };
+  return cleanNumber;
 };
 
-export const getSessionStatus = (instituteId) => {
-  const session = activeSessions.get(instituteId);
-  if (!session) {
-    const sessionFolder = path.join(process.cwd(), "sessions", `whatsapp_${instituteId}`);
-    if (fs.existsSync(sessionFolder)) {
-      initializeSession(instituteId).catch(() => {});
-      return { status: "connecting", qr: null };
+// Retrieve global Meta WhatsApp Cloud API credentials
+const getMetaCredentials = async () => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "meta_whatsapp_settings" });
+    if (setting && setting.value) {
+      let val = setting.value;
+      if (typeof val === "string") {
+        try {
+          val = JSON.parse(val);
+        } catch (e) {}
+      }
+      if (val && val.accessToken && val.phoneNumberId) {
+        return val;
+      }
     }
-    return { status: "disconnected", qr: null };
+  } catch (err) {
+    console.error("Error fetching meta_whatsapp_settings:", err.message);
   }
-  return { status: session.status, qr: qrCodes.get(instituteId) || null };
+  return null;
+};
+
+export const initializeSession = async (instituteId) => {
+  const creds = await getMetaCredentials();
+  if (creds) {
+    return { status: "connected" };
+  }
+  return { status: "disconnected", qr: null };
+};
+
+export const getSessionStatus = async (instituteId) => {
+  const creds = await getMetaCredentials();
+  if (creds) {
+    return { status: "connected", qr: null };
+  }
+  return { status: "disconnected", qr: null };
 };
 
 export const logoutSession = async (instituteId) => {
-  const session = activeSessions.get(instituteId);
-  const sessionFolder = path.join(process.cwd(), "sessions", `whatsapp_${instituteId}`);
-
-  if (session) {
-    try {
-      session.sock.logout().catch(() => {});
-      session.sock.end();
-    } catch (e) {}
-    activeSessions.delete(instituteId);
-  }
-
-  qrCodes.delete(instituteId);
-
-  try {
-    fs.rmSync(sessionFolder, { recursive: true, force: true });
-  } catch (e) {}
-
   return { success: true };
 };
 
 export const sendMessage = async (instituteId, to, text) => {
-  const session = activeSessions.get(instituteId);
-  if (!session || session.status !== "connected") {
-    throw new Error("WhatsApp not connected for this tuition.");
+  const creds = await getMetaCredentials();
+  if (!creds) {
+    console.warn(`WhatsApp skip send to ${to}: Meta Cloud API not configured.`);
+    return { success: false, message: "Meta API not configured." };
   }
 
-  let cleanNumber = String(to).replace(/\D/g, "");
-  if (!cleanNumber.startsWith("91") && cleanNumber.length === 10) {
-    cleanNumber = "91" + cleanNumber;
-  }
-  const jid = `${cleanNumber}@s.whatsapp.net`;
+  const cleanNumber = formatPhoneNumber(to);
+  const { accessToken, phoneNumberId } = creds;
 
-  await session.sock.sendMessage(jid, { text });
-  return { success: true };
+  console.log(`Sending Meta WhatsApp message to ${cleanNumber}...`);
+
+  try {
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanNumber,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: text
+        }
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error?.message || "Failed to send WhatsApp message via Meta API");
+    }
+
+    return { success: true, messageId: data.messages?.[0]?.id };
+  } catch (err) {
+    console.error(`Meta WhatsApp send text error to ${cleanNumber}:`, err.message);
+    throw err;
+  }
 };
 
 export const sendDocument = async (instituteId, to, fileBuffer, fileName, caption = "") => {
-  const session = activeSessions.get(instituteId);
-  if (!session || session.status !== "connected") {
-    throw new Error("WhatsApp not connected for this tuition.");
+  const creds = await getMetaCredentials();
+  if (!creds) {
+    console.warn(`WhatsApp skip document send to ${to}: Meta Cloud API not configured.`);
+    return { success: false, message: "Meta API not configured." };
   }
 
-  let cleanNumber = String(to).replace(/\D/g, "");
-  if (!cleanNumber.startsWith("91") && cleanNumber.length === 10) {
-    cleanNumber = "91" + cleanNumber;
-  }
-  const jid = `${cleanNumber}@s.whatsapp.net`;
+  const cleanNumber = formatPhoneNumber(to);
+  const { accessToken, phoneNumberId } = creds;
 
-  await session.sock.sendMessage(jid, {
-    document: fileBuffer,
-    mimetype: "application/pdf",
-    fileName: fileName,
-    caption: caption
-  });
-  return { success: true };
+  console.log(`Uploading Meta WhatsApp media file ${fileName}...`);
+
+  try {
+    // 1. Upload the PDF file buffer to Meta media endpoint
+    const formData = new FormData();
+    formData.append("messaging_product", "whatsapp");
+    formData.append("type", "application/pdf");
+    
+    const blob = new Blob([fileBuffer], { type: "application/pdf" });
+    formData.append("file", blob, fileName);
+
+    const mediaResponse = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/media`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`
+      },
+      body: formData
+    });
+
+    const mediaData = await mediaResponse.json();
+    if (!mediaResponse.ok) {
+      throw new Error(mediaData.error?.message || "Failed to upload media file via Meta API");
+    }
+
+    const mediaId = mediaData.id;
+    console.log(`Media uploaded successfully. Media ID: ${mediaId}. Sending document message...`);
+
+    // 2. Send the document message referencing the media ID
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanNumber,
+        type: "document",
+        document: {
+          id: mediaId,
+          filename: fileName,
+          caption: caption
+        }
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error?.message || "Failed to send document message via Meta API");
+    }
+
+    return { success: true, messageId: data.messages?.[0]?.id };
+  } catch (err) {
+    console.error(`Meta WhatsApp send document error to ${cleanNumber}:`, err.message);
+    throw err;
+  }
 };
 
 export const reconnectAllSessions = async () => {
-  const sessionsParent = path.join(process.cwd(), "sessions");
-  if (!fs.existsSync(sessionsParent)) {
-    return;
-  }
-
-  try {
-    const files = fs.readdirSync(sessionsParent);
-    for (const file of files) {
-      if (file.startsWith("whatsapp_")) {
-        const instituteId = file.replace("whatsapp_", "");
-        console.log(`Auto-reconnecting WhatsApp session for institute: ${instituteId}`);
-        initializeSession(instituteId).catch((err) => {
-          console.error(`Auto-reconnect failed for ${instituteId}:`, err);
-        });
-      }
-    }
-  } catch (err) {
-    console.error("Failed to read sessions directory for auto-reconnect:", err);
-  }
+  // Baileys auto-reconnect is deprecated since we use the centralized Meta API.
+  return;
 };
