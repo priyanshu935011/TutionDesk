@@ -1,7 +1,10 @@
 import express from "express";
+import multer from "multer";
 import Institute from "../models/Institute.js";
 import { generateTuitionHTML } from "../services/netlifyService.js";
-import { getPublicLeadForm, submitPublicLead } from "../controllers/leadController.js";
+import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormByShortId } from "../controllers/leadController.js";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const router = express.Router();
 
@@ -65,7 +68,9 @@ router.get("/website/:slug", async (req, res) => {
 });
 
 // Public lead form routes
+router.get("/lead-forms/short/:shortId", getPublicLeadFormByShortId);
 router.get("/lead-forms/:id", getPublicLeadForm);
 router.post("/lead-forms/:id/submit", submitPublicLead);
+router.post("/website/upload", upload.single("file"), uploadLeadFile);
 
 export default router;

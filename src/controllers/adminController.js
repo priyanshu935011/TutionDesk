@@ -296,6 +296,7 @@ export const createInstitute = async (req, res) => {
       allowedFeatures,
       studentCustomFields,
       studentPortalEnabled,
+      maxLeadFileSizeMb,
     } = req.body;
 
     if (
@@ -345,6 +346,7 @@ export const createInstitute = async (req, res) => {
       studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
       studentPortalEnabled: studentPortalEnabled !== false,
       quizFeatureEnabled: quizFeatureEnabled !== false,
+      maxLeadFileSizeMb: Number(maxLeadFileSizeMb || 10),
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
       themeColor: themeColor || "#6366f1",
@@ -418,6 +420,7 @@ export const updateInstitute = async (req, res) => {
       allowedFeatures,
       studentCustomFields,
       studentPortalEnabled,
+      maxLeadFileSizeMb,
     } = req.body;
 
     if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
@@ -440,6 +443,7 @@ export const updateInstitute = async (req, res) => {
     if (flexibleDueDate !== undefined) institute.flexibleDueDate = Boolean(flexibleDueDate);
     if (studentCustomFields !== undefined) institute.studentCustomFields = Array.isArray(studentCustomFields) ? studentCustomFields : [];
     if (studentPortalEnabled !== undefined) institute.studentPortalEnabled = Boolean(studentPortalEnabled);
+    if (maxLeadFileSizeMb !== undefined) institute.maxLeadFileSizeMb = Number(maxLeadFileSizeMb);
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
     if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;

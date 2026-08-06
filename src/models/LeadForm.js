@@ -23,14 +23,28 @@ const leadFormSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    themeColor: {
+      type: String,
+      default: "#4c3fbe",
+    },
+    bannerUrl: {
+      type: String,
+      default: "",
+    },
+    shortId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
     fields: {
       type: [
         {
           name: String, // name, phone, email, course, message
           label: String,
           required: Boolean,
-          type: String, // text, select, textarea
+          type: String, // text, select, textarea, file
           options: [String], // for select fields
+          acceptedTypes: [String], // accepted extensions e.g. [".pdf", ".jpg", ".png"]
         }
       ],
       default: [

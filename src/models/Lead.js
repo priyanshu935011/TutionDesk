@@ -53,6 +53,10 @@ const leadSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    customFields: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,

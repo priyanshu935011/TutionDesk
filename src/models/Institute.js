@@ -77,6 +77,10 @@ const instituteSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    maxLeadFileSizeMb: {
+      type: Number,
+      default: 10,
+    },
     studentCustomFields: {
       type: Array,
       default: [],

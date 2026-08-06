@@ -4,9 +4,57 @@ import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import LeadForm from "../models/LeadForm.js";
 import { sendMessage } from "../services/whatsappService.js";
+import cloudinary from "../utils/cloudinary.js";
+import { Readable } from "stream";
 
 const generateApiKey = () => {
   return "td_lead_" + crypto.randomBytes(16).toString("hex");
+};
+
+const uploadBufferToCloudinary = (buffer, options = {}) =>
+  new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "lead_attachments",
+        ...options,
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(result);
+      },
+    );
+    Readable.from(buffer).pipe(uploadStream);
+  });
+
+export const uploadLeadFile = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    const instituteId = req.body.instituteId;
+    if (instituteId) {
+      const institute = await Institute.findById(instituteId);
+      if (institute) {
+        const limitMb = institute.maxLeadFileSizeMb || 10;
+        const fileSizeMb = req.file.size / (1024 * 1024);
+        if (fileSizeMb > limitMb) {
+          return res.status(400).json({
+            message: `File size exceeds the limit of ${limitMb}MB allowed by the institute.`,
+          });
+        }
+      }
+    }
+
+    const result = await uploadBufferToCloudinary(req.file.buffer);
+    return res.json({ fileUrl: result.secure_url });
+  } catch (error) {
+    console.error("uploadLeadFile error:", error);
+    return res.status(500).json({ message: "Could not upload file" });
+  }
 };
 
 export const submitLead = async (req, res) => {
@@ -216,10 +264,17 @@ export const getLeadForms = async (req, res) => {
 export const createLeadForm = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { name, title, description, fields } = req.body;
+    const { name, title, description, fields, themeColor, bannerUrl } = req.body;
 
     if (!name || !title) {
       return res.status(400).json({ message: "Form name and display title are required" });
+    }
+
+    let shortId = crypto.randomBytes(3).toString("hex");
+    let existing = await LeadForm.findOne({ shortId });
+    while (existing) {
+      shortId = crypto.randomBytes(3).toString("hex");
+      existing = await LeadForm.findOne({ shortId });
     }
 
     const form = await LeadForm.create({
@@ -227,6 +282,9 @@ export const createLeadForm = async (req, res) => {
       name: name.trim(),
       title: title.trim(),
       description: description ? description.trim() : "",
+      themeColor: themeColor || "#4c3fbe",
+      bannerUrl: bannerUrl || "",
+      shortId,
       fields: Array.isArray(fields) && fields.length > 0 ? fields : undefined,
     });
 
@@ -240,16 +298,28 @@ export const createLeadForm = async (req, res) => {
 export const updateLeadForm = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { name, title, description, fields } = req.body;
+    const { name, title, description, fields, themeColor, bannerUrl } = req.body;
 
     const form = await LeadForm.findOne({ _id: req.params.id, institute: instituteId });
     if (!form) {
       return res.status(404).json({ message: "Lead form not found" });
     }
 
+    if (!form.shortId) {
+      let shortId = crypto.randomBytes(3).toString("hex");
+      let existing = await LeadForm.findOne({ shortId });
+      while (existing) {
+        shortId = crypto.randomBytes(3).toString("hex");
+        existing = await LeadForm.findOne({ shortId });
+      }
+      form.shortId = shortId;
+    }
+
     if (name) form.name = name.trim();
     if (title) form.title = title.trim();
     if (description !== undefined) form.description = description.trim();
+    if (themeColor !== undefined) form.themeColor = themeColor;
+    if (bannerUrl !== undefined) form.bannerUrl = bannerUrl;
     if (fields) form.fields = fields;
 
     await form.save();
@@ -298,7 +368,7 @@ export const submitPublicLead = async (req, res) => {
       return res.status(404).json({ message: "Lead form not found" });
     }
 
-    const { name, phone, email, course, message } = req.body;
+    const { name, phone, email, course, message, customFields } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Name is required." });
@@ -316,6 +386,7 @@ export const submitPublicLead = async (req, res) => {
       message: message ? message.trim() : "",
       source: form.name,
       leadFormId: form._id,
+      customFields: customFields || {},
       status: "new",
     });
 
@@ -351,5 +422,19 @@ Log in to your dashboard to review this lead.`;
   } catch (error) {
     console.error("submitPublicLead error:", error);
     return res.status(500).json({ message: "Could not submit inquiry." });
+  }
+};
+
+export const getPublicLeadFormByShortId = async (req, res) => {
+  try {
+    const { shortId } = req.params;
+    const form = await LeadForm.findOne({ shortId });
+    if (!form) {
+      return res.status(404).json({ message: "Shortened link not found." });
+    }
+    return res.json({ formId: form._id });
+  } catch (error) {
+    console.error("getPublicLeadFormByShortId error:", error);
+    return res.status(500).json({ message: "Could not fetch link mapping." });
   }
 };
