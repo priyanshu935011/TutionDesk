@@ -55,6 +55,10 @@ const leadFormSchema = new mongoose.Schema(
         { name: "message", label: "Additional Query", required: false, type: "textarea" },
       ],
     },
+    acceptingResponses: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true,

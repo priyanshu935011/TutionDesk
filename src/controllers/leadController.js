@@ -264,7 +264,7 @@ export const getLeadForms = async (req, res) => {
 export const createLeadForm = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { name, title, description, fields, themeColor, bannerUrl } = req.body;
+    const { name, title, description, fields, themeColor, bannerUrl, acceptingResponses } = req.body;
 
     if (!name || !title) {
       return res.status(400).json({ message: "Form name and display title are required" });
@@ -285,6 +285,7 @@ export const createLeadForm = async (req, res) => {
       themeColor: themeColor || "#4c3fbe",
       bannerUrl: bannerUrl || "",
       shortId,
+      acceptingResponses: acceptingResponses !== undefined ? acceptingResponses : true,
       fields: Array.isArray(fields) && fields.length > 0 ? fields : undefined,
     });
 
@@ -298,7 +299,7 @@ export const createLeadForm = async (req, res) => {
 export const updateLeadForm = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { name, title, description, fields, themeColor, bannerUrl } = req.body;
+    const { name, title, description, fields, themeColor, bannerUrl, acceptingResponses } = req.body;
 
     const form = await LeadForm.findOne({ _id: req.params.id, institute: instituteId });
     if (!form) {
@@ -320,6 +321,7 @@ export const updateLeadForm = async (req, res) => {
     if (description !== undefined) form.description = description.trim();
     if (themeColor !== undefined) form.themeColor = themeColor;
     if (bannerUrl !== undefined) form.bannerUrl = bannerUrl;
+    if (acceptingResponses !== undefined) form.acceptingResponses = acceptingResponses;
     if (fields) form.fields = fields;
 
     await form.save();
@@ -366,6 +368,9 @@ export const submitPublicLead = async (req, res) => {
     const form = await LeadForm.findById(req.params.id).populate("institute");
     if (!form) {
       return res.status(404).json({ message: "Lead form not found" });
+    }
+    if (form.acceptingResponses === false) {
+      return res.status(400).json({ message: "This form is no longer accepting new responses." });
     }
 
     const { name, phone, email, course, message, customFields } = req.body;
