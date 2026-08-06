@@ -38,7 +38,7 @@ export const generateTuitionHTML = ({
 <body class="bg-slate-50 text-slate-800 antialiased selection:bg-indigo-500 selection:text-white">
 
   <!-- Header / Navbar -->
-  <header class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
     <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
       <div class="flex items-center gap-3">
         ${
@@ -52,7 +52,8 @@ export const generateTuitionHTML = ({
         </div>
       </div>
 
-      <div class="flex items-center gap-3">
+      <!-- Desktop Navigation Links -->
+      <div class="hidden md:flex items-center gap-3">
         <a href="${studentLoginUrl}" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition shadow-sm">
           Student Login
         </a>
@@ -60,6 +61,33 @@ export const generateTuitionHTML = ({
           Educator Login
         </a>
       </div>
+
+      <!-- Mobile Hamburger Button -->
+      <button
+        onclick="document.getElementById('mobile-dropdown-menu').classList.toggle('hidden')"
+        class="md:hidden p-2 rounded-xl text-slate-500 hover:bg-slate-100 transition focus:outline-none"
+        aria-label="Toggle menu"
+      >
+        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Mobile Dropdown Menu / Sidebar -->
+    <div id="mobile-dropdown-menu" class="hidden md:hidden border-t border-slate-100 bg-white p-4 space-y-2.5">
+      <a
+        href="${studentLoginUrl}"
+        class="block w-full text-center rounded-xl border border-slate-200 bg-slate-50 py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 transition"
+      >
+        Student Login
+      </a>
+      <a
+        href="${teacherLoginUrl}"
+        class="block w-full text-center rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white shadow-md shadow-indigo-200 hover:bg-indigo-700 transition"
+      >
+        Educator Login
+      </a>
     </div>
   </header>
 
