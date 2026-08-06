@@ -99,8 +99,10 @@ export const updateBatch = async (req, res) => {
       updateData.status = status;
     }
 
+    const ownerId = req.user.institute?._id || req.user.institute || req.user._id;
+
     const batch = await Batch.findOneAndUpdate(
-      { _id: req.params.id, user: req.user._id },
+      { _id: req.params.id, user: ownerId },
       updateData,
       { new: true, runValidators: true }
     ).populate("teacher", "name email");
@@ -125,11 +127,12 @@ export const deleteBatch = async (req, res) => {
     }
 
     const batchId = req.params.id;
+    const ownerId = req.user.institute?._id || req.user.institute || req.user._id;
 
     // Find the batch first to confirm it belongs to the user
     const batch = await Batch.findOne({
       _id: batchId,
-      user: req.user._id,
+      user: ownerId,
     });
 
     if (!batch) {
@@ -138,7 +141,7 @@ export const deleteBatch = async (req, res) => {
 
     // Find all student records in this batch
     const studentsInBatch = await Student.find({
-      user: req.user._id,
+      user: ownerId,
       batch: batchId,
     });
 
@@ -148,7 +151,7 @@ export const deleteBatch = async (req, res) => {
 
       // Find all records for this student at this institute
       const allStudentRecords = await Student.find({
-        user: req.user._id,
+        user: ownerId,
         $or: [
           ...(email ? [{ email }] : []),
           ...(phone ? [{ phone }] : []),

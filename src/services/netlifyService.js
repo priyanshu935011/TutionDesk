@@ -75,7 +75,7 @@ export const generateTuitionHTML = ({
           ${headline || `Welcome to ${instituteName}`}
         </h2>
         <p class="text-base sm:text-lg text-slate-600 font-medium leading-relaxed">
-          ${subheadline || "Delivering interactive learning, continuous evaluation, attendance tracking, and live quizzes."}
+          ${subheadline || "Premier coaching academy offering personalized education."}
         </p>
 
         <div class="flex flex-wrap items-center gap-4 pt-2">
@@ -106,27 +106,27 @@ export const generateTuitionHTML = ({
 
       <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <div class="rounded-3xl border border-slate-200 p-6 bg-slate-50/50 hover:bg-white transition shadow-sm space-y-3">
-          <div class="h-12 w-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xl">📅</div>
-          <h4 class="text-lg font-bold text-slate-900">Daily Attendance</h4>
-          <p class="text-xs text-slate-500 font-medium leading-relaxed">Automated check-ins and instant WhatsApp absence alerts sent directly to parents.</p>
+          <div class="h-12 w-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xl">📚</div>
+          <h4 class="text-lg font-bold text-slate-900">Academic Excellence</h4>
+          <p class="text-xs text-slate-500 font-medium leading-relaxed">Structured courses focusing on conceptual clarity, rigorous school boards syllabus prep, and exam strategies.</p>
         </div>
 
         <div class="rounded-3xl border border-slate-200 p-6 bg-slate-50/50 hover:bg-white transition shadow-sm space-y-3">
           <div class="h-12 w-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xl">📝</div>
-          <h4 class="text-lg font-bold text-slate-900">Notes & Study Material</h4>
-          <p class="text-xs text-slate-500 font-medium leading-relaxed">Instant access to chapter notes, lecture PDFs, and revision modules anytime.</p>
+          <h4 class="text-lg font-bold text-slate-900">Curated Study Materials</h4>
+          <p class="text-xs text-slate-500 font-medium leading-relaxed">Instant student portal access to daily homework sheets, notes PDFs, and reference books.</p>
         </div>
 
         <div class="rounded-3xl border border-slate-200 p-6 bg-slate-50/50 hover:bg-white transition shadow-sm space-y-3">
           <div class="h-12 w-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xl">📊</div>
-          <h4 class="text-lg font-bold text-slate-900">Test Marks & Progress</h4>
-          <p class="text-xs text-slate-500 font-medium leading-relaxed">Detailed report cards, score analytics, and progress tracking after every test.</p>
+          <h4 class="text-lg font-bold text-slate-900">Regular Assessments</h4>
+          <p class="text-xs text-slate-500 font-medium leading-relaxed">Weekly mock tests, scorecards, and performance metrics shared with parents to track growth.</p>
         </div>
 
         <div class="rounded-3xl border border-slate-200 p-6 bg-slate-50/50 hover:bg-white transition shadow-sm space-y-3">
-          <div class="h-12 w-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xl">⚡</div>
-          <h4 class="text-lg font-bold text-slate-900">Live Quizzes</h4>
-          <p class="text-xs text-slate-500 font-medium leading-relaxed">Real-time socket quiz competitions with instant leaderboard rankings.</p>
+          <div class="h-12 w-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xl">⏱️</div>
+          <h4 class="text-lg font-bold text-slate-900">Student Portal Access</h4>
+          <p class="text-xs text-slate-500 font-medium leading-relaxed">Parents and students can check real-time attendance, announcements notice board, and class timetables.</p>
         </div>
       </div>
     </div>
