@@ -388,6 +388,7 @@ export const createStudent = async (req, res) => {
         await deleteCache(`student:dashboard:${enrollmentNumberToUse}`);
       }
       await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
     } catch (cacheErr) {
       console.warn("Cache eviction warning during student enrollment:", cacheErr);
     }
@@ -623,6 +624,7 @@ export const updateStudent = async (req, res) => {
       await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
     }
     await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("teacher:students:*");
 
     // Find and return a populated active student record for response compatibility
     const responseRecord = remainingRecords.find((r) => String(r._id) === String(student._id)) || remainingRecords[0];
@@ -676,6 +678,7 @@ export const deleteStudent = async (req, res) => {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
       }
       await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
     } catch (cErr) {}
 
     return res.json({ message: "Student deleted successfully" });
@@ -761,6 +764,7 @@ export const addPayment = async (req, res) => {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
       }
       await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
     } catch (cErr) {}
 
     return res.json(populatedStudent);
@@ -815,6 +819,7 @@ export const markAttendance = async (req, res) => {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
       }
       await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
     } catch (cErr) {}
 
     // Return response immediately
@@ -938,6 +943,7 @@ export const markBatchAttendance = async (req, res) => {
     // Clear dashboard & student cache
     try {
       await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
       for (const s of batchStudents) {
         if (s.enrollmentNumber) {
           await deleteCache(`student:dashboard:${s.enrollmentNumber}`);
@@ -1446,6 +1452,7 @@ export const bulkCreateStudents = async (req, res) => {
     if (results.successCount > 0) {
       await clearCachePattern("student:dashboard:*");
       await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
 
       if (req.body.sendWhatsApp) {
         const createdItems = [...results.created];

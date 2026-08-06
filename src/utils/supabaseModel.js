@@ -838,12 +838,20 @@ class SupabaseQuery {
     const includeAttendance = options.includeAttendance !== false;
 
     const promises = [
-      this.model.supabase.from("payments").select("student_id, amount, payment_date, payment_type, note").in("student_id", studentIds)
+      this.model.supabase
+        .from("payments")
+        .select("id, student_id, amount, payment_date, payment_type, note")
+        .in("student_id", studentIds)
+        .order("payment_date", { ascending: true })
     ];
 
     if (includeAttendance) {
       promises.push(
-        this.model.supabase.from("attendance").select("student_id, date, status").in("student_id", studentIds)
+        this.model.supabase
+          .from("attendance")
+          .select("id, student_id, date, status")
+          .in("student_id", studentIds)
+          .order("date", { ascending: false })
       );
     }
 
