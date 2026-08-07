@@ -29,6 +29,12 @@ import {
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import superAdminOnly from "../middleware/superAdminMiddleware.js";
+import {
+  getAdminPages,
+  createAdminPage,
+  updateAdminPage,
+  deleteAdminPage,
+} from "../controllers/pageController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -70,5 +76,14 @@ router.put("/institutes/:id", updateInstitute);
 router.post("/institutes/upload-logo", upload.single("logo"), uploadInstituteLogo);
 router.post("/institutes/:id/renew", renewInstituteSubscription);
 router.delete("/institutes/:id", deleteInstitute);
+
+// Custom Pages Routes
+router.route("/pages")
+  .get(getAdminPages)
+  .post(createAdminPage);
+
+router.route("/pages/:id")
+  .put(updateAdminPage)
+  .delete(deleteAdminPage);
 
 export default router;

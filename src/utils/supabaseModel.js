@@ -8,7 +8,7 @@ const supabaseKey = process.env.SUPABASE_KEY || "";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms"]);
+const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages"]);
 const FALLBACK_DIR = "c:/Users/priya/priyanshu/projects/tutions_crm/scratch/data";
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
 const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");

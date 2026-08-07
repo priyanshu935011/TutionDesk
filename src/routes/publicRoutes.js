@@ -3,6 +3,7 @@ import multer from "multer";
 import Institute from "../models/Institute.js";
 import { generateTuitionHTML } from "../services/netlifyService.js";
 import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormByShortId } from "../controllers/leadController.js";
+import { getPublicPages, getPublicPageBySlug } from "../controllers/pageController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -72,5 +73,9 @@ router.get("/lead-forms/short/:shortId", getPublicLeadFormByShortId);
 router.get("/lead-forms/:id", getPublicLeadForm);
 router.post("/lead-forms/:id/submit", submitPublicLead);
 router.post("/website/upload", upload.single("file"), uploadLeadFile);
+
+// Public custom pages routes
+router.get("/pages", getPublicPages);
+router.get("/pages/:slug", getPublicPageBySlug);
 
 export default router;
