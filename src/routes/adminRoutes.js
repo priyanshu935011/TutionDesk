@@ -42,6 +42,11 @@ import {
   updateAdminPage,
   deleteAdminPage,
 } from "../controllers/pageController.js";
+import {
+  getContactMessages,
+  markContactMessageRead,
+  deleteContactMessage,
+} from "../controllers/contactController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -54,6 +59,10 @@ router.get("/system-logs", getSystemLogs);
 router.delete("/system-logs", clearSystemLogs);
 router.put("/system-logs/read-all", markAllSystemLogsAsRead);
 router.put("/system-logs/:id/read", markSystemLogAsRead);
+
+router.get("/contact-messages", getContactMessages);
+router.put("/contact-messages/:id/read", markContactMessageRead);
+router.delete("/contact-messages/:id", deleteContactMessage);
 
 router.get("/whatsapp-template", getWhatsAppCredentialsTemplate);
 router.put("/whatsapp-template", updateWhatsAppCredentialsTemplate);
