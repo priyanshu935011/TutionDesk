@@ -1,68 +1,7 @@
 import SystemLog from "../models/SystemLog.js";
 
 // In-memory log cache store for instant access & fallback
-export const inMemoryLogs = [
-  {
-    _id: "log-1",
-    level: "error",
-    category: "WhatsApp Failure",
-    message: "Failed to deliver absence WhatsApp alert: WhatsApp gateway session disconnected.",
-    userName: "Saksham Thapa",
-    userEmail: "saksham.thapa@gmail.com",
-    userPhone: "9031285632",
-    userRole: "student",
-    instituteName: "Tiwari & son's Academy",
-    createdAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-  },
-  {
-    _id: "log-2",
-    level: "warning",
-    category: "Authentication Failed",
-    message: "Invalid password provided during login attempt (4 consecutive attempts).",
-    userName: "Vikash Sir",
-    userEmail: "jhamlal2003@gmail.com",
-    userPhone: "7319721155",
-    userRole: "teacher",
-    instituteName: "Tiwari & son's Academy",
-    createdAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-  },
-  {
-    _id: "log-3",
-    level: "error",
-    category: "WhatsApp Broadcast Failed",
-    message: "Test marks report card broadcast failed: Target phone number not on WhatsApp network.",
-    userName: "Om Sharma",
-    userEmail: "sanjay69kumar191919@gmail.com",
-    userPhone: "98353054",
-    userRole: "student",
-    instituteName: "Tiwari & son's Academy",
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    _id: "log-4",
-    level: "failed",
-    category: "Payment Failure",
-    message: "Fee collection entry failed: Payment token validation mismatch.",
-    userName: "Arnav Aaryan",
-    userEmail: "arnavaryan11245@gmail.com",
-    userPhone: "9304163669",
-    userRole: "student",
-    instituteName: "Tiwari & son's Academy",
-    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    _id: "log-5",
-    level: "error",
-    category: "Quiz Submission Error",
-    message: "Quiz response sync failed: Network timeout during submission.",
-    userName: "Pratiksha Thapa",
-    userEmail: "priyashailesh1920@gmail.com",
-    userPhone: "7061640830",
-    userRole: "student",
-    instituteName: "Tiwari & son's Academy",
-    createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-  },
-];
+export const inMemoryLogs = [];
 
 /**
  * Utility to log system failures and errors with student/teacher user context
