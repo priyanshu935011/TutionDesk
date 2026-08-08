@@ -20,8 +20,22 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["super_admin", "institute_admin", "teacher"],
+      enum: [
+        "super_admin",
+        "tech_admin",
+        "sales_admin",
+        "sales_person",
+        "marketing_admin",
+        "marketing_person",
+        "institute_admin",
+        "teacher"
+      ],
       default: "institute_admin",
+    },
+    parentAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
     },
     institute: {
       type: mongoose.Schema.Types.ObjectId,

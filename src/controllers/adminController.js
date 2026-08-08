@@ -17,6 +17,8 @@ import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
+import { logActivity } from "../utils/activityLogger.js";
+import ActivityLog from "../models/ActivityLog.js";
 
 const getAdminEmails = async () => {
   try {
@@ -1343,6 +1345,196 @@ export const updateMetaWhatsAppSettings = async (req, res) => {
   } catch (error) {
     console.error("updateMetaWhatsAppSettings error:", error);
     return res.status(500).json({ message: "Could not update Meta WhatsApp settings" });
+  }
+};
+
+// Staff management CRUD
+export const getStaff = async (req, res) => {
+  try {
+    const role = req.user.role;
+    let query = {};
+
+    if (role === "super_admin" || role === "tech_admin") {
+      query = {
+        role: {
+          $in: ["tech_admin", "sales_admin", "sales_person", "marketing_admin", "marketing_person"],
+        },
+      };
+    } else if (role === "sales_admin") {
+      query = { role: "sales_person", parentAdmin: req.user._id };
+    } else if (role === "marketing_admin") {
+      query = { role: "marketing_person", parentAdmin: req.user._id };
+    } else {
+      return res.json([]);
+    }
+
+    const staffList = await User.find(query)
+      .select("name email role parentAdmin createdAt")
+      .populate("parentAdmin", "name email");
+
+    return res.json(staffList);
+  } catch (err) {
+    console.error("getStaff error:", err);
+    return res.status(500).json({ message: "Could not load staff members." });
+  }
+};
+
+export const createStaff = async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+
+    const requesterRole = req.user.role;
+
+    // Access control
+    if (requesterRole === "sales_admin" && role !== "sales_person") {
+      return res.status(403).json({ message: "Sales admins can only create sales persons." });
+    }
+    if (requesterRole === "marketing_admin" && role !== "marketing_person") {
+      return res.status(403).json({ message: "Marketing admins can only create marketing persons." });
+    }
+    if (requesterRole === "sales_person" || requesterRole === "marketing_person") {
+      return res.status(403).json({ message: "Sales/Marketing staff cannot create accounts." });
+    }
+
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existingUser) {
+      return res.status(400).json({ message: "A user with this email already exists." });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const staff = await User.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword,
+      role,
+      parentAdmin: req.user._id,
+      institute: null,
+    });
+
+    await logActivity(req.user._id, "Create Staff", `Created staff member ${email} with role ${role}`, req.ip);
+
+    return res.status(201).json({
+      _id: staff._id,
+      name: staff.name,
+      email: staff.email,
+      role: staff.role,
+      createdAt: staff.createdAt,
+    });
+  } catch (err) {
+    console.error("createStaff error:", err);
+    return res.status(500).json({ message: "Could not create staff member." });
+  }
+};
+
+export const updateStaff = async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+    const staff = await User.findById(req.params.id);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff member not found." });
+    }
+
+    const requesterRole = req.user.role;
+
+    // Access control
+    if (requesterRole === "sales_admin" && (staff.role !== "sales_person" || String(staff.parentAdmin) !== String(req.user._id))) {
+      return res.status(403).json({ message: "Unauthorized team updates." });
+    }
+    if (requesterRole === "marketing_admin" && (staff.role !== "marketing_person" || String(staff.parentAdmin) !== String(req.user._id))) {
+      return res.status(403).json({ message: "Unauthorized team updates." });
+    }
+    if (requesterRole === "sales_person" || requesterRole === "marketing_person") {
+      return res.status(403).json({ message: "Unauthorized updates." });
+    }
+
+    if (email && email.toLowerCase().trim() !== staff.email) {
+      const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+      if (existingUser && String(existingUser._id) !== String(staff._id)) {
+        return res.status(400).json({ message: "Email is already taken." });
+      }
+      staff.email = email.toLowerCase().trim();
+    }
+
+    if (name) staff.name = name.trim();
+    if (role) {
+      if (requesterRole === "sales_admin" && role !== "sales_person") {
+        return res.status(403).json({ message: "Cannot change role out of sales category." });
+      }
+      if (requesterRole === "marketing_admin" && role !== "marketing_person") {
+        return res.status(403).json({ message: "Cannot change role out of marketing category." });
+      }
+      staff.role = role;
+    }
+
+    if (password) {
+      staff.password = await bcrypt.hash(password, 10);
+    }
+
+    await staff.save();
+    await logActivity(req.user._id, "Update Staff", `Updated staff member ${staff.email}`, req.ip);
+
+    return res.json({
+      _id: staff._id,
+      name: staff.name,
+      email: staff.email,
+      role: staff.role,
+      createdAt: staff.createdAt,
+    });
+  } catch (err) {
+    console.error("updateStaff error:", err);
+    return res.status(500).json({ message: "Could not update staff member." });
+  }
+};
+
+export const deleteStaff = async (req, res) => {
+  try {
+    const staff = await User.findById(req.params.id);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff member not found." });
+    }
+
+    const requesterRole = req.user.role;
+
+    // Access control
+    if (requesterRole === "sales_admin" && (staff.role !== "sales_person" || String(staff.parentAdmin) !== String(req.user._id))) {
+      return res.status(403).json({ message: "Unauthorized team removal." });
+    }
+    if (requesterRole === "marketing_admin" && (staff.role !== "marketing_person" || String(staff.parentAdmin) !== String(req.user._id))) {
+      return res.status(403).json({ message: "Unauthorized team removal." });
+    }
+    if (requesterRole === "sales_person" || requesterRole === "marketing_person") {
+      return res.status(403).json({ message: "Unauthorized removal request." });
+    }
+
+    await User.findByIdAndDelete(req.params.id);
+    await logActivity(req.user._id, "Delete Staff", `Deleted staff member ${staff.email}`, req.ip);
+
+    return res.json({ message: "Staff member deleted successfully." });
+  } catch (err) {
+    console.error("deleteStaff error:", err);
+    return res.status(500).json({ message: "Could not delete staff member." });
+  }
+};
+
+// Activity logs retrieval
+export const getActivityLogs = async (req, res) => {
+  try {
+    if (req.user.role !== "super_admin" && req.user.role !== "tech_admin") {
+      return res.status(403).json({ message: "Access denied. Admin view required." });
+    }
+
+    const logs = await ActivityLog.find({})
+      .sort({ createdAt: -1 })
+      .limit(500)
+      .populate("user", "name email role");
+
+    return res.json(logs);
+  } catch (err) {
+    console.error("getActivityLogs error:", err);
+    return res.status(500).json({ message: "Could not retrieve activity logs." });
   }
 };
 

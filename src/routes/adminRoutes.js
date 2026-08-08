@@ -26,9 +26,14 @@ import {
   updateWhatsAppCredentialsTemplate,
   getMetaWhatsAppSettings,
   updateMetaWhatsAppSettings,
+  getStaff,
+  createStaff,
+  updateStaff,
+  deleteStaff,
+  getActivityLogs,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
-import superAdminOnly from "../middleware/superAdminMiddleware.js";
+import staffOnly from "../middleware/staffMiddleware.js";
 import {
   getAdminPages,
   createAdminPage,
@@ -39,7 +44,7 @@ import {
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.use(protect, superAdminOnly);
+router.use(protect, staffOnly);
 
 router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
@@ -85,5 +90,16 @@ router.route("/pages")
 router.route("/pages/:id")
   .put(updateAdminPage)
   .delete(deleteAdminPage);
+
+// Staff Team management & audit activity logs
+router.route("/staff")
+  .get(getStaff)
+  .post(createStaff);
+
+router.route("/staff/:id")
+  .put(updateStaff)
+  .delete(deleteStaff);
+
+router.get("/activity-logs", getActivityLogs);
 
 export default router;
