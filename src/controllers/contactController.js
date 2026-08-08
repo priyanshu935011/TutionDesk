@@ -74,10 +74,10 @@ export const deleteContactMessage = async (req, res) => {
 };
 
 const DEFAULT_CONTACT_DETAILS = {
-  phone: "+91 90000 12345",
-  email: "support@classtech.com",
-  companyName: "Classtech",
-  address: "4th Floor, Tech Hub Tower, HSR Layout, Sector 6, Bangalore, Karnataka - 560102"
+  phone: "",
+  email: "",
+  companyName: "",
+  address: ""
 };
 
 export const getContactDetails = async (req, res) => {
@@ -86,7 +86,17 @@ export const getContactDetails = async (req, res) => {
     if (!setting) {
       return res.json(DEFAULT_CONTACT_DETAILS);
     }
-    const merged = { ...DEFAULT_CONTACT_DETAILS, ...(setting.value || {}) };
+
+    let rawValue = setting.value;
+    if (typeof rawValue === "string") {
+      try {
+        rawValue = JSON.parse(rawValue);
+      } catch (e) {
+        rawValue = {};
+      }
+    }
+
+    const merged = { ...DEFAULT_CONTACT_DETAILS, ...(rawValue || {}) };
     return res.json(merged);
   } catch (error) {
     console.error("getContactDetails error:", error);
