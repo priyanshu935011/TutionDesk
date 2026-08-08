@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import Institute from "../models/Institute.js";
 import { generateTuitionHTML } from "../services/netlifyService.js";
+import SystemSetting from "../models/SystemSetting.js";
 import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormByShortId } from "../controllers/leadController.js";
 import { getPublicPages, getPublicPageBySlug } from "../controllers/pageController.js";
 import { submitContactMessage, getContactDetails } from "../controllers/contactController.js";
@@ -82,5 +83,27 @@ router.get("/pages/:slug", getPublicPageBySlug);
 // Public contact submission
 router.post("/contact", submitContactMessage);
 router.get("/contact-details", getContactDetails);
+
+// Public AdSense configuration
+router.get("/ads-config", async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "ads_settings" });
+    if (!setting) {
+      return res.json({ enableAds: false, adsenseClientId: "", adsenseCodeSnippet: "" });
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try { val = JSON.parse(val); } catch (e) { val = {}; }
+    }
+    return res.json({
+      enableAds: !!val.enableAds,
+      adsenseClientId: val.adsenseClientId || "",
+      adsenseCodeSnippet: val.adsenseCodeSnippet || "",
+    });
+  } catch (error) {
+    console.error("Public ads-config route error:", error);
+    return res.status(500).json({ message: "Could not fetch public ads config." });
+  }
+});
 
 export default router;
