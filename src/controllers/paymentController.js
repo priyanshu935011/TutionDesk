@@ -1538,16 +1538,19 @@ export const updateAdsSettings = async (req, res) => {
     };
 
     let setting = await SystemSetting.findOne({ key: "ads_settings" });
-    if (!setting) {
-      setting = new SystemSetting({
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      await SystemSetting.create({
         key: "ads_settings",
         value: updatedValue,
         description: "Google AdSense verification and tuition target settings",
       });
-    } else {
-      setting.value = updatedValue;
     }
-    await setting.save();
     try {
       await clearCachePattern("student:dashboard:*");
     } catch (cErr) {}
