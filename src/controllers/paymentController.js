@@ -785,6 +785,9 @@ export const testSmtpConnection = async (req, res) => {
       try {
         console.log("Testing Brevo HTTP API connection...");
         const apiKey = testBrevoApiKey || testPass;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
         const response = await fetch("https://api.brevo.com/v3/smtp/email", {
           method: "POST",
           headers: {
@@ -798,7 +801,9 @@ export const testSmtpConnection = async (req, res) => {
             subject: "🧪 Classtech SMTP Configuration Test (Brevo API)",
             htmlContent: testHtml,
           }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
           success = true;
@@ -822,6 +827,9 @@ export const testSmtpConnection = async (req, res) => {
             user: testUser,
             pass: testPass,
           },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 8000,
         });
 
         const mailOptions = {

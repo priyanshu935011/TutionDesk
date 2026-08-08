@@ -91,6 +91,9 @@ export const sendResetEmail = async (email, name, resetLink) => {
   try {
     console.log("Attempting to send email via Brevo HTTP REST API (port 443)...");
     const apiKey = config.brevoApiKey || pass;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -112,7 +115,9 @@ export const sendResetEmail = async (email, name, resetLink) => {
         subject: "Reset your Classtech Password",
         htmlContent: emailHtml,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (response.ok) {
       const responseData = await response.json();
@@ -134,6 +139,9 @@ export const sendResetEmail = async (email, name, resetLink) => {
         user,
         pass,
       },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000,
     });
 
     const mailOptions = {
@@ -207,6 +215,9 @@ export const sendDemoRequestEmail = async ({
 
   try {
     const apiKey = config.brevoApiKey || pass;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -228,7 +239,9 @@ export const sendDemoRequestEmail = async ({
         subject: `🚀 New Demo Request: ${name} (${instituteName || "Tuition"})`,
         htmlContent: emailHtml,
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (response.ok) {
       const responseData = await response.json();
@@ -255,6 +268,9 @@ export const sendDemoRequestEmail = async ({
         user,
         pass,
       },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000,
     });
 
     const mailOptions = {
