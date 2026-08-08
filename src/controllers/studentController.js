@@ -6,6 +6,7 @@ import TestResult from "../models/TestResult.js";
 import User from "../models/User.js";
 import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
+import SystemSetting from "../models/SystemSetting.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
@@ -1019,6 +1020,21 @@ export const getStudentPortalData = async (req, res) => {
       return res.json(cachedData);
     }
 
+    const adsSetting = await SystemSetting.findOne({ key: "ads_settings" });
+    let adsConfig = { enableAds: false, adsenseClientId: "", adsenseCodeSnippet: "", adTuitions: [] };
+    if (adsSetting) {
+      let val = adsSetting.value;
+      if (typeof val === "string") {
+        try { val = JSON.parse(val); } catch (e) { val = {}; }
+      }
+      adsConfig = {
+        enableAds: !!val.enableAds,
+        adsenseClientId: val.adsenseClientId || "",
+        adsenseCodeSnippet: val.adsenseCodeSnippet || "",
+        adTuitions: val.adTuitions || [],
+      };
+    }
+
     const students = req.students; // all student records from protectStudent middleware
     const classes = [];
 
@@ -1176,6 +1192,9 @@ export const getStudentPortalData = async (req, res) => {
         logoUrl: institute.logoUrl || null,
         themeColor: institute.themeColor || "#6366f1",
         allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+        showAds: adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId)),
+        adsenseClientId: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseClientId : "",
+        adsenseCodeSnippet: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseCodeSnippet : "",
       });
     }
 

@@ -1,5 +1,6 @@
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
+import { sendRenewalReceiptEmail } from "../utils/mailer.js";
 import nodemailer from "nodemailer";
 import CashfreePayment from "../models/CashfreePayment.js";
 import Institute from "../models/Institute.js";
@@ -69,7 +70,7 @@ const getNextStartDate = (institute) => {
 // Create dynamic payment order or recurring subscription mandate
 export const createPaymentSession = async (req, res) => {
   try {
-    const { plan, tier, type } = req.body;
+    const { plan, tier, type, billingDetails } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
 
     if (!instituteId) {
@@ -165,6 +166,7 @@ export const createPaymentSession = async (req, res) => {
         cfOrderId: subId,
         subscriptionId: subId,
         autoRenew: true,
+        cfPaymentDetails: { billingDetails },
       });
 
       return res.json({
@@ -204,6 +206,7 @@ export const createPaymentSession = async (req, res) => {
         cfOrderId,
         paymentSessionId: response.data.payment_session_id,
         autoRenew: false,
+        cfPaymentDetails: { billingDetails },
       });
 
       return res.json({
@@ -307,6 +310,11 @@ export const verifyPayment = async (req, res) => {
 
         await institute.save();
         try {
+          await sendRenewalReceiptEmail(institute.adminEmail, institute.name, payment);
+        } catch (receiptErr) {
+          console.error("Receipt email error in verifyPayment:", receiptErr);
+        }
+        try {
           await clearCachePattern("teacher:dashboard:*");
           await clearCachePattern("student:dashboard:*");
         } catch (cacheErr) {
@@ -380,6 +388,11 @@ export const handleCashfreeWebhook = async (req, res) => {
               });
             }
             await institute.save();
+            try {
+              await sendRenewalReceiptEmail(institute.adminEmail, institute.name, payment);
+            } catch (receiptErr) {
+              console.error("Receipt email error in webhook:", receiptErr);
+            }
             try {
               await clearCachePattern("teacher:dashboard:*");
               await clearCachePattern("student:dashboard:*");
@@ -858,5 +871,689 @@ export const testSmtpConnection = async (req, res) => {
   } catch (error) {
     console.error("testSmtpConnection error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to test SMTP connection." });
+  }
+};
+
+export const getGstSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "gst_settings" });
+    const defaults = {
+      companyName: "Classtech Private Limited",
+      gstin: "",
+      address: "123, Tech Suite, Mumbai",
+      state: "Maharashtra",
+      stateCode: "27",
+      pan: "",
+      cgstRate: 9,
+      sgstRate: 9,
+      igstRate: 18,
+    };
+    if (!setting) {
+      return res.json(defaults);
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try {
+        val = JSON.parse(val);
+      } catch (e) {
+        val = {};
+      }
+    }
+    return res.json({
+      companyName: val.companyName || defaults.companyName,
+      gstin: val.gstin || "",
+      address: val.address || defaults.address,
+      state: val.state || defaults.state,
+      stateCode: val.stateCode || defaults.stateCode,
+      pan: val.pan || "",
+      cgstRate: val.cgstRate !== undefined ? Number(val.cgstRate) : 9,
+      sgstRate: val.sgstRate !== undefined ? Number(val.sgstRate) : 9,
+      igstRate: val.igstRate !== undefined ? Number(val.igstRate) : 18,
+    });
+  } catch (error) {
+    console.error("getGstSettings error:", error);
+    return res.status(500).json({ message: "Could not retrieve GST settings." });
+  }
+};
+
+export const updateGstSettings = async (req, res) => {
+  try {
+    const { companyName, gstin, address, state, stateCode, pan, cgstRate, sgstRate, igstRate } = req.body;
+
+    const updatedValue = {
+      companyName: companyName || "Classtech Private Limited",
+      gstin: gstin || "",
+      address: address || "",
+      state: state || "Maharashtra",
+      stateCode: stateCode || "27",
+      pan: pan || "",
+      cgstRate: cgstRate !== undefined ? Number(cgstRate) : 9,
+      sgstRate: sgstRate !== undefined ? Number(sgstRate) : 9,
+      igstRate: igstRate !== undefined ? Number(igstRate) : 18,
+    };
+
+    let setting = await SystemSetting.findOne({ key: "gst_settings" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "gst_settings",
+        value: updatedValue,
+        description: "Dynamic GST Tax Invoice Seller details configurations",
+      });
+    }
+
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateGstSettings error:", error);
+    return res.status(500).json({ message: "Could not update GST settings." });
+  }
+};
+
+export const getReceiptDesignSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "receipt_design_settings" });
+    const defaults = {
+      logoUrl: "https://classtech.in/logo.png",
+      primaryColor: "#4f46e5",
+      termsAndConditions: "1. Subscription payments are non-refundable.\n2. Access is valid for the selected plan tenure.",
+      footerNotes: "Thank you for partnering with Classtech!",
+      signatureText: "Authorized Signatory",
+      signatureUrl: "",
+    };
+    if (!setting) {
+      return res.json(defaults);
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try {
+        val = JSON.parse(val);
+      } catch (e) {
+        val = {};
+      }
+    }
+    return res.json({
+      logoUrl: val.logoUrl || defaults.logoUrl,
+      primaryColor: val.primaryColor || defaults.primaryColor,
+      termsAndConditions: val.termsAndConditions || defaults.termsAndConditions,
+      footerNotes: val.footerNotes || defaults.footerNotes,
+      signatureText: val.signatureText || defaults.signatureText,
+      signatureUrl: val.signatureUrl || "",
+    });
+  } catch (error) {
+    console.error("getReceiptDesignSettings error:", error);
+    return res.status(500).json({ message: "Could not retrieve Receipt design settings." });
+  }
+};
+
+export const updateReceiptDesignSettings = async (req, res) => {
+  try {
+    const { logoUrl, primaryColor, termsAndConditions, footerNotes, signatureText, signatureUrl } = req.body;
+
+    const updatedValue = {
+      logoUrl: logoUrl || "https://classtech.in/logo.png",
+      primaryColor: primaryColor || "#4f46e5",
+      termsAndConditions: termsAndConditions || "",
+      footerNotes: footerNotes || "",
+      signatureText: signatureText || "Authorized Signatory",
+      signatureUrl: signatureUrl || "",
+    };
+
+    let setting = await SystemSetting.findOne({ key: "receipt_design_settings" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "receipt_design_settings",
+        value: updatedValue,
+        description: "Dynamic Receipt/Invoice design layout and parameters",
+      });
+    }
+
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateReceiptDesignSettings error:", error);
+    return res.status(500).json({ message: "Could not update Receipt design settings." });
+  }
+};
+
+export const getSmtpRenewalSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "smtp_renewal_settings" });
+    const defaults = {
+      host: "",
+      port: 587,
+      user: "",
+      pass: "",
+      from: '"Classtech Billing" <support@classtech.in>',
+      brevoApiKey: "",
+      useDedicatedSmtp: false,
+    };
+    if (!setting) {
+      return res.json(defaults);
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try {
+        val = JSON.parse(val);
+      } catch (e) {
+        val = {};
+      }
+    }
+    return res.json({
+      host: val.host || "",
+      port: val.port || 587,
+      user: val.user || "",
+      pass: val.pass || "",
+      from: val.from || '"Classtech Billing" <support@classtech.in>',
+      brevoApiKey: val.brevoApiKey || "",
+      useDedicatedSmtp: !!val.useDedicatedSmtp,
+    });
+  } catch (error) {
+    console.error("getSmtpRenewalSettings error:", error);
+    return res.status(500).json({ message: "Could not retrieve SMTP renewal settings." });
+  }
+};
+
+export const updateSmtpRenewalSettings = async (req, res) => {
+  try {
+    const { host, port, user, pass, from, brevoApiKey, useDedicatedSmtp } = req.body;
+
+    const updatedValue = {
+      host: host || "",
+      port: Number(port) || 587,
+      user: user || "",
+      pass: pass || "",
+      from: from || '"Classtech Billing" <support@classtech.in>',
+      brevoApiKey: brevoApiKey || "",
+      useDedicatedSmtp: !!useDedicatedSmtp,
+    };
+
+    let setting = await SystemSetting.findOne({ key: "smtp_renewal_settings" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "smtp_renewal_settings",
+        value: updatedValue,
+        description: "Dedicated dynamic SMTP configuration for billing renewal receipt alerts",
+      });
+    }
+
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateSmtpRenewalSettings error:", error);
+    return res.status(500).json({ message: "Could not update SMTP renewal settings." });
+  }
+};
+
+export const testSmtpRenewalConnection = async (req, res) => {
+  try {
+    const { host, port, user, pass, from, brevoApiKey, recipientEmail } = req.body;
+
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, message: "Recipient email is required for testing." });
+    }
+
+    const testHost = host || process.env.SMTP_HOST;
+    const testPort = Number(port) || Number(process.env.SMTP_PORT) || 587;
+    const testUser = user || process.env.SMTP_USER;
+    const testPass = pass || process.env.SMTP_PASS;
+    const testFrom = from || process.env.SMTP_FROM || '"Classtech Billing" <support@classtech.in>';
+    const testBrevoApiKey = brevoApiKey || process.env.BREVO_API_KEY;
+
+    if (!testHost || !testUser || !testPass) {
+      return res.status(400).json({
+        success: false,
+        message: "SMTP host, user, and password are required to test.",
+      });
+    }
+
+    let parsedSenderName = "Classtech Billing Test";
+    let parsedSenderEmail = "support@classtech.in";
+    const fromMatch = testFrom.match(/^"([^"]+)"\s*<([^>]+)>$/);
+    if (fromMatch) {
+      parsedSenderName = fromMatch[1];
+      parsedSenderEmail = fromMatch[2];
+    } else {
+      const emailOnlyMatch = testFrom.match(/<([^>]+)>/);
+      if (emailOnlyMatch) {
+        parsedSenderEmail = emailOnlyMatch[1];
+      } else if (testFrom.includes("@")) {
+        parsedSenderEmail = testFrom.trim();
+      }
+    }
+
+    const testHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <h2 style="color: #4f46e5; margin-bottom: 20px;">🧪 Dedicated SMTP Renewal Test</h2>
+        <p>Hello,</p>
+        <p>This is a verification email sent from the Classtech Super Admin dashboard using your dedicated **Renewal SMTP Server** credentials.</p>
+        <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; font-family: monospace; font-size: 13px; color: #334155; margin: 20px 0;">
+          <strong>Host:</strong> ${testHost}<br/>
+          <strong>Port:</strong> ${testPort}<br/>
+          <strong>User:</strong> ${testUser}<br/>
+          <strong>From:</strong> ${testFrom}
+        </div>
+        <p style="color: #4f46e5; font-weight: bold;">If you are reading this email, your dedicated billing SMTP settings are working perfectly!</p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
+        <p style="font-size: 12px; color: #94a3b8;">Classtech SMTP Billing Verification Module</p>
+      </div>
+    `;
+
+    let success = false;
+    let errorLog = "";
+
+    if (testBrevoApiKey || (testPass && testPass.startsWith("xkeysib-"))) {
+      try {
+        console.log("Testing Brevo HTTP API connection (Renewal SMTP)...");
+        const apiKey = testBrevoApiKey || testPass;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "api-key": apiKey,
+          },
+          body: JSON.stringify({
+            sender: { name: parsedSenderName, email: parsedSenderEmail },
+            to: [{ email: recipientEmail, name: "Test Recipient" }],
+            subject: "🧪 Classtech Billing SMTP Test (Brevo API)",
+            htmlContent: testHtml,
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          success = true;
+        } else {
+          const errText = await response.text();
+          errorLog += `Brevo HTTP API status ${response.status}: ${errText}\n`;
+        }
+      } catch (brevoErr) {
+        errorLog += `Brevo HTTP API failed: ${brevoErr.message}\n`;
+      }
+    }
+
+    if (!success) {
+      try {
+        console.log("Testing direct SMTP transporter connection (Renewal SMTP)...");
+        const transporter = nodemailer.createTransport({
+          host: testHost,
+          port: testPort,
+          secure: testPort === 465,
+          auth: {
+            user: testUser,
+            pass: testPass,
+          },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 8000,
+        });
+
+        const mailOptions = {
+          from: testFrom,
+          to: recipientEmail,
+          subject: "🧪 Classtech Billing SMTP Test (Direct SMTP)",
+          html: testHtml,
+        };
+
+        await transporter.sendMail(mailOptions);
+        success = true;
+      } catch (smtpErr) {
+        errorLog += `SMTP transport failed: ${smtpErr.message}\n`;
+      }
+    }
+
+    if (success) {
+      return res.json({ success: true, message: `Test email sent successfully to ${recipientEmail}.` });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Failed to send email. See error logs.",
+        logs: errorLog,
+      });
+    }
+  } catch (error) {
+    console.error("testSmtpRenewalConnection error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to test SMTP connection." });
+  }
+};
+
+export const previewReceipt = async (req, res) => {
+  try {
+    const gstSetting = await SystemSetting.findOne({ key: "gst_settings" });
+    let rawSeller = gstSetting?.value || {
+      companyName: "Classtech Private Limited",
+      gstin: "27AAAAA1111A1Z1",
+      address: "123, Tech Suite, Mumbai",
+      state: "Maharashtra",
+      stateCode: "27",
+      pan: "AAAAA1111A",
+      cgstRate: 9,
+      sgstRate: 9,
+      igstRate: 18,
+    };
+    if (typeof rawSeller === "string") {
+      try {
+        rawSeller = JSON.parse(rawSeller);
+      } catch (e) {
+        rawSeller = {};
+      }
+    }
+    const seller = {
+      companyName: rawSeller.companyName || "Classtech Private Limited",
+      gstin: rawSeller.gstin || "",
+      address: rawSeller.address || "123, Tech Suite, Mumbai",
+      state: rawSeller.state || "Maharashtra",
+      stateCode: rawSeller.stateCode || "27",
+      pan: rawSeller.pan || "",
+      cgstRate: rawSeller.cgstRate !== undefined ? Number(rawSeller.cgstRate) : 9,
+      sgstRate: rawSeller.sgstRate !== undefined ? Number(rawSeller.sgstRate) : 9,
+      igstRate: rawSeller.igstRate !== undefined ? Number(rawSeller.igstRate) : 18,
+    };
+
+    const designSetting = await SystemSetting.findOne({ key: "receipt_design_settings" });
+    let rawDesign = designSetting?.value || {
+      logoUrl: "https://classtech.in/logo.png",
+      primaryColor: "#4f46e5",
+      termsAndConditions: "1. Subscription payments are non-refundable.\n2. Access is valid for the selected plan tenure.",
+      footerNotes: "Thank you for partnering with Classtech!",
+      signatureText: "Authorized Signatory",
+    };
+    if (typeof rawDesign === "string") {
+      try {
+        rawDesign = JSON.parse(rawDesign);
+      } catch (e) {
+        rawDesign = {};
+      }
+    }
+    const design = {
+      logoUrl: rawDesign.logoUrl || "https://classtech.in/logo.png",
+      primaryColor: rawDesign.primaryColor || "#4f46e5",
+      termsAndConditions: rawDesign.termsAndConditions || "1. Subscription payments are non-refundable.\n2. Access is valid for the selected plan tenure.",
+      footerNotes: rawDesign.footerNotes || "Thank you for partnering with Classtech!",
+      signatureText: rawDesign.signatureText || "Authorized Signatory",
+      signatureUrl: rawDesign.signatureUrl || "",
+    };
+
+    const dummyPayment = {
+      amount: 1999,
+      plan: "half_yearly",
+      cfOrderId: "cf_order_dummy123456",
+      updatedAt: new Date().toISOString(),
+      cfPaymentDetails: {
+        billingDetails: {
+          name: "Sample Academy",
+          gstin: "27BBBBB2222B2Z2",
+          address: "456, Knowledge Park, Pune",
+          state: "Maharashtra",
+        }
+      }
+    };
+
+    const billing = dummyPayment.cfPaymentDetails.billingDetails;
+    const buyerName = billing.name;
+    const buyerGstin = billing.gstin;
+    const buyerAddress = billing.address;
+    const buyerState = billing.state;
+
+    const totalAmount = Number(dummyPayment.amount);
+    const cgstRate = Number(seller.cgstRate ?? 9);
+    const sgstRate = Number(seller.sgstRate ?? 9);
+    const igstRate = Number(seller.igstRate ?? 18);
+
+    const isIntraState = String(buyerState).toLowerCase().trim() === String(seller.state).toLowerCase().trim();
+    let baseAmount = 0;
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+
+    if (isIntraState) {
+      const combinedRate = (cgstRate + sgstRate) / 100;
+      baseAmount = totalAmount / (1 + combinedRate);
+      cgstAmount = baseAmount * (cgstRate / 100);
+      sgstAmount = baseAmount * (sgstRate / 100);
+    } else {
+      const combinedRate = igstRate / 100;
+      baseAmount = totalAmount / (1 + combinedRate);
+      igstAmount = baseAmount * (igstRate / 100);
+    }
+
+    const formatNum = (val) => Number(val).toFixed(2);
+
+    const invoiceDate = new Date(dummyPayment.updatedAt).toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 650px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 20px; background-color: #ffffff; color: #1e293b; line-height: 1.5; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+        
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 25px;">
+          <div>
+            <img src="${design.logoUrl}" alt="Logo" style="max-height: 40px; margin-bottom: 10px; border-radius: 8px;" />
+            <h2 style="margin: 0; font-size: 18px; font-weight: 800; color: ${design.primaryColor || "#4f46e5"}; text-transform: uppercase;">Tax Invoice / Receipt</h2>
+          </div>
+          <div style="text-align: right; font-size: 11px; color: #64748b; font-family: monospace;">
+            <strong style="color: #0f172a; font-size: 12px;">${seller.companyName}</strong><br/>
+            ${seller.address}<br/>
+            GSTIN: <strong>${seller.gstin || "Not Configured"}</strong><br/>
+            State: ${seller.state} (Code: ${seller.stateCode || "N/A"})
+          </div>
+        </div>
+
+        <!-- Meta Info -->
+        <div style="display: flex; justify-content: space-between; margin-bottom: 25px; font-size: 12px; border-bottom: 1px solid #f8fafc; padding-bottom: 15px;">
+          <div>
+            <span style="color: #94a3b8; text-transform: uppercase; font-weight: bold; font-size: 10px;">Billed To</span>
+            <div style="font-weight: bold; color: #0f172a; margin-top: 4px; font-size: 13px;">${buyerName}</div>
+            <div style="color: #64748b; margin-top: 2px;">Address: ${buyerAddress}</div>
+            <div style="color: #64748b;">State: ${buyerState}</div>
+            ${buyerGstin ? `<div style="color: #0f172a; margin-top: 4px;">GSTIN: <strong>${buyerGstin}</strong></div>` : ""}
+          </div>
+          <div style="text-align: right;">
+            <span style="color: #94a3b8; text-transform: uppercase; font-weight: bold; font-size: 10px;">Invoice Details</span>
+            <div style="color: #64748b; margin-top: 4px;">Receipt ID: <strong style="color: #0f172a;">${dummyPayment.cfOrderId}</strong></div>
+            <div style="color: #64748b;">Date: ${invoiceDate}</div>
+            <div style="color: #64748b;">Status: <span style="color: #10b981; font-weight: bold; text-transform: uppercase; font-size: 10px; background-color: #ecfdf5; padding: 2px 6px; border-radius: 4px; border: 1px solid #d1fae5;">PAID</span></div>
+          </div>
+        </div>
+
+        <!-- Table -->
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px;">
+          <thead>
+            <tr style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; text-align: left;">
+              <th style="padding: 10px; color: #475569; font-weight: bold;">Description</th>
+              <th style="padding: 10px; color: #475569; font-weight: bold; text-align: right;">Qty</th>
+              <th style="padding: 10px; color: #475569; font-weight: bold; text-align: right;">Base Price</th>
+              <th style="padding: 10px; color: #475569; font-weight: bold; text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+              <td style="padding: 12px 10px;">
+                <strong style="color: #0f172a; text-transform: capitalize;">Classtech Subscription Plan (${dummyPayment.plan})</strong><br/>
+                <span style="color: #94a3b8; font-size: 10px;">Access period extended automatically</span>
+              </td>
+              <td style="padding: 12px 10px; text-align: right; color: #475569;">1</td>
+              <td style="padding: 12px 10px; text-align: right; color: #475569;">INR ${formatNum(baseAmount)}</td>
+              <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #0f172a;">INR ${formatNum(baseAmount)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Totals & Tax Split -->
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 30px;">
+          <div style="width: 250px; font-size: 12px; border-top: 1px solid #f1f5f9; padding-top: 10px;">
+            <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #64748b;">
+              <span>Subtotal:</span>
+              <span>INR ${formatNum(baseAmount)}</span>
+            </div>
+            
+            ${isIntraState ? `
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #64748b;">
+                <span>CGST (${cgstRate}%):</span>
+                <span>INR ${formatNum(cgstAmount)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #64748b;">
+                <span>SGST (${sgstRate}%):</span>
+                <span>INR ${formatNum(sgstAmount)}</span>
+              </div>
+            ` : `
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: #64748b;">
+                <span>IGST (${igstRate}%):</span>
+                <span>INR ${formatNum(igstAmount)}</span>
+              </div>
+            `}
+
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-top: 2px solid #e2e8f0; font-weight: bold; font-size: 14px; color: #0f172a;">
+              <span>Total Paid:</span>
+              <span>INR ${formatNum(totalAmount)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Signatory & Terms -->
+        <div style="display: flex; justify-content: space-between; border-top: 1px solid #e2e8f0; padding-top: 20px; font-size: 11px; color: #64748b; line-height: 1.6;">
+          <div style="flex-grow: 1; padding-right: 30px;">
+            <span style="font-weight: bold; color: #0f172a; text-transform: uppercase; font-size: 9px; letter-spacing: 1px;">Terms & Conditions</span><br/>
+            <span style="white-space: pre-line;">${design.termsAndConditions}</span>
+            <div style="margin-top: 12px; font-weight: bold; color: ${design.primaryColor || "#4f46e5"};">${design.footerNotes}</div>
+          </div>
+          <div style="text-align: right; width: 150px; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end;">
+            <div style="height: 35px; min-width: 100px; display: flex; align-items: flex-end; justify-content: flex-end; margin-bottom: 6px;">
+              ${design.signatureUrl ? `<img src="${design.signatureUrl}" alt="Signature" style="max-height: 35px; max-width: 120px;" />` : `<div style="height: 35px; width: 100px; border-bottom: 1px dashed #cbd5e1;"></div>`}
+            </div>
+            <strong style="color: #0f172a; font-size: 11px;">${design.signatureText}</strong>
+            <span style="font-size: 10px; color: #94a3b8; margin-top: 1px;">For ${seller.companyName}</span>
+          </div>
+        </div>
+
+      </div>
+    `;
+
+    return res.send(emailHtml);
+  } catch (error) {
+    return res.status(500).send("<h3>Could not render receipt preview layout.</h3>");
+  }
+};
+
+import cloudinary from "../utils/cloudinary.js";
+import { Readable } from "stream";
+
+const uploadBufferToCloudinary = (buffer, options = {}) =>
+  new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: "image",
+        folder: "classtech/signatures",
+        ...options,
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(result);
+      },
+    );
+    Readable.from(buffer).pipe(uploadStream);
+  });
+
+export const uploadSignatoryImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+    const result = await uploadBufferToCloudinary(req.file.buffer);
+    return res.json({ signatureUrl: result.secure_url });
+  } catch (error) {
+    console.error("uploadSignatoryImage error:", error);
+    return res.status(500).json({ message: "Could not upload signature image" });
+  }
+};
+
+export const getAdsSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "ads_settings" });
+    const defaults = {
+      enableAds: false,
+      adsenseClientId: "",
+      adsenseCodeSnippet: "",
+      adsTxtContent: "",
+      adTuitions: [],
+    };
+    if (!setting) {
+      return res.json(defaults);
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try {
+        val = JSON.parse(val);
+      } catch (e) {
+        val = {};
+      }
+    }
+    return res.json({
+      enableAds: val.enableAds ?? defaults.enableAds,
+      adsenseClientId: val.adsenseClientId || defaults.adsenseClientId,
+      adsenseCodeSnippet: val.adsenseCodeSnippet || defaults.adsenseCodeSnippet,
+      adsTxtContent: val.adsTxtContent || defaults.adsTxtContent,
+      adTuitions: val.adTuitions || defaults.adTuitions,
+    });
+  } catch (error) {
+    console.error("getAdsSettings error:", error);
+    return res.status(500).json({ message: "Could not retrieve ads settings." });
+  }
+};
+
+export const updateAdsSettings = async (req, res) => {
+  try {
+    const { enableAds, adsenseClientId, adsenseCodeSnippet, adsTxtContent, adTuitions } = req.body;
+    const updatedValue = {
+      enableAds: !!enableAds,
+      adsenseClientId: adsenseClientId || "",
+      adsenseCodeSnippet: adsenseCodeSnippet || "",
+      adsTxtContent: adsTxtContent || "",
+      adTuitions: Array.isArray(adTuitions) ? adTuitions : [],
+    };
+
+    let setting = await SystemSetting.findOne({ key: "ads_settings" });
+    if (!setting) {
+      setting = new SystemSetting({
+        key: "ads_settings",
+        value: updatedValue,
+        description: "Google AdSense verification and tuition target settings",
+      });
+    } else {
+      setting.value = updatedValue;
+    }
+    await setting.save();
+    try {
+      await clearCachePattern("student:dashboard:*");
+    } catch (cErr) {}
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateAdsSettings error:", error);
+    return res.status(500).json({ message: "Could not save ads settings." });
   }
 };

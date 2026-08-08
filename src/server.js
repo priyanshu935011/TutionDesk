@@ -23,6 +23,7 @@ import leadRoutes from "./routes/leadRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
+import SystemSetting from "./models/SystemSetting.js";
 
 connectDB();
 
@@ -82,6 +83,27 @@ app.use(globalLimiter);
 
 app.get("/", (_, res) => {
   res.json({ message: "Coaching CRM API is running" });
+});
+
+app.get("/ads.txt", async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "ads_settings" });
+    if (setting && setting.value) {
+      let val = setting.value;
+      if (typeof val === "string") {
+        try { val = JSON.parse(val); } catch(e) { val = {}; }
+      }
+      if (val.adsTxtContent) {
+        res.setHeader("Content-Type", "text/plain");
+        return res.send(val.adsTxtContent);
+      }
+    }
+    res.setHeader("Content-Type", "text/plain");
+    return res.send("google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0");
+  } catch (err) {
+    res.setHeader("Content-Type", "text/plain");
+    return res.send("google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0");
+  }
 });
 
 app.use("/auth", authLimiter, authRoutes);

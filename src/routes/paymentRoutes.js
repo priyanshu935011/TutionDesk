@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
 import {
@@ -15,8 +16,20 @@ import {
   getSmtpSettings,
   updateSmtpSettings,
   testSmtpConnection,
+  getGstSettings,
+  updateGstSettings,
+  getReceiptDesignSettings,
+  updateReceiptDesignSettings,
+  getSmtpRenewalSettings,
+  updateSmtpRenewalSettings,
+  testSmtpRenewalConnection,
+  previewReceipt,
+  uploadSignatoryImage,
+  getAdsSettings,
+  updateAdsSettings,
 } from "../controllers/paymentController.js";
 
+const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
 // Public webhook route (not protected by auth)
@@ -39,5 +52,24 @@ router.post("/test-gateway", protect, staffOnly, testGatewayConnection);
 router.get("/smtp-settings", protect, staffOnly, getSmtpSettings);
 router.put("/smtp-settings", protect, staffOnly, updateSmtpSettings);
 router.post("/test-smtp", protect, staffOnly, testSmtpConnection);
+
+// GST configuration routes
+router.get("/gst-settings", protect, staffOnly, getGstSettings);
+router.put("/gst-settings", protect, staffOnly, updateGstSettings);
+
+// Receipt design configuration routes
+router.get("/receipt-design", protect, staffOnly, getReceiptDesignSettings);
+router.put("/receipt-design", protect, staffOnly, updateReceiptDesignSettings);
+router.post("/receipt-design/upload-signature", protect, staffOnly, upload.single("signature"), uploadSignatoryImage);
+router.get("/preview-receipt", protect, staffOnly, previewReceipt);
+
+// Dedicated SMTP Renewal routes
+router.get("/smtp-renewal-settings", protect, staffOnly, getSmtpRenewalSettings);
+router.put("/smtp-renewal-settings", protect, staffOnly, updateSmtpRenewalSettings);
+router.post("/test-smtp-renewal", protect, staffOnly, testSmtpRenewalConnection);
+
+// Ads configuration routes
+router.get("/ads-settings", protect, staffOnly, getAdsSettings);
+router.put("/ads-settings", protect, staffOnly, updateAdsSettings);
 
 export default router;

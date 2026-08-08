@@ -6,7 +6,12 @@ import { updateConcurrentPeak } from "../utils/activityTracker.js";
 import redisClient from "../config/redis.js";
 
 const protect = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
+  let authHeader = req.headers.authorization;
+
+  // Fallback to query parameter for token authentication (e.g. for iframe preview routes)
+  if (!authHeader && req.query.token) {
+    authHeader = `Bearer ${req.query.token}`;
+  }
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ message: "Not authorized" });
