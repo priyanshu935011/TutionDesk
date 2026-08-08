@@ -29,6 +29,21 @@ const getBaseUrl = (environment) => {
     : "https://sandbox.cashfree.com/pg";
 };
 
+const getCoveragePlan = (planStr) => {
+  if (!planStr) return "monthly";
+  const str = String(planStr).toLowerCase();
+  if (str.includes("half_yearly") || str.includes("halfyearly")) {
+    return "half_yearly";
+  }
+  if (str.includes("yearly") || str.includes("annual")) {
+    return "yearly";
+  }
+  if (str.includes("quarterly")) {
+    return "quarterly";
+  }
+  return "monthly";
+};
+
 const getNextStartDate = (institute) => {
   if (institute?.subscriptionEnd) {
     const currentEnd = new Date(institute.subscriptionEnd);
@@ -255,9 +270,7 @@ export const verifyPayment = async (req, res) => {
     if (status === "success") {
       const institute = await Institute.findById(payment.institute);
       if (institute) {
-        // Extract plain plan coverage cycle (monthly, quarterly, yearly)
-        const parts = payment.plan.split("_");
-        const coveragePlan = parts[1] || "monthly";
+        const coveragePlan = getCoveragePlan(payment.plan);
 
         const nextStart = getNextStartDate(institute);
         const nextEnd = resolveSubscriptionEnd({
@@ -335,8 +348,7 @@ export const handleCashfreeWebhook = async (req, res) => {
         if (payment.status === "success") {
           const institute = await Institute.findById(payment.institute);
           if (institute) {
-            const parts = payment.plan.split("_");
-            const coveragePlan = parts[1] || "monthly";
+            const coveragePlan = getCoveragePlan(payment.plan);
             const nextStart = getNextStartDate(institute);
             const nextEnd = resolveSubscriptionEnd({
               subscriptionPlan: coveragePlan,
