@@ -1595,7 +1595,7 @@ const mockMongoose = {
         return this.value;
       };
       ObjectId.isValid = function(val) {
-        return typeof val === "string" && val.length > 0;
+        return typeof val === "string" && val.length === 24 && /^[0-9a-fA-F]{24}$/.test(val);
       };
       return ObjectId;
     })()
