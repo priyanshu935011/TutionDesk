@@ -111,6 +111,9 @@ export const updateContactDetails = async (req, res) => {
     let setting = await SystemSetting.findOne({ key: "contact_details" });
     if (setting) {
       setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
       await setting.save();
     } else {
       setting = await SystemSetting.create({
@@ -120,10 +123,7 @@ export const updateContactDetails = async (req, res) => {
       });
     }
 
-    return res.json({
-      message: "Contact details updated successfully.",
-      data: updatedValue,
-    });
+    return res.json(updatedValue);
   } catch (error) {
     console.error("updateContactDetails error:", error);
     return res.status(500).json({ message: "Could not update contact details." });
