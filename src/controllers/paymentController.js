@@ -1,4 +1,5 @@
 import SystemSetting from "../models/SystemSetting.js";
+import { clearCachePattern } from "../utils/cache.js";
 import CashfreePayment from "../models/CashfreePayment.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
@@ -29,6 +30,13 @@ const getBaseUrl = (environment) => {
 };
 
 const getNextStartDate = (institute) => {
+  if (institute?.subscriptionEnd) {
+    const currentEnd = new Date(institute.subscriptionEnd);
+    if (!isNaN(currentEnd.getTime()) && currentEnd.getTime() > Date.now()) {
+      return currentEnd;
+    }
+  }
+
   const history = Array.isArray(institute?.subscriptionHistory) ? institute.subscriptionHistory : [];
   const lastHistory = history.slice().sort(
     (a, b) => new Date(b?.endDate).getTime() - new Date(a?.endDate).getTime()
@@ -284,6 +292,12 @@ export const verifyPayment = async (req, res) => {
         }
 
         await institute.save();
+        try {
+          await clearCachePattern("teacher:dashboard:*");
+          await clearCachePattern("student:dashboard:*");
+        } catch (cacheErr) {
+          console.error("Cache clear error in payment verify:", cacheErr);
+        }
       }
     }
 
@@ -353,6 +367,12 @@ export const handleCashfreeWebhook = async (req, res) => {
               });
             }
             await institute.save();
+            try {
+              await clearCachePattern("teacher:dashboard:*");
+              await clearCachePattern("student:dashboard:*");
+            } catch (cacheErr) {
+              console.error("Cache clear error in payment webhook:", cacheErr);
+            }
           }
         }
       }
