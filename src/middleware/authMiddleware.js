@@ -40,6 +40,8 @@ const protect = async (req, res, next) => {
     }
 
     if (req.user.role !== "super_admin" && req.user.institute) {
+      const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");
+
       const institute = await Institute.findById(req.user.institute).select(
         "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan"
       );
@@ -49,7 +51,7 @@ const protect = async (req, res, next) => {
           institute.status !== "active" ||
           new Date(institute.subscriptionEnd).getTime() < Date.now();
 
-        if (isExpired) {
+        if (isExpired && !isPaymentRoute) {
           return res.status(403).json({
             message:
               "Your subscription has expired. Please renew to access the institute features.",
