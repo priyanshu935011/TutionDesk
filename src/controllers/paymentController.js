@@ -1,5 +1,6 @@
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
+import nodemailer from "nodemailer";
 import CashfreePayment from "../models/CashfreePayment.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
@@ -649,5 +650,205 @@ export const getPaymentDetailsForInstitute = async (req, res) => {
   } catch (error) {
     console.error("getPaymentDetailsForInstitute error:", error);
     return res.status(500).json({ message: "Could not fetch payment configuration details." });
+  }
+};
+
+export const getSmtpSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "smtp_settings" });
+    const defaults = {
+      host: "",
+      port: 587,
+      user: "",
+      pass: "",
+      from: '"Classtech" <support@classtech.in>',
+      brevoApiKey: "",
+    };
+    if (!setting) {
+      return res.json(defaults);
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try {
+        val = JSON.parse(val);
+      } catch (e) {
+        val = {};
+      }
+    }
+    return res.json({
+      host: val.host || "",
+      port: val.port || 587,
+      user: val.user || "",
+      pass: val.pass || "",
+      from: val.from || '"Classtech" <support@classtech.in>',
+      brevoApiKey: val.brevoApiKey || "",
+    });
+  } catch (error) {
+    console.error("getSmtpSettings error:", error);
+    return res.status(500).json({ message: "Could not retrieve SMTP settings." });
+  }
+};
+
+export const updateSmtpSettings = async (req, res) => {
+  try {
+    const { host, port, user, pass, from, brevoApiKey } = req.body;
+
+    const updatedValue = {
+      host: host || "",
+      port: Number(port) || 587,
+      user: user || "",
+      pass: pass || "",
+      from: from || '"Classtech" <support@classtech.in>',
+      brevoApiKey: brevoApiKey || "",
+    };
+
+    let setting = await SystemSetting.findOne({ key: "smtp_settings" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "smtp_settings",
+        value: updatedValue,
+        description: "Dynamic SMTP configuration credentials for Nodemailer/Brevo API",
+      });
+    }
+
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateSmtpSettings error:", error);
+    return res.status(500).json({ message: "Could not update SMTP settings." });
+  }
+};
+
+export const testSmtpConnection = async (req, res) => {
+  try {
+    const { host, port, user, pass, from, brevoApiKey, recipientEmail } = req.body;
+
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, message: "Recipient email is required for testing." });
+    }
+
+    const testHost = host || process.env.SMTP_HOST;
+    const testPort = Number(port) || Number(process.env.SMTP_PORT) || 587;
+    const testUser = user || process.env.SMTP_USER;
+    const testPass = pass || process.env.SMTP_PASS;
+    const testFrom = from || process.env.SMTP_FROM || '"Classtech" <support@classtech.in>';
+    const testBrevoApiKey = brevoApiKey || process.env.BREVO_API_KEY;
+
+    if (!testHost || !testUser || !testPass) {
+      return res.status(400).json({
+        success: false,
+        message: "SMTP host, user, and password are required to test.",
+      });
+    }
+
+    let parsedSenderName = "Classtech Test";
+    let parsedSenderEmail = "support@classtech.in";
+    const fromMatch = testFrom.match(/^"([^"]+)"\s*<([^>]+)>$/);
+    if (fromMatch) {
+      parsedSenderName = fromMatch[1];
+      parsedSenderEmail = fromMatch[2];
+    } else {
+      const emailOnlyMatch = testFrom.match(/<([^>]+)>/);
+      if (emailOnlyMatch) {
+        parsedSenderEmail = emailOnlyMatch[1];
+      } else if (testFrom.includes("@")) {
+        parsedSenderEmail = testFrom.trim();
+      }
+    }
+
+    const testHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <h2 style="color: #10b981; margin-bottom: 20px;">🧪 SMTP Configuration Test</h2>
+        <p>Hello,</p>
+        <p>This is a test email sent from the Classtech Super Admin dashboard to verify your SMTP settings.</p>
+        <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; font-family: monospace; font-size: 13px; color: #334155; margin: 20px 0;">
+          <strong>Host:</strong> ${testHost}<br/>
+          <strong>Port:</strong> ${testPort}<br/>
+          <strong>User:</strong> ${testUser}<br/>
+          <strong>From:</strong> ${testFrom}
+        </div>
+        <p style="color: #059669; font-weight: bold;">If you are reading this email, your SMTP settings are working perfectly!</p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
+        <p style="font-size: 12px; color: #94a3b8;">Classtech SMTP System Verification Module</p>
+      </div>
+    `;
+
+    let success = false;
+    let errorLog = "";
+
+    if (testBrevoApiKey || (testPass && testPass.startsWith("xkeysib-"))) {
+      try {
+        console.log("Testing Brevo HTTP API connection...");
+        const apiKey = testBrevoApiKey || testPass;
+        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "api-key": apiKey,
+          },
+          body: JSON.stringify({
+            sender: { name: parsedSenderName, email: parsedSenderEmail },
+            to: [{ email: recipientEmail, name: "Test Recipient" }],
+            subject: "🧪 Classtech SMTP Configuration Test (Brevo API)",
+            htmlContent: testHtml,
+          }),
+        });
+
+        if (response.ok) {
+          success = true;
+        } else {
+          const errText = await response.text();
+          errorLog += `Brevo HTTP API status ${response.status}: ${errText}\n`;
+        }
+      } catch (brevoErr) {
+        errorLog += `Brevo HTTP API failed: ${brevoErr.message}\n`;
+      }
+    }
+
+    if (!success) {
+      try {
+        console.log("Testing direct SMTP transporter connection...");
+        const transporter = nodemailer.createTransport({
+          host: testHost,
+          port: testPort,
+          secure: testPort === 465,
+          auth: {
+            user: testUser,
+            pass: testPass,
+          },
+        });
+
+        const mailOptions = {
+          from: testFrom,
+          to: recipientEmail,
+          subject: "🧪 Classtech SMTP Configuration Test (Direct SMTP)",
+          html: testHtml,
+        };
+
+        await transporter.sendMail(mailOptions);
+        success = true;
+      } catch (smtpErr) {
+        errorLog += `SMTP transport failed: ${smtpErr.message}\n`;
+      }
+    }
+
+    if (success) {
+      return res.json({ success: true, message: `Test email sent successfully to ${recipientEmail}.` });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Failed to send email. See error logs.",
+        logs: errorLog,
+      });
+    }
+  } catch (error) {
+    console.error("testSmtpConnection error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to test SMTP connection." });
   }
 };

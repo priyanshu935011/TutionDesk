@@ -12,6 +12,9 @@ import {
   updateCashfreeSettings,
   testGatewayConnection,
   getPaymentDetailsForInstitute,
+  getSmtpSettings,
+  updateSmtpSettings,
+  testSmtpConnection,
 } from "../controllers/paymentController.js";
 
 const router = express.Router();
@@ -31,5 +34,10 @@ router.post("/:id/cancel-subscription", protect, staffOnly, cancelAutoRenew);
 router.get("/settings", protect, staffOnly, getCashfreeSettings);
 router.put("/settings", protect, staffOnly, updateCashfreeSettings);
 router.post("/test-gateway", protect, staffOnly, testGatewayConnection);
+
+// SMTP configuration routes
+router.get("/smtp-settings", protect, staffOnly, getSmtpSettings);
+router.put("/smtp-settings", protect, staffOnly, updateSmtpSettings);
+router.post("/test-smtp", protect, staffOnly, testSmtpConnection);
 
 export default router;

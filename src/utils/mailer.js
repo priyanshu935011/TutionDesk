@@ -1,11 +1,47 @@
 import nodemailer from "nodemailer";
+import SystemSetting from "../models/SystemSetting.js";
+
+export const getSmtpConfig = async () => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "smtp_settings" });
+    if (setting && setting.value) {
+      let val = setting.value;
+      if (typeof val === "string") {
+        try {
+          val = JSON.parse(val);
+        } catch (e) {
+          val = {};
+        }
+      }
+      return {
+        host: val.host || process.env.SMTP_HOST,
+        port: val.port || process.env.SMTP_PORT || 587,
+        user: val.user || process.env.SMTP_USER,
+        pass: val.pass || process.env.SMTP_PASS,
+        from: val.from || process.env.SMTP_FROM || `"Classtech" <support@classtech.in>`,
+        brevoApiKey: val.brevoApiKey || process.env.BREVO_API_KEY
+      };
+    }
+  } catch (error) {
+    console.error("Error reading SMTP settings from DB, using fallback:", error);
+  }
+  return {
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT || 587,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: process.env.SMTP_FROM || `"Classtech" <support@classtech.in>`,
+    brevoApiKey: process.env.BREVO_API_KEY
+  };
+};
 
 export const sendResetEmail = async (email, name, resetLink) => {
-  const host = process.env.SMTP_HOST;
-  const port = process.env.SMTP_PORT || 587;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  let from = process.env.SMTP_FROM || `"Classtech" <support@classtech.in>`;
+  const config = await getSmtpConfig();
+  const host = config.host;
+  const port = config.port;
+  const user = config.user;
+  const pass = config.pass;
+  let from = config.from;
   if (from.includes("classtech.in")) {
     from = from.replace("classtech.in", "classtech.in");
   }
@@ -16,7 +52,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
   console.log(`==================================================\n`);
 
   if (!host || !user || !pass) {
-    console.log("SMTP environment variables not configured. Logged reset email link above.");
+    console.log("SMTP configurations not complete. Logged reset email link above.");
     return;
   }
 
@@ -54,7 +90,7 @@ export const sendResetEmail = async (email, name, resetLink) => {
 
   try {
     console.log("Attempting to send email via Brevo HTTP REST API (port 443)...");
-    const apiKey = process.env.BREVO_API_KEY || pass;
+    const apiKey = config.brevoApiKey || pass;
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -122,11 +158,12 @@ export const sendDemoRequestEmail = async ({
   preferredTime,
   notes,
 }) => {
-  const host = process.env.SMTP_HOST;
-  const port = process.env.SMTP_PORT || 587;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  let from = process.env.SMTP_FROM || `"Classtech" <support@classtech.in>`;
+  const config = await getSmtpConfig();
+  const host = config.host;
+  const port = config.port;
+  const user = config.user;
+  const pass = config.pass;
+  let from = config.from;
   if (from.includes("classtech.in")) {
     from = from.replace("classtech.in", "classtech.in");
   }
@@ -169,7 +206,7 @@ export const sendDemoRequestEmail = async ({
   `;
 
   try {
-    const apiKey = process.env.BREVO_API_KEY || pass;
+    const apiKey = config.brevoApiKey || pass;
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
