@@ -68,20 +68,24 @@ export const createPaymentSession = async (req, res) => {
     const { appId, secretKey, environment } = config;
     const baseUrl = getBaseUrl(environment);
 
-    // Calculate billing amount based on selected plan/tier
-    let amount = 1999;
-    if (tier === "gold") {
-      if (plan === "monthly") amount = 2999;
-      if (plan === "quarterly") amount = 7999;
-      if (plan === "yearly") amount = 24999;
-    } else if (tier === "diamond") {
-      if (plan === "monthly") amount = 4999;
-      if (plan === "quarterly") amount = 12999;
-      if (plan === "yearly") amount = 39999;
-    } else { // silver
-      if (plan === "monthly") amount = 1999;
-      if (plan === "quarterly") amount = 4999;
-      if (plan === "yearly") amount = 15999;
+    // Calculate billing amount based on institute subscriptionAmount and config default base price
+    const basePrice = Number(institute.subscriptionAmount) || Number(config.defaultMonthlyPrice) || 1999;
+    const { defaultMonthlyPrice, enableOffers, sixMonthsFreeMonths, twelveMonthsFreeMonths } = config;
+
+    let amount = basePrice;
+    let coveragePlan = "monthly";
+
+    if (plan === "half_yearly" || plan === "quarterly") { // quarterly maps to 6 months here per UI
+      coveragePlan = "half_yearly";
+      const freeMonths = enableOffers !== false ? Number(sixMonthsFreeMonths || 1) : 0;
+      amount = basePrice * (6 - freeMonths);
+    } else if (plan === "yearly") {
+      coveragePlan = "yearly";
+      const freeMonths = enableOffers !== false ? Number(twelveMonthsFreeMonths || 2) : 0;
+      amount = basePrice * (12 - freeMonths);
+    } else {
+      coveragePlan = "monthly";
+      amount = basePrice;
     }
 
     const cfOrderId = "order_" + crypto.randomUUID().replace(/-/g, "");
@@ -95,17 +99,17 @@ export const createPaymentSession = async (req, res) => {
 
     if (type === "recurring") {
       // Auto-renew subscription flow using Cashfree Subscriptions APIs
-      const planId = `plan_${tier}_${plan}_recurring`;
+      const planId = `plan_${coveragePlan}_recurring`;
       
       // Attempt to ensure subscription plan exists
       try {
         await axios.post(`${baseUrl}/plans`, {
           plan_id: planId,
-          plan_name: `${tier.toUpperCase()} ${plan.toUpperCase()} Auto-Renew`,
+          plan_name: `Tuition ${coveragePlan.toUpperCase()} Auto-Renew`,
           plan_type: "PERIODIC",
           plan_currency: "INR",
           plan_intervals: 1,
-          plan_interval_type: plan === "yearly" ? "YEAR" : (plan === "quarterly" ? "QUARTER" : "MONTH"),
+          plan_interval_type: coveragePlan === "yearly" ? "YEAR" : (coveragePlan === "half_yearly" ? "HALF_YEAR" : "MONTH"),
           plan_amount: amount,
         }, { headers });
       } catch (err) {
@@ -130,7 +134,7 @@ export const createPaymentSession = async (req, res) => {
       await CashfreePayment.create({
         institute: instituteId,
         instituteName: institute.name,
-        plan: `${tier}_${plan}`,
+        plan: coveragePlan,
         amount,
         type: "recurring",
         status: "pending",
@@ -169,7 +173,7 @@ export const createPaymentSession = async (req, res) => {
       await CashfreePayment.create({
         institute: instituteId,
         instituteName: institute.name,
-        plan: `${tier}_${plan}`,
+        plan: coveragePlan,
         amount,
         type: "one_time",
         status: "pending",
@@ -463,8 +467,17 @@ export const cancelAutoRenew = async (req, res) => {
 export const getCashfreeSettings = async (req, res) => {
   try {
     const setting = await SystemSetting.findOne({ key: "cashfree_settings" });
+    const defaults = {
+      appId: "",
+      secretKey: "",
+      environment: "sandbox",
+      defaultMonthlyPrice: 1999,
+      enableOffers: true,
+      sixMonthsFreeMonths: 1,
+      twelveMonthsFreeMonths: 2,
+    };
     if (!setting) {
-      return res.json({ appId: "", secretKey: "", environment: "sandbox" });
+      return res.json(defaults);
     }
     let val = setting.value;
     if (typeof val === "string") {
@@ -474,7 +487,7 @@ export const getCashfreeSettings = async (req, res) => {
         val = {};
       }
     }
-    const merged = { appId: "", secretKey: "", environment: "sandbox", ...(val || {}) };
+    const merged = { ...defaults, ...(val || {}) };
     return res.json(merged);
   } catch (error) {
     console.error("getCashfreeSettings error:", error);
@@ -484,7 +497,7 @@ export const getCashfreeSettings = async (req, res) => {
 
 export const updateCashfreeSettings = async (req, res) => {
   try {
-    const { appId, secretKey, environment } = req.body;
+    const { appId, secretKey, environment, defaultMonthlyPrice, enableOffers, sixMonthsFreeMonths, twelveMonthsFreeMonths } = req.body;
     if (!appId || !secretKey || !environment) {
       return res.status(400).json({ message: "App ID, Secret Key and Environment are required." });
     }
@@ -493,6 +506,10 @@ export const updateCashfreeSettings = async (req, res) => {
       appId: appId.trim(),
       secretKey: secretKey.trim(),
       environment: environment.trim().toLowerCase(),
+      defaultMonthlyPrice: Number(defaultMonthlyPrice || 1999),
+      enableOffers: enableOffers !== false,
+      sixMonthsFreeMonths: Number(sixMonthsFreeMonths || 1),
+      twelveMonthsFreeMonths: Number(twelveMonthsFreeMonths || 2),
     };
 
     let setting = await SystemSetting.findOne({ key: "cashfree_settings" });
@@ -566,5 +583,39 @@ export const testGatewayConnection = async (req, res) => {
       success: false,
       message: error.response?.data?.message || error.message || "Failed to authenticate with Cashfree Gateway API.",
     });
+  }
+};
+
+export const getPaymentDetailsForInstitute = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "Institute context is required." });
+    }
+
+    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    let config = { defaultMonthlyPrice: 1999, enableOffers: true, sixMonthsFreeMonths: 1, twelveMonthsFreeMonths: 2 };
+    try {
+      config = await getCashfreeConfig();
+    } catch (e) {}
+
+    const basePrice = Number(institute.subscriptionAmount) || Number(config.defaultMonthlyPrice) || 1999;
+    
+    return res.json({
+      basePrice,
+      enableOffers: config.enableOffers !== false,
+      sixMonthsFreeMonths: Number(config.sixMonthsFreeMonths || 1),
+      twelveMonthsFreeMonths: Number(config.twelveMonthsFreeMonths || 2),
+      tuitionName: institute.name,
+      plan: institute.subscriptionPlan,
+      status: institute.status,
+    });
+  } catch (error) {
+    console.error("getPaymentDetailsForInstitute error:", error);
+    return res.status(500).json({ message: "Could not fetch payment configuration details." });
   }
 };

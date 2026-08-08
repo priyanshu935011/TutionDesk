@@ -11,6 +11,7 @@ import {
   getCashfreeSettings,
   updateCashfreeSettings,
   testGatewayConnection,
+  getPaymentDetailsForInstitute,
 } from "../controllers/paymentController.js";
 
 const router = express.Router();
@@ -21,6 +22,7 @@ router.post("/webhook", handleCashfreeWebhook);
 // Protected routes (Tuition Admin / Teachers)
 router.post("/create-session", protect, createPaymentSession);
 router.post("/verify", protect, verifyPayment);
+router.get("/details", protect, getPaymentDetailsForInstitute);
 
 // Protected staff routes (Super Admin / Tech Admin)
 router.get("/list", protect, staffOnly, getAllPayments);
