@@ -1209,6 +1209,47 @@ export const clearSystemLogs = async (req, res) => {
   }
 };
 
+export const markSystemLogAsRead = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Update in-memory
+    const memLog = inMemoryLogs.find(log => String(log._id) === String(id));
+    if (memLog) {
+      memLog.isRead = true;
+    }
+
+    // Update database
+    try {
+      await SystemLog.findByIdAndUpdate(id, { isRead: true });
+    } catch (e) {}
+
+    return res.json({ message: "Log marked as read successfully." });
+  } catch (error) {
+    console.error("markSystemLogAsRead error:", error);
+    return res.status(500).json({ message: "Could not mark log as read." });
+  }
+};
+
+export const markAllSystemLogsAsRead = async (req, res) => {
+  try {
+    // Update in-memory
+    inMemoryLogs.forEach(log => {
+      log.isRead = true;
+    });
+
+    // Update database
+    try {
+      await SystemLog.updateMany({}, { isRead: true });
+    } catch (e) {}
+
+    return res.json({ message: "All logs marked as read successfully." });
+  } catch (error) {
+    console.error("markAllSystemLogsAsRead error:", error);
+    return res.status(500).json({ message: "Could not mark all logs as read." });
+  }
+};
+
 export const updateTuitionWebsite = async (req, res) => {
   try {
     const { id } = req.params;

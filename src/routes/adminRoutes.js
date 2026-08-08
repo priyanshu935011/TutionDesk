@@ -21,6 +21,8 @@ import {
   getInstituteFullAnalytics,
   getSystemLogs,
   clearSystemLogs,
+  markSystemLogAsRead,
+  markAllSystemLogsAsRead,
   updateTuitionWebsite,
   getWhatsAppCredentialsTemplate,
   updateWhatsAppCredentialsTemplate,
@@ -50,6 +52,8 @@ router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
 router.get("/system-logs", getSystemLogs);
 router.delete("/system-logs", clearSystemLogs);
+router.put("/system-logs/read-all", markAllSystemLogsAsRead);
+router.put("/system-logs/:id/read", markSystemLogAsRead);
 
 router.get("/whatsapp-template", getWhatsAppCredentialsTemplate);
 router.put("/whatsapp-template", updateWhatsAppCredentialsTemplate);

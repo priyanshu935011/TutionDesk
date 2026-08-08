@@ -42,6 +42,10 @@ const systemLogSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+    isRead: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

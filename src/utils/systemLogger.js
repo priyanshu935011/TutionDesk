@@ -132,6 +132,7 @@ export const logSystemError = async ({
       method: req?.method || undefined,
       timestamp: new Date().toISOString(),
     },
+    isRead: false,
     createdAt: new Date().toISOString(),
   };
 
