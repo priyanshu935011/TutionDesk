@@ -76,6 +76,7 @@ export const deleteContactMessage = async (req, res) => {
 const DEFAULT_CONTACT_DETAILS = {
   phone: "+91 90000 12345",
   email: "support@classtech.com",
+  companyName: "Classtech",
   address: "4th Floor, Tech Hub Tower, HSR Layout, Sector 6, Bangalore, Karnataka - 560102"
 };
 
@@ -85,7 +86,8 @@ export const getContactDetails = async (req, res) => {
     if (!setting) {
       return res.json(DEFAULT_CONTACT_DETAILS);
     }
-    return res.json(setting.value || DEFAULT_CONTACT_DETAILS);
+    const merged = { ...DEFAULT_CONTACT_DETAILS, ...(setting.value || {}) };
+    return res.json(merged);
   } catch (error) {
     console.error("getContactDetails error:", error);
     return res.status(500).json({ message: "Could not fetch contact details." });
@@ -94,7 +96,7 @@ export const getContactDetails = async (req, res) => {
 
 export const updateContactDetails = async (req, res) => {
   try {
-    const { phone, email, address } = req.body;
+    const { phone, email, address, companyName } = req.body;
     if (!phone || !email || !address) {
       return res.status(400).json({ message: "Phone, email and address are required." });
     }
@@ -102,18 +104,25 @@ export const updateContactDetails = async (req, res) => {
     const updatedValue = {
       phone: phone.trim(),
       email: email.trim().toLowerCase(),
+      companyName: companyName ? companyName.trim() : "Classtech",
       address: address.trim(),
     };
 
-    const updatedSetting = await SystemSetting.findOneAndUpdate(
-      { key: "contact_details" },
-      { key: "contact_details", value: updatedValue, description: "System website contact coordinates" },
-      { new: true, upsert: true }
-    );
+    let setting = await SystemSetting.findOne({ key: "contact_details" });
+    if (setting) {
+      setting.value = updatedValue;
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "contact_details",
+        value: updatedValue,
+        description: "System website contact coordinates"
+      });
+    }
 
     return res.json({
       message: "Contact details updated successfully.",
-      data: updatedSetting.value,
+      data: updatedValue,
     });
   } catch (error) {
     console.error("updateContactDetails error:", error);
