@@ -1,4 +1,5 @@
 import ContactMessage from "../models/ContactMessage.js";
+import SystemSetting from "../models/SystemSetting.js";
 
 // Public submission
 export const submitContactMessage = async (req, res) => {
@@ -69,5 +70,53 @@ export const deleteContactMessage = async (req, res) => {
   } catch (error) {
     console.error("deleteContactMessage error:", error);
     return res.status(500).json({ message: "Could not delete contact message." });
+  }
+};
+
+const DEFAULT_CONTACT_DETAILS = {
+  phone: "+91 90000 12345",
+  email: "support@classtech.com",
+  address: "4th Floor, Tech Hub Tower, HSR Layout, Sector 6, Bangalore, Karnataka - 560102"
+};
+
+export const getContactDetails = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "contact_details" });
+    if (!setting) {
+      return res.json(DEFAULT_CONTACT_DETAILS);
+    }
+    return res.json(setting.value || DEFAULT_CONTACT_DETAILS);
+  } catch (error) {
+    console.error("getContactDetails error:", error);
+    return res.status(500).json({ message: "Could not fetch contact details." });
+  }
+};
+
+export const updateContactDetails = async (req, res) => {
+  try {
+    const { phone, email, address } = req.body;
+    if (!phone || !email || !address) {
+      return res.status(400).json({ message: "Phone, email and address are required." });
+    }
+
+    const updatedValue = {
+      phone: phone.trim(),
+      email: email.trim().toLowerCase(),
+      address: address.trim(),
+    };
+
+    const updatedSetting = await SystemSetting.findOneAndUpdate(
+      { key: "contact_details" },
+      { key: "contact_details", value: updatedValue, description: "System website contact coordinates" },
+      { new: true, upsert: true }
+    );
+
+    return res.json({
+      message: "Contact details updated successfully.",
+      data: updatedSetting.value,
+    });
+  } catch (error) {
+    console.error("updateContactDetails error:", error);
+    return res.status(500).json({ message: "Could not update contact details." });
   }
 };

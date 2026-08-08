@@ -4,7 +4,7 @@ import Institute from "../models/Institute.js";
 import { generateTuitionHTML } from "../services/netlifyService.js";
 import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormByShortId } from "../controllers/leadController.js";
 import { getPublicPages, getPublicPageBySlug } from "../controllers/pageController.js";
-import { submitContactMessage } from "../controllers/contactController.js";
+import { submitContactMessage, getContactDetails } from "../controllers/contactController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -81,5 +81,6 @@ router.get("/pages/:slug", getPublicPageBySlug);
 
 // Public contact submission
 router.post("/contact", submitContactMessage);
+router.get("/contact-details", getContactDetails);
 
 export default router;

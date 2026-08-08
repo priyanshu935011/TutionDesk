@@ -46,6 +46,7 @@ import {
   getContactMessages,
   markContactMessageRead,
   deleteContactMessage,
+  updateContactDetails,
 } from "../controllers/contactController.js";
 
 const router = express.Router();
@@ -63,6 +64,7 @@ router.put("/system-logs/:id/read", markSystemLogAsRead);
 router.get("/contact-messages", getContactMessages);
 router.put("/contact-messages/:id/read", markContactMessageRead);
 router.delete("/contact-messages/:id", deleteContactMessage);
+router.put("/contact-details", updateContactDetails);
 
 router.get("/whatsapp-template", getWhatsAppCredentialsTemplate);
 router.put("/whatsapp-template", updateWhatsAppCredentialsTemplate);
