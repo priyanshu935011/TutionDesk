@@ -26,6 +26,9 @@ import {
   updateTuitionWebsite,
   getWhatsAppCredentialsTemplate,
   updateWhatsAppCredentialsTemplate,
+  getWhatsAppGlobalTemplates,
+  updateWhatsAppGlobalTemplates,
+  sendWhatsAppTestMessage,
   getMetaWhatsAppSettings,
   updateMetaWhatsAppSettings,
   getStaff,
@@ -68,6 +71,10 @@ router.put("/contact-details", updateContactDetails);
 
 router.get("/whatsapp-template", getWhatsAppCredentialsTemplate);
 router.put("/whatsapp-template", updateWhatsAppCredentialsTemplate);
+
+router.get("/whatsapp-global-templates", getWhatsAppGlobalTemplates);
+router.put("/whatsapp-global-templates", updateWhatsAppGlobalTemplates);
+router.post("/whatsapp-send-test", sendWhatsAppTestMessage);
 
 router.get("/whatsapp-settings", getMetaWhatsAppSettings);
 router.put("/whatsapp-settings", updateMetaWhatsAppSettings);

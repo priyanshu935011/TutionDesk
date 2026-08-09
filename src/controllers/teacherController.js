@@ -22,6 +22,7 @@ import {
 } from "../services/quizRuntime.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendMessage, getSessionStatus } from "../services/whatsappService.js";
+import { getGlobalTemplates, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 
 const uploadBufferToCloudinary = (buffer, options = {}) =>
   new Promise((resolve, reject) => {
@@ -742,6 +743,7 @@ export const createTestResultsBulk = async (req, res) => {
 
           const formattedDate = new Date(examDate).toLocaleDateString("en-IN");
           const totalNum = Number(totalMarks);
+          const globalTemplates = await getGlobalTemplates();
 
           for (const entry of entries) {
             const student = studentMap[String(entry.studentId)];
@@ -753,7 +755,16 @@ export const createTestResultsBulk = async (req, res) => {
             const scoreNum = Number(entry.score || 0);
             const percentage = totalNum > 0 ? Math.round((scoreNum / totalNum) * 100) : 0;
 
-            const messageText = `📊 *Test Marks Alert - ${inst?.name || "Classtech"}*\nStudent: *${student.name}*\nTest Title: *${title}*\nScore: *${scoreNum} / ${totalNum}* (${percentage}%)\nExam Date: *${formattedDate}*\n${entry.remarks ? `Remarks: ${entry.remarks}\n` : ""}Thank you!`;
+            const messageText = formatTestMarksMessage({
+              template: globalTemplates.testMarks,
+              studentName: student.name,
+              testName: title,
+              marksObtained: String(scoreNum),
+              totalMarks: String(totalNum),
+              percentage: String(percentage),
+              remarks: entry.remarks || "-",
+              instituteName: inst?.name || "Classtech",
+            });
 
             try {
               await sendMessage(String(instituteId), targetPhone, messageText);

@@ -11,7 +11,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendMessage, sendDocument } from "../services/whatsappService.js";
-import { getCredentialsTemplate, formatCredentialsMessage } from "../utils/whatsappTemplateHelper.js";
+import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 
 export const getInitialPassword = (name, phone) => {
@@ -841,12 +841,16 @@ export const markAttendance = async (req, res) => {
               month: "short",
               year: "numeric",
             });
-            const template = settings.customMessageTemplate || "Dear Parent, your child {studentName} was marked absent on {date}.";
+            const globalTemplates = await getGlobalTemplates();
+            const inst = await Institute.findById(instituteId);
+            const messageText = formatAbsentMessage({
+              template: globalTemplates.absent,
+              studentName: student.name,
+              date: formattedDate,
+              instituteName: inst?.name || "Classtech",
+            });
             const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
             if (recipientPhone) {
-              const messageText = template
-                .replace(/\{studentName\}/g, student.name)
-                .replace(/\{date\}/g, formattedDate);
               await sendMessage(String(instituteId), recipientPhone, messageText);
             }
           }
@@ -979,15 +983,19 @@ export const markBatchAttendance = async (req, res) => {
             month: "short",
             year: "numeric",
           });
-          const template = settings.customMessageTemplate || "Dear Parent, your child {studentName} was marked absent on {date}.";
+          const globalTemplates = await getGlobalTemplates();
+          const inst = await Institute.findById(instituteId);
 
           for (const student of absentStudents) {
             const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
             if (!recipientPhone) continue;
 
-            const messageText = template
-              .replace(/\{studentName\}/g, student.name)
-              .replace(/\{date\}/g, formattedDate);
+            const messageText = formatAbsentMessage({
+              template: globalTemplates.absent,
+              studentName: student.name,
+              date: formattedDate,
+              instituteName: inst?.name || "Classtech",
+            });
 
             try {
               console.log(`Sending background WhatsApp absent alert to ${student.name} at ${recipientPhone}...`);

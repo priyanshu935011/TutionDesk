@@ -12,7 +12,8 @@ import Note from "../models/Note.js";
 import Notice from "../models/Notice.js";
 import Quiz from "../models/Quiz.js";
 import SystemSetting from "../models/SystemSetting.js";
-import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE } from "../utils/whatsappTemplateHelper.js";
+import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
+import { sendMessage } from "../services/whatsappService.js";
 import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 import redisClient from "../config/redis.js";
@@ -1576,6 +1577,122 @@ export const getActivityLogs = async (req, res) => {
   } catch (err) {
     console.error("getActivityLogs error:", err);
     return res.status(500).json({ message: "Could not retrieve activity logs." });
+  }
+};
+
+export const getWhatsAppGlobalTemplates = async (req, res) => {
+  try {
+    const templates = await getGlobalTemplates();
+    return res.json(templates);
+  } catch (error) {
+    console.error("getWhatsAppGlobalTemplates error:", error);
+    return res.status(500).json({ message: "Could not fetch WhatsApp templates" });
+  }
+};
+
+export const updateWhatsAppGlobalTemplates = async (req, res) => {
+  try {
+    const { credentials, absent, feeReminder, testMarks } = req.body;
+    
+    const updatedValue = {
+      credentials: credentials || "",
+      absent: absent || "",
+      feeReminder: feeReminder || "",
+      testMarks: testMarks || "",
+    };
+
+    let setting = await SystemSetting.findOne({ key: "whatsapp_global_templates" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      await SystemSetting.create({
+        key: "whatsapp_global_templates",
+        value: updatedValue,
+        description: "Global templates for all WhatsApp notification events",
+      });
+    }
+
+    return res.json({
+      message: "WhatsApp global templates updated successfully!",
+      templates: updatedValue,
+    });
+  } catch (error) {
+    console.error("updateWhatsAppGlobalTemplates error:", error);
+    return res.status(500).json({ message: "Could not update WhatsApp templates" });
+  }
+};
+
+export const sendWhatsAppTestMessage = async (req, res) => {
+  try {
+    const { phone, templateType, customValues } = req.body;
+    if (!phone || !phone.trim()) {
+      return res.status(400).json({ message: "Phone number is required" });
+    }
+    if (!templateType) {
+      return res.status(400).json({ message: "Template type is required" });
+    }
+
+    const templates = await getGlobalTemplates();
+    const targetTemplate = templates[templateType];
+    if (!targetTemplate) {
+      return res.status(400).json({ message: "Invalid template type" });
+    }
+
+    const instituteName = "Classtech (Test)";
+    let text = "";
+
+    if (templateType === "credentials") {
+      text = formatCredentialsMessage({
+        template: targetTemplate,
+        studentName: customValues?.studentName || "John Doe",
+        enrollmentNumber: customValues?.enrollmentNumber || "CT-2026-101",
+        password: customValues?.password || "123456",
+        phone: phone,
+        instituteName,
+        loginUrl: `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`,
+      });
+    } else if (templateType === "absent") {
+      text = formatAbsentMessage({
+        template: targetTemplate,
+        studentName: customValues?.studentName || "John Doe",
+        date: new Date().toLocaleDateString("en-IN"),
+        instituteName,
+      });
+    } else if (templateType === "feeReminder") {
+      text = formatFeeReminderMessage({
+        template: targetTemplate,
+        studentName: customValues?.studentName || "John Doe",
+        parentName: customValues?.parentName || "Jane Doe",
+        pendingAmount: customValues?.pendingAmount || "1500",
+        dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN"),
+        instituteName,
+      });
+    } else if (templateType === "testMarks") {
+      text = formatTestMarksMessage({
+        template: targetTemplate,
+        studentName: customValues?.studentName || "John Doe",
+        testName: customValues?.testName || "Math Term Test",
+        marksObtained: customValues?.marksObtained || "92",
+        totalMarks: customValues?.totalMarks || "100",
+        percentage: customValues?.percentage || "92",
+        remarks: customValues?.remarks || "Outstanding performance!",
+        instituteName,
+      });
+    }
+
+    const result = await sendMessage("admin_test", phone, text);
+    if (!result.success) {
+      return res.status(400).json({ message: result.message || "Failed to send WhatsApp message" });
+    }
+
+    return res.json({ message: "Test WhatsApp message sent successfully!", previewText: text });
+  } catch (error) {
+    console.error("sendWhatsAppTestMessage error:", error);
+    return res.status(500).json({ message: error.message || "Could not dispatch test WhatsApp message" });
   }
 };
 

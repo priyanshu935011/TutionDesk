@@ -2,6 +2,7 @@ import express from "express";
 import Student from "../models/Student.js";
 import Institute from "../models/Institute.js";
 import { sendMessage } from "../services/whatsappService.js";
+import { getGlobalTemplates, formatFeeReminderMessage } from "../utils/whatsappTemplateHelper.js";
 
 const router = express.Router();
 
@@ -12,6 +13,7 @@ router.post("/fee-reminders", async (req, res) => {
   }
 
   try {
+    const globalTemplates = await getGlobalTemplates();
     const students = await Student.find({});
     let sentCount = 0;
     let failCount = 0;
@@ -51,14 +53,15 @@ router.post("/fee-reminders", async (req, res) => {
             }
           }
 
-          const template = inst.whatsappSettings?.feeReminderTemplate || "Dear {parentName}, this is a friendly reminder that INR {pendingAmount} is outstanding for student {studentName}'s tuition fee. Due date: {dueDate}. Thank you!";
           const formattedDueDate = student.dueDate ? new Date(student.dueDate).toLocaleDateString("en-IN") : "-";
-          const text = template
-            .replace(/\{studentName\}/g, student.name || "")
-            .replace(/\{parentName\}/g, student.parentName || "Parent")
-            .replace(/\{pendingAmount\}/g, String(pending))
-            .replace(/\{dueDate\}/g, formattedDueDate)
-            .replace(/\{instituteName\}/g, inst.name || "Classtech");
+          const text = formatFeeReminderMessage({
+            template: globalTemplates.feeReminder,
+            studentName: student.name || "",
+            parentName: student.parentName || "Parent",
+            pendingAmount: String(pending),
+            dueDate: formattedDueDate,
+            instituteName: inst.name || "Classtech",
+          });
 
           try {
             await sendMessage(instId, targetPhone, text);
