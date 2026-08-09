@@ -104,6 +104,24 @@ router.get("/ads-config", async (req, res) => {
     console.error("Public ads-config route error:", error);
     return res.status(500).json({ message: "Could not fetch public ads config." });
   }
+// Public website settings (for custom meta tags verification)
+router.get("/website-settings", async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "website_settings" });
+    if (!setting) {
+      return res.json({ customMetaTags: "" });
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try { val = JSON.parse(val); } catch (e) { val = {}; }
+    }
+    return res.json({
+      customMetaTags: val.customMetaTags || "",
+    });
+  } catch (error) {
+    console.error("Public website-settings route error:", error);
+    return res.status(500).json({ message: "Could not fetch public website settings." });
+  }
 });
 
 export default router;

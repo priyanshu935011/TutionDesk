@@ -27,6 +27,8 @@ import {
   uploadSignatoryImage,
   getAdsSettings,
   updateAdsSettings,
+  getWebsiteSettings,
+  updateWebsiteSettings,
 } from "../controllers/paymentController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -71,5 +73,9 @@ router.post("/test-smtp-renewal", protect, staffOnly, testSmtpRenewalConnection)
 // Ads configuration routes
 router.get("/ads-settings", protect, staffOnly, getAdsSettings);
 router.put("/ads-settings", protect, staffOnly, updateAdsSettings);
+
+// Custom Website settings / Meta tags routes
+router.get("/website-settings", protect, staffOnly, getWebsiteSettings);
+router.put("/website-settings", protect, staffOnly, updateWebsiteSettings);
 
 export default router;

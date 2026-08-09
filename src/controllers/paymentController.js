@@ -1560,3 +1560,49 @@ export const updateAdsSettings = async (req, res) => {
     return res.status(500).json({ message: "Could not save ads settings." });
   }
 };
+
+export const getWebsiteSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "website_settings" });
+    if (!setting) {
+      return res.json({ customMetaTags: "" });
+    }
+    return res.json(setting.value);
+  } catch (error) {
+    console.error("getWebsiteSettings error:", error);
+    return res.status(500).json({ message: "Could not fetch website settings." });
+  }
+};
+
+export const updateWebsiteSettings = async (req, res) => {
+  try {
+    const { customMetaTags } = req.body;
+    const updatedValue = {
+      customMetaTags: customMetaTags || "",
+    };
+
+    let setting = await SystemSetting.findOne({ key: "website_settings" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      await SystemSetting.create({
+        key: "website_settings",
+        value: updatedValue,
+        description: "Custom SEO verification metadata and script tags",
+      });
+    }
+
+    try {
+      await clearCachePattern("student:dashboard:*");
+    } catch (cErr) {}
+
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateWebsiteSettings error:", error);
+    return res.status(500).json({ message: "Could not save website settings." });
+  }
+};
