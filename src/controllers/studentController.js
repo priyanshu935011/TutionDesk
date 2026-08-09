@@ -10,7 +10,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
-import { sendMessage, sendDocument } from "../services/whatsappService.js";
+import { sendMessage, sendDocument, sendTemplateMessage } from "../services/whatsappService.js";
 import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 
@@ -405,19 +405,15 @@ export const createStudent = async (req, res) => {
           const recipientPhone = parentPhone?.trim() || phone?.trim();
 
           if (recipientPhone) {
-            const template = await getCredentialsTemplate();
-            const messageText = formatCredentialsMessage({
-              template,
-              studentName: name,
-              enrollmentNumber: enrollmentNumberToUse,
-              password: plainPassword,
-              phone,
+            const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
+            await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
               instituteName,
-              loginUrl: `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`,
-            });
-
-            await sendMessage(String(instituteId), recipientPhone, messageText);
-            console.log(`WhatsApp login credentials sent successfully to ${name} (${recipientPhone})`);
+              name,
+              enrollmentNumberToUse,
+              plainPassword,
+              loginUrl
+            ]);
+            console.log(`WhatsApp login credentials template sent successfully to ${name} (${recipientPhone})`);
           }
         } catch (wErr) {
           console.error(`Failed to send WhatsApp credentials to ${name}:`, wErr.message);
@@ -1495,19 +1491,15 @@ export const bulkCreateStudents = async (req, res) => {
               const recipientPhone = item.parentPhone?.trim() || item.phone?.trim();
               if (!recipientPhone) continue;
 
-              const messageText = formatCredentialsMessage({
-                template,
-                studentName: item.name,
-                enrollmentNumber: item.enrollmentNumber,
-                password: item.plainPassword,
-                phone: item.phone,
-                instituteName,
-                loginUrl,
-              });
-
               try {
                 console.log(`Sending bulk WhatsApp login credentials to ${item.name} (${recipientPhone})...`);
-                await sendMessage(String(instituteId), recipientPhone, messageText);
+                await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
+                  instituteName,
+                  item.name,
+                  item.enrollmentNumber,
+                  item.plainPassword,
+                  loginUrl
+                ]);
                 await new Promise((r) => setTimeout(r, 600));
               } catch (wErr) {
                 console.error(`Failed sending bulk WhatsApp credentials to ${item.name}:`, wErr.message);
@@ -1547,21 +1539,16 @@ export const sendStudentCredentialsWhatsApp = async (req, res) => {
       return res.status(400).json({ message: "Student or parent phone number is missing" });
     }
 
-    const template = await getCredentialsTemplate();
     const plainPassword = getInitialPassword(student.name, student.phone);
     const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
 
-    const messageText = formatCredentialsMessage({
-      template,
-      studentName: student.name,
-      enrollmentNumber: student.enrollmentNumber,
-      password: plainPassword,
-      phone: student.phone,
+    await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
       instituteName,
-      loginUrl,
-    });
-
-    await sendMessage(String(instituteId), recipientPhone, messageText);
+      student.name,
+      student.enrollmentNumber,
+      plainPassword,
+      loginUrl
+    ]);
 
     return res.json({
       success: true,

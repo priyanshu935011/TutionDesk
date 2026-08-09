@@ -1673,7 +1673,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         loginUrl,
       });
     } else if (templateType === "absent") {
-      templateName = "student_absent_alert";
+      templateName = "absent_alert";
       const studentName = customValues?.studentName || "John Doe";
       const date = new Date().toLocaleDateString("en-IN");
       parameters = [studentName, date, instituteName];
@@ -1685,7 +1685,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         instituteName,
       });
     } else if (templateType === "feeReminder") {
-      templateName = "fee_due_reminder";
+      templateName = "fee_reminder";
       const parentName = customValues?.parentName || "Jane Doe";
       const pendingAmount = customValues?.pendingAmount || "1500";
       const studentName = customValues?.studentName || "John Doe";
@@ -1701,7 +1701,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         instituteName,
       });
     } else if (templateType === "testMarks") {
-      templateName = "test_marks_alert";
+      templateName = "test_marks";
       const studentName = customValues?.studentName || "John Doe";
       const testName = customValues?.testName || "Math Term Test";
       const marksObtained = customValues?.marksObtained || "92";
