@@ -20,6 +20,8 @@ export const DEFAULT_TEST_MARKS_TEMPLATE = `Dear Parent, test results for {stude
 Score: {marksObtained} / {totalMarks} ({percentage}%).
 Status/Remarks: {remarks}`;
 
+export const DEFAULT_HELLO_WORLD_TEMPLATE = `Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification from the Cloud API, hosted by Meta. Thank you for taking the time to test with us.`;
+
 export const getCredentialsTemplate = async () => {
   try {
     const setting = await SystemSetting.findOne({ key: "whatsapp_credentials_template" });
@@ -41,6 +43,7 @@ export const getGlobalTemplates = async () => {
       absent: stored.absent || DEFAULT_ABSENT_TEMPLATE,
       feeReminder: stored.feeReminder || DEFAULT_FEE_REMINDER_TEMPLATE,
       testMarks: stored.testMarks || DEFAULT_TEST_MARKS_TEMPLATE,
+      helloWorld: stored.helloWorld || DEFAULT_HELLO_WORLD_TEMPLATE,
     };
   } catch (err) {
     console.error("Error fetching whatsapp_global_templates from DB:", err.message);
@@ -49,6 +52,7 @@ export const getGlobalTemplates = async () => {
       absent: DEFAULT_ABSENT_TEMPLATE,
       feeReminder: DEFAULT_FEE_REMINDER_TEMPLATE,
       testMarks: DEFAULT_TEST_MARKS_TEMPLATE,
+      helloWorld: DEFAULT_HELLO_WORLD_TEMPLATE,
     };
   }
 };

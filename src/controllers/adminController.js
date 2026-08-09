@@ -1600,13 +1600,14 @@ export const getWhatsAppGlobalTemplates = async (req, res) => {
 
 export const updateWhatsAppGlobalTemplates = async (req, res) => {
   try {
-    const { credentials, absent, feeReminder, testMarks } = req.body;
+    const { credentials, absent, feeReminder, testMarks, helloWorld } = req.body;
     
     const updatedValue = {
       credentials: credentials || "",
       absent: absent || "",
       feeReminder: feeReminder || "",
       testMarks: testMarks || "",
+      helloWorld: helloWorld || "",
     };
 
     let setting = await SystemSetting.findOne({ key: "whatsapp_global_templates" });
@@ -1720,6 +1721,10 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         remarks,
         instituteName,
       });
+    } else if (templateType === "helloWorld") {
+      templateName = "hello_world";
+      parameters = [];
+      text = targetTemplate;
     }
 
     const result = await sendTemplateMessage("admin_test", phone, templateName, parameters);
