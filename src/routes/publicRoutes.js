@@ -104,6 +104,8 @@ router.get("/ads-config", async (req, res) => {
     console.error("Public ads-config route error:", error);
     return res.status(500).json({ message: "Could not fetch public ads config." });
   }
+});
+
 // Public website settings (for custom meta tags verification)
 router.get("/website-settings", async (req, res) => {
   try {
