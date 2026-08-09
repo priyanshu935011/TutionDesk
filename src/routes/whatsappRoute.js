@@ -6,6 +6,35 @@ import { getCache, setCache, clearCachePattern } from "../utils/cache.js";
 
 const router = express.Router();
 
+// Public Webhook receiver for Meta WhatsApp Cloud API (not protected by auth)
+router.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  // Default to a fallback verification token if not set in environment
+  const verifyToken = process.env.META_WHATSAPP_VERIFY_TOKEN || "classtech_verify_token";
+
+  if (mode && token) {
+    if (mode === "subscribe" && token === verifyToken) {
+      console.log("Meta WhatsApp Webhook verified successfully.");
+      return res.status(200).send(challenge);
+    } else {
+      console.warn("Meta WhatsApp Webhook verification failed: verify_token mismatch.");
+      return res.sendStatus(403);
+    }
+  }
+  return res.sendStatus(400);
+});
+
+router.post("/webhook", (req, res) => {
+  const body = req.body;
+  console.log("Meta WhatsApp Webhook event received:", JSON.stringify(body));
+
+  // Meta expects a 200 OK response to avoid retry loops
+  return res.sendStatus(200);
+});
+
 router.use(protect);
 
 router.get("/status", async (req, res) => {
