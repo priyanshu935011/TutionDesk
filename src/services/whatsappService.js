@@ -162,6 +162,60 @@ export const sendDocument = async (instituteId, to, fileBuffer, fileName, captio
   }
 };
 
+export const sendTemplateMessage = async (instituteId, to, templateName, parameters) => {
+  const creds = await getMetaCredentials();
+  if (!creds) {
+    console.warn(`WhatsApp template skip to ${to}: Meta Cloud API not configured.`);
+    return { success: false, message: "Meta API not configured." };
+  }
+
+  const cleanNumber = formatPhoneNumber(to);
+  const { accessToken, phoneNumberId } = creds;
+
+  console.log(`Sending Meta WhatsApp Template [${templateName}] to ${cleanNumber}...`);
+
+  try {
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: cleanNumber,
+        type: "template",
+        template: {
+          name: templateName,
+          language: {
+            code: "en_US"
+          },
+          components: [
+            {
+              type: "body",
+              parameters: parameters.map(p => ({
+                type: "text",
+                text: String(p)
+              }))
+            }
+          ]
+        }
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error?.message || "Failed to send WhatsApp template message via Meta API");
+    }
+
+    return { success: true, messageId: data.messages?.[0]?.id };
+  } catch (err) {
+    console.error(`Meta WhatsApp template error to ${cleanNumber}:`, err.message);
+    throw err;
+  }
+};
+
 export const reconnectAllSessions = async () => {
   // Baileys auto-reconnect is deprecated since we use the centralized Meta API.
   return;

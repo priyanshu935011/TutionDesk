@@ -13,7 +13,7 @@ import Notice from "../models/Notice.js";
 import Quiz from "../models/Quiz.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
-import { sendMessage } from "../services/whatsappService.js";
+import { sendMessage, sendTemplateMessage } from "../services/whatsappService.js";
 import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 import redisClient from "../config/redis.js";
@@ -1652,52 +1652,82 @@ export const sendWhatsAppTestMessage = async (req, res) => {
 
     const instituteName = "Classtech (Test)";
     let text = "";
+    let templateName = "";
+    let parameters = [];
 
     if (templateType === "credentials") {
+      templateName = "student_credentials";
+      const studentName = customValues?.studentName || "John Doe";
+      const enrollmentNumber = customValues?.enrollmentNumber || "CT-2026-101";
+      const password = customValues?.password || "123456";
+      const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
+      parameters = [instituteName, studentName, enrollmentNumber, password, loginUrl];
+      
       text = formatCredentialsMessage({
         template: targetTemplate,
-        studentName: customValues?.studentName || "John Doe",
-        enrollmentNumber: customValues?.enrollmentNumber || "CT-2026-101",
-        password: customValues?.password || "123456",
-        phone: phone,
+        studentName,
+        enrollmentNumber,
+        password,
+        phone,
         instituteName,
-        loginUrl: `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`,
+        loginUrl,
       });
     } else if (templateType === "absent") {
+      templateName = "student_absent_alert";
+      const studentName = customValues?.studentName || "John Doe";
+      const date = new Date().toLocaleDateString("en-IN");
+      parameters = [studentName, date, instituteName];
+
       text = formatAbsentMessage({
         template: targetTemplate,
-        studentName: customValues?.studentName || "John Doe",
-        date: new Date().toLocaleDateString("en-IN"),
+        studentName,
+        date,
         instituteName,
       });
     } else if (templateType === "feeReminder") {
+      templateName = "fee_due_reminder";
+      const parentName = customValues?.parentName || "Jane Doe";
+      const pendingAmount = customValues?.pendingAmount || "1500";
+      const studentName = customValues?.studentName || "John Doe";
+      const dueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN");
+      parameters = [parentName, pendingAmount, studentName, instituteName, dueDate];
+
       text = formatFeeReminderMessage({
         template: targetTemplate,
-        studentName: customValues?.studentName || "John Doe",
-        parentName: customValues?.parentName || "Jane Doe",
-        pendingAmount: customValues?.pendingAmount || "1500",
-        dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toLocaleDateString("en-IN"),
+        studentName,
+        parentName,
+        pendingAmount,
+        dueDate,
         instituteName,
       });
     } else if (templateType === "testMarks") {
+      templateName = "test_marks_alert";
+      const studentName = customValues?.studentName || "John Doe";
+      const testName = customValues?.testName || "Math Term Test";
+      const marksObtained = customValues?.marksObtained || "92";
+      const totalMarks = customValues?.totalMarks || "100";
+      const percentage = customValues?.percentage || "92";
+      const remarks = customValues?.remarks || "Outstanding performance!";
+      parameters = [studentName, testName, instituteName, marksObtained, totalMarks, percentage, remarks];
+
       text = formatTestMarksMessage({
         template: targetTemplate,
-        studentName: customValues?.studentName || "John Doe",
-        testName: customValues?.testName || "Math Term Test",
-        marksObtained: customValues?.marksObtained || "92",
-        totalMarks: customValues?.totalMarks || "100",
-        percentage: customValues?.percentage || "92",
-        remarks: customValues?.remarks || "Outstanding performance!",
+        studentName,
+        testName,
+        marksObtained,
+        totalMarks,
+        percentage,
+        remarks,
         instituteName,
       });
     }
 
-    const result = await sendMessage("admin_test", phone, text);
+    const result = await sendTemplateMessage("admin_test", phone, templateName, parameters);
     if (!result.success) {
-      return res.status(400).json({ message: result.message || "Failed to send WhatsApp message" });
+      return res.status(400).json({ message: result.message || "Failed to send WhatsApp template message" });
     }
 
-    return res.json({ message: "Test WhatsApp message sent successfully!", previewText: text });
+    return res.json({ message: "Test WhatsApp template message sent successfully!", previewText: text });
   } catch (error) {
     console.error("sendWhatsAppTestMessage error:", error);
     return res.status(500).json({ message: error.message || "Could not dispatch test WhatsApp message" });
