@@ -1346,7 +1346,15 @@ export const updateWhatsAppCredentialsTemplate = async (req, res) => {
 export const getMetaWhatsAppSettings = async (req, res) => {
   try {
     const setting = await SystemSetting.findOne({ key: "meta_whatsapp_settings" });
-    const settings = setting?.value || {
+    let val = setting?.value;
+    if (typeof val === "string") {
+      try {
+        val = JSON.parse(val);
+      } catch (e) {
+        val = {};
+      }
+    }
+    const settings = val || {
       accessToken: "",
       phoneNumberId: "",
       businessAccountId: "",
