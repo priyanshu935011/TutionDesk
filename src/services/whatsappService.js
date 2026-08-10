@@ -170,9 +170,10 @@ export const sendTemplateMessage = async (instituteId, to, templateName, paramet
   }
 
   const cleanNumber = formatPhoneNumber(to);
-  const { accessToken, phoneNumberId } = creds;
+  const { accessToken, phoneNumberId, languageCode } = creds;
+  const targetLang = (languageCode || "en").trim();
 
-  console.log(`Sending Meta WhatsApp Template [${templateName}] to ${cleanNumber}...`);
+  console.log(`Sending Meta WhatsApp Template [${templateName}] (${targetLang}) to ${cleanNumber}...`);
 
   try {
     const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
@@ -189,7 +190,7 @@ export const sendTemplateMessage = async (instituteId, to, templateName, paramet
         template: {
           name: templateName,
           language: {
-            code: "en_US"
+            code: targetLang
           },
           components: [
             {

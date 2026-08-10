@@ -1358,7 +1358,11 @@ export const getMetaWhatsAppSettings = async (req, res) => {
       accessToken: "",
       phoneNumberId: "",
       businessAccountId: "",
+      languageCode: "en",
     };
+    if (settings.languageCode === undefined) {
+      settings.languageCode = "en";
+    }
     return res.json(settings);
   } catch (error) {
     console.error("getMetaWhatsAppSettings error:", error);
@@ -1368,13 +1372,14 @@ export const getMetaWhatsAppSettings = async (req, res) => {
 
 export const updateMetaWhatsAppSettings = async (req, res) => {
   try {
-    const { accessToken, phoneNumberId, businessAccountId } = req.body;
+    const { accessToken, phoneNumberId, businessAccountId, languageCode } = req.body;
     
     let setting = await SystemSetting.findOne({ key: "meta_whatsapp_settings" });
     const updatedValue = {
       accessToken: (accessToken || "").trim(),
       phoneNumberId: (phoneNumberId || "").trim(),
       businessAccountId: (businessAccountId || "").trim(),
+      languageCode: (languageCode || "en").trim(),
     };
 
     if (setting) {
