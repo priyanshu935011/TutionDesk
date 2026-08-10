@@ -8,6 +8,7 @@ import {
   getNotes,
   getQuizzes,
   getTeacherDashboard,
+  getInstituteFeatures,
   getTestResults,
   startQuizLive,
   updateQuiz,
@@ -40,6 +41,9 @@ const checkQuizFeature = (req, res, next) => {
 };
 
 router.get("/dashboard", getTeacherDashboard);
+
+// Direct DB read — no cache/Redis — for always-fresh feature gating
+router.get("/features", getInstituteFeatures);
 router.get("/quizzes", checkQuizFeature, getQuizzes);
 router.post("/quizzes", checkQuizFeature, createQuiz);
 router.put("/quizzes/:id", checkQuizFeature, updateQuiz);

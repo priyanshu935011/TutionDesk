@@ -45,6 +45,36 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
     Readable.from(buffer).pipe(uploadStream);
   });
 
+// ─── Direct DB feature read — no cache, no Redis ──────────────────────────
+// Reads allowedFeatures straight from MongoDB every time so admin changes
+// are reflected instantly on the next app launch.
+export const getInstituteFeatures = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute linked to this account" });
+    }
+
+    // Select ONLY allowedFeatures — lean() gives a plain JS object (no Mongoose overhead)
+    const institute = await Institute.findById(instituteId)
+      .select("allowedFeatures")
+      .lean();
+
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found" });
+    }
+
+    return res.json({
+      allowedFeatures: Array.isArray(institute.allowedFeatures)
+        ? institute.allowedFeatures
+        : [],
+    });
+  } catch (error) {
+    console.error("getInstituteFeatures error:", error);
+    return res.status(500).json({ message: "Could not load features" });
+  }
+};
+
 export const getTeacherDashboard = async (req, res) => {
   try {
     const cacheKey = `teacher:dashboard:${req.user._id}`;
