@@ -50,15 +50,14 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
 // are reflected instantly on the next app launch.
 export const getInstituteFeatures = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    if (!instituteId) {
+    const rawInst = req.user.institute;
+    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+    if (!instIdStr) {
       return res.status(400).json({ message: "No institute linked to this account" });
     }
 
-    // Select ONLY allowedFeatures — lean() gives a plain JS object (no Mongoose overhead)
-    const institute = await Institute.findById(instituteId)
-      .select("allowedFeatures")
-      .lean();
+    const institute = await Institute.findById(instIdStr)
+      .select("allowedFeatures");
 
     if (!institute) {
       return res.status(404).json({ message: "Institute not found" });
@@ -77,25 +76,34 @@ export const getInstituteFeatures = async (req, res) => {
 
 export const getTeacherDashboard = async (req, res) => {
   try {
-    const cacheKey = `teacher:dashboard:${req.user._id}`;
-    if (req.query.nocache !== "true") {
-      const cachedData = await getCache(cacheKey);
-      if (cachedData) {
-        return res.json(cachedData);
-      }
+    const rawInst = req.user.institute;
+    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+
+    let institute = null;
+    if (instIdStr) {
+      institute = await Institute.findById(instIdStr)
+        .select(
+          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+        );
     }
 
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const institute = await Institute.findById(instituteId).select(
-      "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
-    );
-    if (institute) {
-      const savedSettings = await getCache(`institute:whatsapp_settings:${instituteId}`);
+    if (institute && instIdStr) {
+      const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
       if (savedSettings) {
         institute.whatsappSettings = savedSettings;
       }
     }
-    const ownerId = req.user.role === "teacher" ? institute?.adminUser : req.user._id;
+
+    const cacheKey = `teacher:dashboard:${req.user._id}`;
+    if (req.query.nocache !== "true") {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        // ALWAYS attach fresh live institute from MongoDB so allowedFeatures & branding are never stale
+        cachedData.institute = institute;
+        return res.json(cachedData);
+      }
+    }
+    const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
 
     let studentQuery = { user: ownerId };
     let batchQuery = { user: ownerId };
