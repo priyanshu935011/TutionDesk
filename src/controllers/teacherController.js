@@ -78,6 +78,7 @@ export const getTeacherDashboard = async (req, res) => {
   try {
     const rawInst = req.user.institute;
     const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+    const instituteId = instIdStr;
 
     let institute = null;
     if (instIdStr) {
