@@ -1109,6 +1109,60 @@ export const deleteHiredTeacher = async (req, res) => {
   }
 };
 
+export const updateHiredTeacher = async (req, res) => {
+  try {
+    if (req.user.role !== "institute_admin") {
+      return res.status(403).json({ message: "Access denied. Only institute admins can edit teachers." });
+    }
+
+    const { name, email, password } = req.body;
+    const instituteId = req.user.institute?._id || req.user.institute;
+
+    const teacher = await User.findOne({
+      _id: req.params.id,
+      institute: instituteId,
+      role: "teacher",
+    });
+
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    if (name) {
+      teacher.name = name.trim();
+    }
+    if (email) {
+      const normalizedEmail = email.toLowerCase().trim();
+      if (normalizedEmail !== teacher.email) {
+        const existingUser = await User.findOne({ email: normalizedEmail });
+        if (existingUser) {
+          return res.status(400).json({ message: "Email already exists" });
+        }
+        teacher.email = normalizedEmail;
+      }
+    }
+    if (password && password.trim() !== "") {
+      teacher.password = await bcrypt.hash(password.trim(), 10);
+    }
+
+    await teacher.save();
+
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    await clearCachePattern("teacher:dashboard:*");
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({
+      _id: teacher._id,
+      name: teacher.name,
+      email: teacher.email,
+      role: teacher.role,
+    });
+  } catch (error) {
+    console.error("updateHiredTeacher error:", error);
+    return res.status(500).json({ message: error.message || "Could not update teacher" });
+  }
+};
+
 export const getQuizLeaderboard = async (req, res) => {
   try {
     const quizId = req.params.id;

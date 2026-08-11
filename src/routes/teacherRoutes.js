@@ -18,6 +18,7 @@ import {
   createHiredTeacher,
   getHiredTeachers,
   deleteHiredTeacher,
+  updateHiredTeacher,
   getQuizLeaderboard,
   uploadBrandingLogo,
   updateBrandingSettings,
@@ -67,7 +68,9 @@ router.post("/test-results/grouped/delete", deleteGroupedTestResults);
 router.route("/hired-teachers")
   .get(getHiredTeachers)
   .post(createHiredTeacher);
-router.delete("/hired-teachers/:id", deleteHiredTeacher);
+router.route("/hired-teachers/:id")
+  .put(updateHiredTeacher)
+  .delete(deleteHiredTeacher);
 
 // Branding endpoints
 router.post("/branding/logo", upload.single("logo"), uploadBrandingLogo);
