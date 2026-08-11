@@ -89,6 +89,7 @@ export const loginUser = async (req, res) => {
 
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
     user.currentSessionId = sessionId;
+    user.lastActiveAt = new Date();
     await user.save();
 
     if (redisClient.isReady) {

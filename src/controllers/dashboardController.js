@@ -95,6 +95,9 @@ export const getDashboard = async (req, res) => {
     return res.json({
       summary,
       institute: institute || {},
+      user: {
+        role: req.user.role,
+      },
     });
   } catch (error) {
     console.error("getDashboard error:", error);

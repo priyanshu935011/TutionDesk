@@ -179,6 +179,11 @@ export const createPaymentSession = async (req, res) => {
 
     } else {
       // One-time payment flow
+      const origin = req.headers.origin || "http://localhost:8080";
+      const returnUrl = origin.includes("8080")
+        ? `${origin}/#/subscription-expired?verify_id=${cfOrderId}`
+        : `${origin}/subscription-expired?verify_id=${cfOrderId}`;
+
       const orderPayload = {
         order_id: cfOrderId,
         order_amount: amount,
@@ -190,7 +195,7 @@ export const createPaymentSession = async (req, res) => {
           customer_phone: req.user.phone || "9999999999",
         },
         order_meta: {
-          return_url: `${process.env.CLIENT_URL || "http://localhost:5173"}/subscription-expired?verify_id=${cfOrderId}`,
+          return_url: returnUrl,
         },
       };
 
@@ -213,6 +218,9 @@ export const createPaymentSession = async (req, res) => {
         type: "one_time",
         cfOrderId,
         paymentSessionId: response.data.payment_session_id,
+        paymentLink: environment === "production" 
+          ? `https://payments.cashfree.com/order/${cfOrderId}`
+          : `https://payments-test.cashfree.com/order/${cfOrderId}`,
         environment,
       });
     }
@@ -659,6 +667,8 @@ export const getPaymentDetailsForInstitute = async (req, res) => {
       tuitionName: institute.name,
       plan: institute.subscriptionPlan,
       status: institute.status,
+      allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+      quizFeatureEnabled: institute.quizFeatureEnabled !== false,
     });
   } catch (error) {
     console.error("getPaymentDetailsForInstitute error:", error);

@@ -1598,7 +1598,11 @@ export const sendPaymentReceiptWhatsApp = async (req, res) => {
       return res.status(400).json({ message: "PDF document file is required" });
     }
 
-    const student = await Student.findOne({ _id: id, user: req.user._id });
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    const student = await Student.findOne({ _id: id, user: ownerId });
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }

@@ -912,7 +912,6 @@ export const createTestResultsBulk = async (req, res) => {
         institute_id: String(instituteId),
         batch_id: String(batchId),
         test_name: title.trim(),
-        subject: subject.trim(),
         max_marks: Number(totalMarks),
         test_date: new Date(examDate).toISOString().substring(0, 10),
         marks: marksMap,

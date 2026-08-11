@@ -39,7 +39,8 @@ const protect = async (req, res, next) => {
 
     if (decoded.role !== "super_admin" && req.user.lastActiveAt) {
       const fourteenDaysInMs = 14 * 24 * 60 * 60 * 1000;
-      if (Date.now() - new Date(req.user.lastActiveAt).getTime() > fourteenDaysInMs) {
+      const isTokenRecent = decoded.iat && (Date.now() / 1000 - decoded.iat < 3600); // 1 hour
+      if (!isTokenRecent && (Date.now() - new Date(req.user.lastActiveAt).getTime() > fourteenDaysInMs)) {
         return res.status(401).json({ message: "Session expired due to 14 days of inactivity." });
       }
     }
