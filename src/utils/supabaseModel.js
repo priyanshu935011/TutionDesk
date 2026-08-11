@@ -560,6 +560,49 @@ class SupabaseQuery {
   async exec() {
     const tableName = this.model.tableName;
 
+    if (this.queryType === "findOneAndUpdate") {
+      const filter = this.args[0] || {};
+      const update = this.args[1] || {};
+      const options = this.args[2] || {};
+
+      if (MISSING_TABLES.has(tableName)) {
+        const fallbackData = readFallbackData(tableName);
+        const index = fallbackData.findIndex(doc => matchFilter(doc, filter));
+        if (index === -1) return null;
+
+        const updated = applyUpdateJson(fallbackData[index], update);
+        writeFallbackData(tableName, fallbackData);
+        const doc = new SupabaseDocument(tableName, updated, this.model);
+        await this.resolvePopulations([doc]);
+        return doc;
+      }
+
+      const payload = update.$set ? update.$set : update;
+      const dbPayload = {};
+      for (const [key, val] of Object.entries(payload)) {
+        if (key.startsWith("$")) continue;
+        const dbKey = camelToSnake(key);
+        dbPayload[dbKey] = val;
+      }
+
+      let updateQuery = this.model.supabase.from(tableName).update(dbPayload);
+      updateQuery = this.model.applyFilters(updateQuery, filter);
+      const { data, error } = await updateQuery.select();
+
+      if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+        console.warn(`Table "${tableName}" does not exist in DB, ignoring findOneAndUpdate.`);
+        return null;
+      }
+      if (error) throw error;
+
+      const row = data?.[0];
+      if (!row) return null;
+
+      const doc = new SupabaseDocument(tableName, row, this.model);
+      await this.resolvePopulations([doc]);
+      return doc;
+    }
+
     if (MISSING_TABLES.has(tableName)) {
       const fallbackData = readFallbackData(tableName);
       const currentFilter = { ...(this.args[0] || {}) };
@@ -1049,6 +1092,10 @@ class SupabaseModel {
 
   findById(id) {
     return new SupabaseQuery(this, "findById", [{ _id: id }]);
+  }
+
+  findOneAndUpdate(filter = {}, update = {}, options = {}) {
+    return new SupabaseQuery(this, "findOneAndUpdate", [filter, update, options]);
   }
 
   async create(doc) {
