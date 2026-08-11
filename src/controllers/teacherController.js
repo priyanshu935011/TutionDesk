@@ -1251,8 +1251,38 @@ export const updateBrandingSettings = async (req, res) => {
 
 export const updateTestResult = async (req, res) => {
   try {
-    const { score, totalMarks, remarks } = req.body;
-    const result = await TestResult.findById(req.params.id);
+    const id = req.params.id;
+    const { score, totalMarks, remarks, marks, title, examDate } = req.body;
+
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    if (!id.includes("_")) {
+      const updateData = {};
+      if (marks !== undefined) updateData.marks = marks;
+      if (title !== undefined) updateData.test_name = title.trim();
+      if (totalMarks !== undefined) updateData.max_marks = Number(totalMarks);
+      if (examDate !== undefined) updateData.test_date = new Date(examDate).toISOString().substring(0, 10);
+
+      const { data, error } = await sb
+        .from("test_marks")
+        .update(updateData)
+        .eq("id", id)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        console.error("Supabase update error:", error);
+        return res.status(500).json({ message: error.message || "Could not update test marks" });
+      }
+
+      await deleteCache(`teacher:dashboard:${req.user._id}`);
+      await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("student:dashboard:*");
+
+      return res.json({ message: "Test marks updated successfully", result: data });
+    }
+
+    const result = await TestResult.findById(id);
     if (!result) {
       return res.status(404).json({ message: "Test result not found" });
     }
@@ -1269,25 +1299,34 @@ export const updateTestResult = async (req, res) => {
 
     return res.json({ message: "Test result updated successfully", result });
   } catch (error) {
+    console.error("updateTestResult error:", error);
     return res.status(500).json({ message: "Could not update test result" });
   }
 };
 
 export const deleteTestResult = async (req, res) => {
   try {
-    const result = await TestResult.findById(req.params.id);
-    if (!result) {
-      return res.status(404).json({ message: "Test result not found" });
-    }
+    const id = req.params.id;
+    const realId = id.includes("_") ? id.split("_")[0] : id;
 
-    await TestResult.deleteOne({ _id: req.params.id });
+    const { supabase: sb } = await import("../utils/supabase.js");
+    const { error: deleteError } = await sb
+      .from("test_marks")
+      .delete()
+      .eq("id", realId);
+
+    if (deleteError) {
+      console.error("Supabase test_marks delete error:", deleteError);
+      return res.status(500).json({ message: deleteError.message || "Could not delete test" });
+    }
 
     await deleteCache(`teacher:dashboard:${req.user._id}`);
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
 
-    return res.json({ message: "Test result deleted successfully" });
+    return res.json({ message: "Test deleted successfully" });
   } catch (error) {
+    console.error("deleteTestResult error:", error);
     return res.status(500).json({ message: "Could not delete test result" });
   }
 };
