@@ -42,6 +42,7 @@ const checkQuizFeature = (req, res, next) => {
 };
 
 router.get("/dashboard", getTeacherDashboard);
+router.get("/sync", getTeacherDashboard);
 
 // Direct DB read — no cache/Redis — for always-fresh feature gating
 router.get("/features", getInstituteFeatures);

@@ -45,6 +45,18 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
     Readable.from(buffer).pipe(uploadStream);
   });
 
+const invalidateUserDashboard = async (req) => {
+  try {
+    await deleteCache(`teacher:dashboard:${req.user._id}`);
+    const adminId = req.user.institute?.adminUser;
+    if (adminId) {
+      await deleteCache(`teacher:dashboard:${adminId}`);
+    }
+  } catch (e) {
+    console.error("Cache invalidation error:", e);
+  }
+};
+
 // ─── Direct DB feature read — no cache, no Redis ──────────────────────────
 // Reads allowedFeatures straight from MongoDB every time so admin changes
 // are reflected instantly on the next app launch.
@@ -320,8 +332,7 @@ export const createQuiz = async (req, res) => {
       })),
     });
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json(quiz);
@@ -402,8 +413,7 @@ export const updateQuiz = async (req, res) => {
 
     await quiz.save();
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json(quiz);
@@ -432,8 +442,7 @@ export const deleteQuiz = async (req, res) => {
 
     await forceStopLiveQuiz(req.params.id);
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Quiz deleted successfully" });
@@ -455,8 +464,7 @@ export const startQuizLive = async (req, res) => {
     }
 
     const liveState = await startLiveQuiz(quiz);
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
     return res.json(liveState);
   } catch (error) {
@@ -725,8 +733,7 @@ export const uploadNote = async (req, res) => {
         return res.status(500).json({ message: retryError.message || "Failed to save note metadata" });
       }
 
-      await deleteCache(`teacher:dashboard:${req.user._id}`);
-      await clearCachePattern("teacher:dashboard:*");
+      await invalidateUserDashboard(req);
       await clearCachePattern("student:dashboard:*");
       return res.status(201).json({
         _id: retryData?.id,
@@ -740,8 +747,7 @@ export const uploadNote = async (req, res) => {
       });
     }
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json({
@@ -794,8 +800,7 @@ export const deleteNote = async (req, res) => {
 
     await Note.findByIdAndDelete(note._id);
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Note deleted successfully" });
@@ -851,8 +856,7 @@ export const createTestResult = async (req, res) => {
       subject: subject.trim(),
     });
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res
@@ -935,8 +939,7 @@ export const createTestResultsBulk = async (req, res) => {
       examDate,
     }));
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     // Asynchronous background WhatsApp test mark alerts
@@ -1047,8 +1050,7 @@ export const createHiredTeacher = async (req, res) => {
       institute: instituteId,
     });
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json({
@@ -1098,8 +1100,7 @@ export const deleteHiredTeacher = async (req, res) => {
       return res.status(404).json({ message: "Teacher not found" });
     }
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Teacher deleted successfully" });
@@ -1146,8 +1147,7 @@ export const updateHiredTeacher = async (req, res) => {
 
     await teacher.save();
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({
@@ -1229,8 +1229,7 @@ export const updateBrandingSettings = async (req, res) => {
       return res.status(404).json({ message: "Institute not found" });
     }
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({
@@ -1275,8 +1274,7 @@ export const updateTestResult = async (req, res) => {
         return res.status(500).json({ message: error.message || "Could not update test marks" });
       }
 
-      await deleteCache(`teacher:dashboard:${req.user._id}`);
-      await clearCachePattern("teacher:dashboard:*");
+      await invalidateUserDashboard(req);
       await clearCachePattern("student:dashboard:*");
 
       return res.json({ message: "Test marks updated successfully", result: data });
@@ -1293,8 +1291,7 @@ export const updateTestResult = async (req, res) => {
 
     await result.save();
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Test result updated successfully", result });
@@ -1320,8 +1317,7 @@ export const deleteTestResult = async (req, res) => {
       return res.status(500).json({ message: deleteError.message || "Could not delete test" });
     }
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Test deleted successfully" });
@@ -1350,8 +1346,7 @@ export const updateGroupedTestResults = async (req, res) => {
       await r.save();
     }
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Grouped test details updated successfully" });
@@ -1372,8 +1367,7 @@ export const deleteGroupedTestResults = async (req, res) => {
       examDate: examDate
     });
 
-    await deleteCache(`teacher:dashboard:${req.user._id}`);
-    await clearCachePattern("teacher:dashboard:*");
+    await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Grouped test results deleted successfully" });
