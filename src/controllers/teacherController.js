@@ -460,19 +460,35 @@ export const startQuizLive = async (req, res) => {
 
 export const getNotes = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
-    const ownerId = req.user.role === "teacher" && req.user.institute?.adminUser ? String(req.user.institute.adminUser) : String(req.user._id);
+    const rawInst = req.user.institute;
+    let instId = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instId = String(rawInst._id || rawInst.id || "");
+      } else {
+        instId = String(rawInst);
+      }
+    }
+    if (!instId && req.user.institute_id) {
+      instId = String(req.user.institute_id);
+    }
+
+    const ownerId = req.user.role === "teacher" && rawInst?.adminUser
+      ? String(rawInst.adminUser)
+      : String(req.user._id || req.user.id || "");
+
     const { supabase: sb } = await import("../utils/supabase.js");
 
-    const queryFilter = instituteId === ownerId || !ownerId
-      ? `institute_id.eq.${instituteId}`
-      : `institute_id.eq.${instituteId},institute_id.eq.${ownerId}`;
+    let query = sb.from("notes").select("*");
 
-    const { data: rows, error } = await sb
-      .from("notes")
-      .select("*")
-      .or(queryFilter)
-      .order("created_at", { ascending: false });
+    if (req.user.role !== "super_admin") {
+      const validIds = Array.from(new Set([instId, ownerId])).filter((id) => id && id.length > 5 && id !== "[object Object]");
+      if (validIds.length > 0) {
+        query = query.in("institute_id", validIds);
+      }
+    }
+
+    const { data: rows, error } = await query.order("created_at", { ascending: false });
 
     if (error) {
       console.error("getNotes Supabase error:", error.message);
@@ -480,7 +496,7 @@ export const getNotes = async (req, res) => {
     }
 
     // Resolve batch names
-    const batchIds = [...new Set((rows || []).map(r => r.batch_id).filter(Boolean))];
+    const batchIds = [...new Set((rows || []).map((r) => r.batch_id).filter(Boolean))];
     let batchMap = {};
     if (batchIds.length > 0) {
       const { data: batches } = await sb
@@ -488,18 +504,22 @@ export const getNotes = async (req, res) => {
         .select("id, name")
         .in("id", batchIds);
       if (batches) {
-        batches.forEach(b => { batchMap[b.id] = b.name; });
+        batches.forEach((b) => {
+          batchMap[b.id] = b.name;
+        });
       }
     }
 
-    const notes = (rows || []).map(row => ({
+    const notes = (rows || []).map((row) => ({
       _id: row.id,
       id: row.id,
       title: row.title,
       pdfUrl: row.file_url,
       pdfPublicId: row.pdf_public_id,
       targetType: row.target_type || "batch",
-      batch: row.batch_id ? { _id: row.batch_id, name: batchMap[row.batch_id] || row.batch_id } : null,
+      batch: row.batch_id
+        ? { _id: row.batch_id, name: batchMap[row.batch_id] || row.batch_id }
+        : null,
       students: row.student_ids || [],
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -564,7 +584,21 @@ export const downloadNote = async (req, res) => {
 
 export const uploadNote = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const rawInst = req.user.institute;
+    let instituteId = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instituteId = String(rawInst._id || rawInst.id || "");
+      } else {
+        instituteId = String(rawInst);
+      }
+    }
+    if (!instituteId && req.user.institute_id) {
+      instituteId = String(req.user.institute_id);
+    }
+    if (!instituteId) {
+      instituteId = String(req.user._id || req.user.id || "");
+    }
     const { title, batchId, targetType, studentIds } = req.body;
 
     if (!title || !req.file) {
