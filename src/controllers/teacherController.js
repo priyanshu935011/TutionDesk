@@ -460,13 +460,18 @@ export const startQuizLive = async (req, res) => {
 
 export const getNotes = async (req, res) => {
   try {
-    const instituteId = String(req.user.institute?._id || req.user.institute);
+    const instituteId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
+    const ownerId = req.user.role === "teacher" && req.user.institute?.adminUser ? String(req.user.institute.adminUser) : String(req.user._id);
     const { supabase: sb } = await import("../utils/supabase.js");
+
+    const queryFilter = instituteId === ownerId || !ownerId
+      ? `institute_id.eq.${instituteId}`
+      : `institute_id.eq.${instituteId},institute_id.eq.${ownerId}`;
 
     const { data: rows, error } = await sb
       .from("notes")
       .select("*")
-      .eq("institute_id", instituteId)
+      .or(queryFilter)
       .order("created_at", { ascending: false });
 
     if (error) {
