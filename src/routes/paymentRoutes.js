@@ -29,6 +29,10 @@ import {
   updateAdsSettings,
   getWebsiteSettings,
   updateWebsiteSettings,
+  getWalletInfo,
+  getWhatsappLogs,
+  createWalletRechargeSession,
+  verifyWalletRecharge,
 } from "../controllers/paymentController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -41,6 +45,10 @@ router.post("/webhook", handleCashfreeWebhook);
 router.post("/create-session", protect, createPaymentSession);
 router.post("/verify", protect, verifyPayment);
 router.get("/details", protect, getPaymentDetailsForInstitute);
+router.get("/wallet-info", protect, getWalletInfo);
+router.get("/whatsapp-logs", protect, getWhatsappLogs);
+router.post("/wallet-recharge/session", protect, createWalletRechargeSession);
+router.post("/wallet-recharge/verify", protect, verifyWalletRecharge);
 
 // Protected staff routes (Super Admin / Tech Admin)
 router.get("/list", protect, staffOnly, getAllPayments);

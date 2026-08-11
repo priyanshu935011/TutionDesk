@@ -36,6 +36,8 @@ import {
   updateStaff,
   deleteStaff,
   getActivityLogs,
+  topupInstituteWallet,
+  updateInstituteMessageCharge,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -102,6 +104,8 @@ router.post("/institutes", createInstitute);
 router.put("/institutes/:id", updateInstitute);
 router.post("/institutes/upload-logo", upload.single("logo"), uploadInstituteLogo);
 router.post("/institutes/:id/renew", renewInstituteSubscription);
+router.post("/institutes/:id/wallet-topup", topupInstituteWallet);
+router.put("/institutes/:id/message-charge", updateInstituteMessageCharge);
 router.delete("/institutes/:id", deleteInstitute);
 
 // Custom Pages Routes

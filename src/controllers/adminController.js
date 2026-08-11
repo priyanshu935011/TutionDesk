@@ -1739,3 +1739,61 @@ export const sendWhatsAppTestMessage = async (req, res) => {
   }
 };
 
+export const topupInstituteWallet = async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const { id } = req.params;
+
+    if (amount === undefined || Number(amount) <= 0) {
+      return res.status(400).json({ message: "Topup amount must be greater than 0." });
+    }
+
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    institute.walletBalance = (institute.walletBalance || 0) + Number(amount);
+    await institute.save();
+
+    await logActivity(req.user._id, "Wallet Topup", `Manually topped up institute ${institute.name} with INR ${amount}`, req.ip);
+
+    return res.json({
+      message: "Wallet topped up successfully!",
+      walletBalance: institute.walletBalance,
+    });
+  } catch (error) {
+    console.error("topupInstituteWallet error:", error);
+    return res.status(500).json({ message: "Could not top up wallet balance." });
+  }
+};
+
+export const updateInstituteMessageCharge = async (req, res) => {
+  try {
+    const { charge } = req.body;
+    const { id } = req.params;
+
+    if (charge === undefined || Number(charge) < 0) {
+      return res.status(400).json({ message: "Per message charge must be 0 or higher." });
+    }
+
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    institute.perMessageCharge = Number(charge);
+    await institute.save();
+
+    await logActivity(req.user._id, "Message Charge Update", `Set message charge for ${institute.name} to INR ${charge}`, req.ip);
+
+    return res.json({
+      message: "Per-message rate updated successfully!",
+      perMessageCharge: institute.perMessageCharge,
+    });
+  } catch (error) {
+    console.error("updateInstituteMessageCharge error:", error);
+    return res.status(500).json({ message: "Could not update per-message charge." });
+  }
+};
+

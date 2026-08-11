@@ -1,4 +1,6 @@
 import SystemSetting from "../models/SystemSetting.js";
+import Institute from "../models/Institute.js";
+import WhatsappLog from "../models/WhatsappLog.js";
 
 // Helper to format phone number to E.164 format without '+' or special characters
 const formatPhoneNumber = (to) => {
@@ -50,10 +52,46 @@ export const logoutSession = async (instituteId) => {
   return { success: true };
 };
 
-export const sendMessage = async (instituteId, to, text) => {
+export const sendMessage = async (instituteId, to, text, msgType = "custom") => {
+  const inst = await Institute.findById(instituteId);
+  if (!inst) {
+    console.warn(`WhatsApp skip send to ${to}: Institute ${instituteId} not found.`);
+    return { success: false, message: "Institute not found." };
+  }
+
+  const allowedFeatures = inst.allowedFeatures || [];
+  if (!allowedFeatures.includes("whatsapp")) {
+    console.warn(`WhatsApp skip send to ${to}: Feature is disabled for institute ${instituteId}.`);
+    return { success: false, message: "WhatsApp feature is disabled." };
+  }
+
+  const charge = inst.perMessageCharge ?? 0.10;
+  if ((inst.walletBalance ?? 0) < charge) {
+    console.warn(`WhatsApp skip send to ${to}: Insufficient wallet balance for institute ${instituteId}. Balance: ${inst.walletBalance}`);
+    await WhatsappLog.create({
+      institute: instituteId,
+      to,
+      messageText: text,
+      msgType,
+      status: "failed",
+      cost: 0,
+      error: "Insufficient wallet balance."
+    });
+    return { success: false, message: "Insufficient wallet balance." };
+  }
+
   const creds = await getMetaCredentials();
   if (!creds) {
     console.warn(`WhatsApp skip send to ${to}: Meta Cloud API not configured.`);
+    await WhatsappLog.create({
+      institute: instituteId,
+      to,
+      messageText: text,
+      msgType,
+      status: "failed",
+      cost: 0,
+      error: "Meta Cloud API not configured."
+    });
     return { success: false, message: "Meta API not configured." };
   }
 
@@ -86,9 +124,31 @@ export const sendMessage = async (instituteId, to, text) => {
       throw new Error(data.error?.message || "Failed to send WhatsApp message via Meta API");
     }
 
+    // Deduct charge
+    inst.walletBalance = Math.max(0, (inst.walletBalance || 0) - charge);
+    await inst.save();
+
+    await WhatsappLog.create({
+      institute: instituteId,
+      to: cleanNumber,
+      messageText: text,
+      msgType,
+      status: "sent",
+      cost: charge
+    });
+
     return { success: true, messageId: data.messages?.[0]?.id };
   } catch (err) {
     console.error(`Meta WhatsApp send text error to ${cleanNumber}:`, err.message);
+    await WhatsappLog.create({
+      institute: instituteId,
+      to: cleanNumber,
+      messageText: text,
+      msgType,
+      status: "failed",
+      cost: 0,
+      error: err.message || "Meta API Error"
+    });
     throw err;
   }
 };

@@ -991,7 +991,7 @@ export const createTestResultsBulk = async (req, res) => {
             });
 
             try {
-              await sendMessage(String(instituteId), targetPhone, messageText);
+              await sendMessage(String(instituteId), targetPhone, messageText, "test_mark");
               await new Promise((r) => setTimeout(r, 500));
             } catch (wErr) {
               console.error(`Failed to send test marks WhatsApp alert for ${student.name}:`, wErr.message);

@@ -847,7 +847,7 @@ export const markAttendance = async (req, res) => {
             });
             const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
             if (recipientPhone) {
-              await sendMessage(String(instituteId), recipientPhone, messageText);
+              await sendMessage(String(instituteId), recipientPhone, messageText, "absent_alert");
             }
           }
         } catch (err) {
@@ -883,6 +883,12 @@ export const markBatchAttendance = async (req, res) => {
     }
 
     const targetDate = new Date(date);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (targetDate.getTime() > today.getTime()) {
+      return res.status(400).json({ message: "Future attendance marking is not allowed." });
+    }
+
     const targetDateStr = targetDate.toISOString().split("T")[0];
 
     let isUpdate = false;
@@ -894,15 +900,17 @@ export const markBatchAttendance = async (req, res) => {
       if (!student) continue;
 
       const newStatus = item.status === "present" ? "present" : "absent";
-      if (newStatus === "absent") {
-        absentStudents.push(student);
-      }
 
       const existingRecord = (student.attendanceRecords || []).find((r) => {
         if (!r.date) return false;
         const rStr = typeof r.date === "string" ? r.date.substring(0, 10) : new Date(r.date).toISOString().substring(0, 10);
         return rStr === targetDateStr;
       });
+
+      const wasAlreadyAbsent = existingRecord && existingRecord.status === "absent";
+      if (newStatus === "absent" && !wasAlreadyAbsent) {
+        absentStudents.push(student);
+      }
 
       if (existingRecord) {
         isUpdate = true;
@@ -995,7 +1003,7 @@ export const markBatchAttendance = async (req, res) => {
 
             try {
               console.log(`Sending background WhatsApp absent alert to ${student.name} at ${recipientPhone}...`);
-              await sendMessage(String(instituteId), recipientPhone, messageText);
+              await sendMessage(String(instituteId), recipientPhone, messageText, "absent_alert");
               console.log(`WhatsApp absent alert sent successfully for ${student.name}`);
               await new Promise((r) => setTimeout(r, 500));
             } catch (wErr) {

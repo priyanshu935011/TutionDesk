@@ -218,6 +218,14 @@ const instituteSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    walletBalance: {
+      type: Number,
+      default: 0,
+    },
+    perMessageCharge: {
+      type: Number,
+      default: 0.10,
+    },
   },
   {
     timestamps: true,

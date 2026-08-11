@@ -6,6 +6,7 @@ import CashfreePayment from "../models/CashfreePayment.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import { resolveSubscriptionEnd } from "../utils/subscription.js";
+import WhatsappLog from "../models/WhatsappLog.js";
 import axios from "axios";
 import crypto from "crypto";
 
@@ -1614,5 +1615,185 @@ export const updateWebsiteSettings = async (req, res) => {
   } catch (error) {
     console.error("updateWebsiteSettings error:", error);
     return res.status(500).json({ message: "Could not save website settings." });
+  }
+};
+
+export const getWalletInfo = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    const payments = await CashfreePayment.find({ institute: instituteId, type: "wallet_recharge" }).sort({ createdAt: -1 });
+
+    return res.json({
+      walletBalance: institute.walletBalance || 0,
+      perMessageCharge: institute.perMessageCharge || 0.10,
+      history: payments
+    });
+  } catch (error) {
+    console.error("getWalletInfo error:", error);
+    return res.status(500).json({ message: "Could not fetch wallet details." });
+  }
+};
+
+export const getWhatsappLogs = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+
+    const { msgType } = req.query;
+    const filter = { institute: instituteId };
+    if (msgType && msgType !== "all") {
+      filter.msgType = msgType;
+    }
+
+    const logs = await WhatsappLog.find(filter).sort({ createdAt: -1 }).limit(100);
+    return res.json({ logs });
+  } catch (error) {
+    console.error("getWhatsappLogs error:", error);
+    return res.status(500).json({ message: "Could not fetch WhatsApp logs." });
+  }
+};
+
+export const createWalletRechargeSession = async (req, res) => {
+  try {
+    const { amount } = req.body;
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ message: "Recharge amount must be greater than 0." });
+    }
+
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+
+    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    const config = await getCashfreeConfig();
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const cfOrderId = "wallet_" + crypto.randomUUID().replace(/-/g, "");
+
+    const origin = req.headers.origin || "http://localhost:8080";
+    const returnUrl = origin.includes("8080")
+      ? `${origin}/#/dashboard?verify_wallet_id=${cfOrderId}`
+      : `${origin}/dashboard?verify_wallet_id=${cfOrderId}`;
+
+    const orderPayload = {
+      order_id: cfOrderId,
+      order_amount: Number(amount),
+      order_currency: "INR",
+      customer_details: {
+        customer_id: String(instituteId),
+        customer_name: institute.name || "Tuition Admin",
+        customer_email: req.user.email || "support@classtech.com",
+        customer_phone: req.user.phone || "9999999999",
+      },
+      order_meta: {
+        return_url: returnUrl,
+      },
+    };
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const response = await axios.post(`${baseUrl}/orders`, orderPayload, { headers });
+
+    await CashfreePayment.create({
+      institute: instituteId,
+      instituteName: institute.name,
+      plan: "wallet_recharge",
+      amount: Number(amount),
+      type: "wallet_recharge",
+      status: "pending",
+      cfOrderId,
+      paymentSessionId: response.data.payment_session_id,
+      autoRenew: false,
+    });
+
+    return res.json({
+      type: "wallet_recharge",
+      cfOrderId,
+      paymentSessionId: response.data.payment_session_id,
+      paymentLink: response.data.payment_link || `https://payments.cashfree.com/order/${response.data.payment_session_id}`,
+      environment,
+    });
+  } catch (error) {
+    console.error("createWalletRechargeSession error:", error);
+    return res.status(500).json({ message: "Could not create wallet recharge session." });
+  }
+};
+
+export const verifyWalletRecharge = async (req, res) => {
+  try {
+    const { cfOrderId } = req.body;
+    if (!cfOrderId) {
+      return res.status(400).json({ message: "cfOrderId is required." });
+    }
+
+    const payment = await CashfreePayment.findOne({ cfOrderId, type: "wallet_recharge" });
+    if (!payment) {
+      return res.status(404).json({ message: "Recharge transaction record not found." });
+    }
+
+    if (payment.status === "success") {
+      const institute = await Institute.findById(payment.institute);
+      return res.json({ status: "success", walletBalance: institute?.walletBalance || 0 });
+    }
+
+    const config = await getCashfreeConfig();
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const response = await axios.get(`${baseUrl}/orders/${cfOrderId}`, { headers });
+    const rawData = response.data;
+    let status = "pending";
+
+    if (rawData.order_status === "PAID") {
+      status = "success";
+    } else if (["EXPIRED", "CANCELLED", "FAILED"].includes(rawData.order_status)) {
+      status = "failed";
+    }
+
+    payment.status = status;
+    payment.cfPaymentDetails = rawData;
+    await payment.save();
+
+    if (status === "success") {
+      const institute = await Institute.findById(payment.institute);
+      if (institute) {
+        institute.walletBalance = (institute.walletBalance || 0) + Number(payment.amount);
+        await institute.save();
+        return res.json({ status: "success", walletBalance: institute.walletBalance });
+      }
+    }
+
+    return res.json({ status });
+  } catch (error) {
+    console.error("verifyWalletRecharge error:", error);
+    return res.status(500).json({ message: "Could not verify wallet recharge." });
   }
 };
