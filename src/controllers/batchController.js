@@ -116,7 +116,8 @@ export const updateBatch = async (req, res) => {
     await clearCachePattern("teacher:batches:*");
     return res.json(batch);
   } catch (error) {
-    return res.status(500).json({ message: "Could not update batch" });
+    console.error("updateBatch error:", error);
+    return res.status(500).json({ message: error.message || "Could not update batch" });
   }
 };
 
@@ -206,3 +207,4 @@ export const deleteBatch = async (req, res) => {
     return res.status(500).json({ message: "Could not delete batch" });
   }
 };
+// Trivial change to force reload server - attempt 2
