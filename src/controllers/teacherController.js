@@ -221,6 +221,12 @@ export const getTeacherDashboard = async (req, res) => {
       notes,
       testResults,
       institute,
+      user: {
+        id: req.user._id,
+        role: req.user.role,
+        name: req.user.name,
+        email: req.user.email,
+      },
     };
 
     await setCache(cacheKey, responsePayload, 86400);
