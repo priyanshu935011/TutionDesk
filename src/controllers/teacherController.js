@@ -460,16 +460,53 @@ export const startQuizLive = async (req, res) => {
 
 export const getNotes = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const notes = await Note.find({ institute: instituteId })
-      .sort({ createdAt: -1 })
-      .populate("batch", "name")
-      .populate("students", "name enrollmentNumber");
+    const instituteId = String(req.user.institute?._id || req.user.institute);
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    const { data: rows, error } = await sb
+      .from("notes")
+      .select("*")
+      .eq("institute_id", instituteId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("getNotes Supabase error:", error.message);
+      return res.status(500).json({ message: "Could not fetch notes" });
+    }
+
+    // Resolve batch names
+    const batchIds = [...new Set((rows || []).map(r => r.batch_id).filter(Boolean))];
+    let batchMap = {};
+    if (batchIds.length > 0) {
+      const { data: batches } = await sb
+        .from("batches")
+        .select("id, name")
+        .in("id", batchIds);
+      if (batches) {
+        batches.forEach(b => { batchMap[b.id] = b.name; });
+      }
+    }
+
+    const notes = (rows || []).map(row => ({
+      _id: row.id,
+      id: row.id,
+      title: row.title,
+      pdfUrl: row.file_url,
+      pdfPublicId: row.pdf_public_id,
+      targetType: row.target_type || "batch",
+      batch: row.batch_id ? { _id: row.batch_id, name: batchMap[row.batch_id] || row.batch_id } : null,
+      students: row.student_ids || [],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
     return res.json(notes);
   } catch (error) {
+    console.error("getNotes error:", error.message);
     return res.status(500).json({ message: "Could not fetch notes" });
   }
 };
+
 
 export const downloadNote = async (req, res) => {
   try {
