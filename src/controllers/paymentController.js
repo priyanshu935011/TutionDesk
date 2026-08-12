@@ -219,9 +219,9 @@ export const createPaymentSession = async (req, res) => {
         type: "one_time",
         cfOrderId,
         paymentSessionId: response.data.payment_session_id,
-        paymentLink: environment === "production" 
-          ? `https://payments.cashfree.com/order/${cfOrderId}`
-          : `https://payments-test.cashfree.com/order/${cfOrderId}`,
+        paymentLink: response.data.payments?.url || response.data.payment_link || (environment === "production" 
+          ? `https://payments.cashfree.com/order/${response.data.payment_session_id}`
+          : `https://payments-test.cashfree.com/order/${response.data.payment_session_id}`),
         environment,
       });
     }
@@ -1656,7 +1656,15 @@ export const getWhatsappLogs = async (req, res) => {
     }
 
     const logs = await WhatsappLog.find(filter).sort({ createdAt: -1 }).limit(100);
-    return res.json({ logs });
+    const mappedLogs = logs.map(l => {
+      const doc = typeof l.toObject === "function" ? l.toObject() : l;
+      return {
+        ...doc,
+        recipient: doc.to,
+        message: doc.messageText
+      };
+    });
+    return res.json({ logs: mappedLogs });
   } catch (error) {
     console.error("getWhatsappLogs error:", error);
     return res.status(500).json({ message: "Could not fetch WhatsApp logs." });
@@ -1731,7 +1739,9 @@ export const createWalletRechargeSession = async (req, res) => {
       type: "wallet_recharge",
       cfOrderId,
       paymentSessionId: response.data.payment_session_id,
-      paymentLink: response.data.payment_link || `https://payments.cashfree.com/order/${response.data.payment_session_id}`,
+      paymentLink: response.data.payments?.url || response.data.payment_link || (environment === "production"
+        ? `https://payments.cashfree.com/order/${response.data.payment_session_id}`
+        : `https://payments-test.cashfree.com/order/${response.data.payment_session_id}`),
       environment,
     });
   } catch (error) {

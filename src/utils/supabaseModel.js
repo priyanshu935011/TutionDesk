@@ -8,7 +8,7 @@ const supabaseKey = process.env.SUPABASE_KEY || "";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages", "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment"]);
+const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages", "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs", "whatsapplog", "whatsapp_logs", "whatsapp_log"]);
 const FALLBACK_DIR = "c:/Users/priya/priyanshu/projects/tutions_crm/scratch/data";
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
 const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
@@ -300,6 +300,19 @@ class SupabaseDocument {
       this.student_custom_fields = this.studentCustomFields;
       this.studentPortalEnabled = meta.studentPortalEnabled ?? this.studentPortalEnabled ?? true;
       this.student_portal_enabled = this.studentPortalEnabled;
+      this.walletBalance = meta.walletBalance ?? this.walletBalance ?? 0;
+      this.wallet_balance = this.walletBalance;
+      this.perMessageCharge = meta.perMessageCharge ?? this.perMessageCharge ?? 0.10;
+      this.per_message_charge = this.perMessageCharge;
+      this.whatsappSettings = meta.whatsappSettings ?? this.whatsappSettings ?? {
+        absentAlertsEnabled: false,
+        feeRemindersEnabled: false,
+        feeReminderDaysBefore: 3,
+        customMessageTemplate: "Dear Parent, your child {studentName} was marked absent on {date}.",
+        feeReminderTemplate: "Dear {parentName}, this is a friendly reminder that INR {pendingAmount} is outstanding for student {studentName}'s tuition fee. Due date: {dueDate}. Thank you!",
+        sendCredentialsEnabled: false
+      };
+      this.whatsapp_settings = this.whatsappSettings;
     }
 
     if (tableName === "students" && this._id) {
@@ -376,6 +389,12 @@ class SupabaseDocument {
       delete payload.subscription_history;
       delete payload.student_custom_fields;
       delete payload.student_portal_enabled;
+      delete payload.wallet_balance;
+      delete payload.walletBalance;
+      delete payload.per_message_charge;
+      delete payload.perMessageCharge;
+      delete payload.whatsapp_settings;
+      delete payload.whatsappSettings;
     }
 
     if (this._tableName === "students") {
@@ -431,7 +450,10 @@ class SupabaseDocument {
           leadApiKey: this.leadApiKey ?? "",
           subscriptionHistory: this.subscriptionHistory ?? [],
           studentCustomFields: this.studentCustomFields ?? [],
-          studentPortalEnabled: this.studentPortalEnabled ?? true
+          studentPortalEnabled: this.studentPortalEnabled ?? true,
+          walletBalance: this.walletBalance ?? 0,
+          perMessageCharge: this.perMessageCharge ?? 0.10,
+          whatsappSettings: this.whatsappSettings ?? {}
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1153,6 +1175,12 @@ class SupabaseModel {
       delete payload.subscription_history;
       delete payload.student_custom_fields;
       delete payload.student_portal_enabled;
+      delete payload.wallet_balance;
+      delete payload.walletBalance;
+      delete payload.per_message_charge;
+      delete payload.perMessageCharge;
+      delete payload.whatsapp_settings;
+      delete payload.whatsappSettings;
     }
 
     if (this.tableName === "students") {
@@ -1229,7 +1257,10 @@ class SupabaseModel {
         leadApiKey: doc.leadApiKey ?? "",
         subscriptionHistory: doc.subscriptionHistory ?? [],
         studentCustomFields: doc.studentCustomFields ?? [],
-        studentPortalEnabled: doc.studentPortalEnabled ?? true
+        studentPortalEnabled: doc.studentPortalEnabled ?? true,
+        walletBalance: doc.walletBalance ?? 0,
+        perMessageCharge: doc.perMessageCharge ?? 0.10,
+        whatsappSettings: doc.whatsappSettings ?? {}
       };
       writeInstitutesMetadata(metadata);
     }

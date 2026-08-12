@@ -61,7 +61,7 @@ export const createNotice = async (req, res) => {
     if (sendWhatsApp) {
       setImmediate(async () => {
         try {
-          const statusObj = getSessionStatus(String(instituteId));
+          const statusObj = await getSessionStatus(String(instituteId));
           if (statusObj.status !== "connected") {
             console.warn(`WhatsApp not connected for institute ${instituteId}. Skipping notice broadcast.`);
             return;

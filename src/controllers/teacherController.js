@@ -96,13 +96,13 @@ export const getTeacherDashboard = async (req, res) => {
     if (instIdStr) {
       institute = await Institute.findById(instIdStr)
         .select(
-          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields"
         );
     }
 
     if (institute && instIdStr) {
       const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
-      if (savedSettings) {
+      if (savedSettings && Object.keys(savedSettings).length > 0) {
         institute.whatsappSettings = savedSettings;
       }
     }
@@ -953,7 +953,7 @@ export const createTestResultsBulk = async (req, res) => {
             return;
           }
 
-          const statusObj = getSessionStatus(String(instituteId));
+          const statusObj = await getSessionStatus(String(instituteId));
           if (statusObj.status !== "connected") {
             console.warn(`WhatsApp session not connected for institute ${instituteId}.`);
             return;
@@ -991,7 +991,18 @@ export const createTestResultsBulk = async (req, res) => {
             });
 
             try {
-              await sendMessage(String(instituteId), targetPhone, messageText, "test_mark");
+              await sendMessage(String(instituteId), targetPhone, messageText, "test_mark", {
+                templateName: "test_marks",
+                parameters: [
+                  student.name,
+                  title,
+                  inst?.name || "Classtech",
+                  String(scoreNum),
+                  String(totalNum),
+                  String(percentage),
+                  entry.remarks || "-"
+                ]
+              });
               await new Promise((r) => setTimeout(r, 500));
             } catch (wErr) {
               console.error(`Failed to send test marks WhatsApp alert for ${student.name}:`, wErr.message);

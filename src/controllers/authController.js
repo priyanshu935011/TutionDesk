@@ -17,7 +17,7 @@ const buildInstituteState = async (user) => {
   }
 
   const institute = await Institute.findById(user.institute).select(
-    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings"
+    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields"
   );
 
   if (!institute) {
@@ -40,6 +40,7 @@ const buildInstituteState = async (user) => {
     themeColor: institute.themeColor || "#6366f1",
     allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
     whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
+    studentCustomFields: institute.studentCustomFields || [],
   };
 };
 
@@ -171,7 +172,7 @@ export const forgotUserPassword = async (req, res) => {
       { expiresIn: "30m" }
     );
 
-    const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+    const clientUrl = process.env.CLIENT_URL || "https://classtech.in";
     const resetLink = `${clientUrl}/teacher/reset-password?token=${resetToken}`;
 
     // Send email helper

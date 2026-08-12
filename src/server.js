@@ -121,6 +121,7 @@ app.use("/api/public", publicRoutes);
 app.use("/public", publicRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/payments", paymentRoutes);
 
 const PORT = process.env.PORT || 5000;
 

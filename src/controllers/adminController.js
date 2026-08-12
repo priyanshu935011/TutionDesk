@@ -11,6 +11,7 @@ import SystemMetric from "../models/SystemMetric.js";
 import Note from "../models/Note.js";
 import Notice from "../models/Notice.js";
 import Quiz from "../models/Quiz.js";
+import WhatsappLog from "../models/WhatsappLog.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 import { sendMessage, sendTemplateMessage } from "../services/whatsappService.js";
@@ -251,9 +252,33 @@ export const getAdminOverview = async (req, res) => {
       }
     );
 
+    // Global WhatsApp message analytics
+    let globalWhatsappAnalytics = {
+      total: 0,
+      daily: 0,
+      weekly: 0,
+      monthly: 0
+    };
+    try {
+      const nowTime = new Date();
+      const oneDayAgo = new Date(nowTime.getTime() - 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = new Date(nowTime.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const thirtyDaysAgo = new Date(nowTime.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const total = await WhatsappLog.countDocuments({ status: "sent" });
+      const daily = await WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: oneDayAgo } });
+      const weekly = await WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: sevenDaysAgo } });
+      const monthly = await WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: thirtyDaysAgo } });
+
+      globalWhatsappAnalytics = { total, daily, weekly, monthly };
+    } catch (e) {
+      console.error("Error computing globalWhatsappAnalytics:", e);
+    }
+
     return res.json({
       summary,
       institutes: hydrated,
+      globalWhatsappAnalytics,
     });
   } catch (error) {
     console.error("getAdminOverview error:", error);
@@ -1137,6 +1162,29 @@ export const getInstituteFullAnalytics = async (req, res) => {
       activityScore = "Low / Inactive";
     }
 
+    // Fetch WhatsApp logs counts
+    let whatsappAnalytics = {
+      total: 0,
+      daily: 0,
+      weekly: 0,
+      monthly: 0
+    };
+    try {
+      const nowTime = new Date();
+      const oneDayAgo = new Date(nowTime.getTime() - 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = new Date(nowTime.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const thirtyDaysAgo = new Date(nowTime.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const total = await WhatsappLog.countDocuments({ institute: institute._id, status: "sent" });
+      const daily = await WhatsappLog.countDocuments({ institute: institute._id, status: "sent", createdAt: { $gte: oneDayAgo } });
+      const weekly = await WhatsappLog.countDocuments({ institute: institute._id, status: "sent", createdAt: { $gte: sevenDaysAgo } });
+      const monthly = await WhatsappLog.countDocuments({ institute: institute._id, status: "sent", createdAt: { $gte: thirtyDaysAgo } });
+
+      whatsappAnalytics = { total, daily, weekly, monthly };
+    } catch (e) {
+      console.error("Error computing whatsappAnalytics:", e);
+    }
+
     return res.json({
       institute: institute.toObject ? institute.toObject() : institute,
       adminUser,
@@ -1165,6 +1213,7 @@ export const getInstituteFullAnalytics = async (req, res) => {
         quizAttemptsCount,
       },
       students: studentList,
+      whatsappAnalytics,
     });
   } catch (error) {
     console.error("getInstituteFullAnalytics error:", error);

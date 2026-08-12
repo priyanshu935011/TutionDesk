@@ -64,8 +64,22 @@ router.post("/fee-reminders", async (req, res) => {
           });
 
           try {
-            await sendMessage(instId, targetPhone, text);
-            sentCount++;
+            const result = await sendMessage(instId, targetPhone, text, "fee_reminder", {
+              templateName: "fee_reminder",
+              parameters: [
+                student.parentName || "Parent",
+                String(pending),
+                student.name || "",
+                inst.name || "Classtech",
+                formattedDueDate
+              ]
+            });
+            if (result && result.success) {
+              sentCount++;
+            } else {
+              console.warn(`Cron fee reminder skipped for student ${student._id}: ${result?.message || "unknown"}`);
+              failCount++;
+            }
             await new Promise((r) => setTimeout(r, 500));
           } catch (err) {
             console.error(`Cron fee reminder fail for student ${student._id}:`, err.message);

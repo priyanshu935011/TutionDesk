@@ -199,7 +199,7 @@ export const forgotStudentPassword = async (req, res) => {
       { expiresIn: "30m" }
     );
 
-    const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+    const clientUrl = process.env.CLIENT_URL || "https://classtech.in";
     const resetLink = `${clientUrl}/student/reset-password?token=${resetToken}`;
 
     // Send email helper

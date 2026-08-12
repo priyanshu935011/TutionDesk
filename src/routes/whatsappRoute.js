@@ -43,10 +43,10 @@ router.get("/status", async (req, res) => {
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
-    const statusObj = getSessionStatus(String(instituteId));
+    const statusObj = await getSessionStatus(String(instituteId));
 
     let settings = await getCache(`institute:whatsapp_settings:${instituteId}`);
-    if (!settings) {
+    if (!settings || Object.keys(settings).length === 0 || settings.absentAlertsEnabled === undefined) {
       const inst = await Institute.findById(instituteId);
       settings = inst?.whatsappSettings || {
         absentAlertsEnabled: false,
@@ -147,7 +147,10 @@ router.post("/test", async (req, res) => {
     if (!phone || !text) {
       return res.status(400).json({ message: "Phone and text are required." });
     }
-    await sendMessage(String(instituteId), phone, text);
+    const result = await sendMessage(String(instituteId), phone, text);
+    if (!result || !result.success) {
+      return res.status(400).json({ message: result?.message || "Failed to send test message via Meta API." });
+    }
     return res.json({ message: "Test message sent successfully." });
   } catch (error) {
     return res.status(400).json({ message: error.message || "Failed to send test message." });

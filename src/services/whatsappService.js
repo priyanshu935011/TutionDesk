@@ -52,7 +52,7 @@ export const logoutSession = async (instituteId) => {
   return { success: true };
 };
 
-export const sendMessage = async (instituteId, to, text, msgType = "custom") => {
+export const sendMessage = async (instituteId, to, text, msgType = "custom", templateConfig = null) => {
   const inst = await Institute.findById(instituteId);
   if (!inst) {
     console.warn(`WhatsApp skip send to ${to}: Institute ${instituteId} not found.`);
@@ -96,28 +96,63 @@ export const sendMessage = async (instituteId, to, text, msgType = "custom") => 
   }
 
   const cleanNumber = formatPhoneNumber(to);
-  const { accessToken, phoneNumberId } = creds;
-
-  console.log(`Sending Meta WhatsApp message to ${cleanNumber}...`);
+  const { accessToken, phoneNumberId, languageCode } = creds;
 
   try {
-    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: cleanNumber,
-        type: "text",
-        text: {
-          preview_url: false,
-          body: text
-        }
-      })
-    });
+    let response;
+    
+    if (templateConfig && templateConfig.templateName) {
+      const targetLang = (languageCode || "en").trim();
+      console.log(`Sending Meta WhatsApp Template [${templateConfig.templateName}] (${targetLang}) to ${cleanNumber}...`);
+      
+      response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: cleanNumber,
+          type: "template",
+          template: {
+            name: templateConfig.templateName,
+            language: {
+              code: targetLang
+            },
+            components: [
+              {
+                type: "body",
+                parameters: (templateConfig.parameters || []).map(p => ({
+                  type: "text",
+                  text: String(p)
+                }))
+              }
+            ]
+          }
+        })
+      });
+    } else {
+      console.log(`Sending Meta WhatsApp message to ${cleanNumber}...`);
+      response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: cleanNumber,
+          type: "text",
+          text: {
+            preview_url: false,
+            body: text
+          }
+        })
+      });
+    }
 
     const data = await response.json();
     if (!response.ok) {
@@ -139,7 +174,7 @@ export const sendMessage = async (instituteId, to, text, msgType = "custom") => 
 
     return { success: true, messageId: data.messages?.[0]?.id };
   } catch (err) {
-    console.error(`Meta WhatsApp send text error to ${cleanNumber}:`, err.message);
+    console.error(`Meta WhatsApp send error to ${cleanNumber}:`, err.message);
     await WhatsappLog.create({
       institute: instituteId,
       to: cleanNumber,
@@ -149,7 +184,6 @@ export const sendMessage = async (instituteId, to, text, msgType = "custom") => 
       cost: 0,
       error: err.message || "Meta API Error"
     });
-    throw err;
   }
 };
 
