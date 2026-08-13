@@ -9,10 +9,95 @@ const supabaseKey = process.env.SUPABASE_KEY || "";
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages", "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs", "whatsapplog", "whatsapp_logs", "whatsapp_log"]);
-const FALLBACK_DIR = "c:/Users/priya/priyanshu/projects/tutions_crm/scratch/data";
+const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
 const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
 const BATCHES_METADATA_FILE = path.join(FALLBACK_DIR, "batches_metadata.json");
+
+const uploadMetadataFile = (filename, contentString) => {
+  const bucketName = process.env.SUPABASE_BUCKET || "notes";
+  supabase.storage
+    .from(bucketName)
+    .upload(`metadata/${filename}`, Buffer.from(contentString), {
+      contentType: "application/json",
+      upsert: true
+    })
+    .then(({ error }) => {
+      if (error) {
+        console.error(`[Supabase Storage Sync] Error uploading metadata file ${filename}:`, error);
+      } else {
+        console.log(`[Supabase Storage Sync] Successfully backed up ${filename} to Supabase bucket.`);
+      }
+    })
+    .catch(err => {
+      console.error(`[Supabase Storage Sync] Exception during upload of ${filename}:`, err);
+    });
+};
+
+export const initializeSupabaseStorage = async () => {
+  try {
+    const bucketName = process.env.SUPABASE_BUCKET || "notes";
+    console.log(`[Supabase Storage Sync] Initializing storage sync using bucket "${bucketName}"...`);
+
+    // Ensure FALLBACK_DIR exists
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+
+    // 1. Ensure bucket exists
+    const { data: buckets, error: listBucketsError } = await supabase.storage.listBuckets();
+    if (listBucketsError) {
+      console.error("[Supabase Storage Sync] Error listing buckets:", listBucketsError);
+      return;
+    }
+    const exists = buckets.some(b => b.id === bucketName);
+    if (!exists) {
+      console.log(`[Supabase Storage Sync] Bucket "${bucketName}" does not exist. Creating it...`);
+      const { error: createError } = await supabase.storage.createBucket(bucketName, { public: true });
+      if (createError) {
+        console.error("[Supabase Storage Sync] Error creating bucket:", createError);
+        return;
+      }
+      console.log(`[Supabase Storage Sync] Bucket "${bucketName}" created successfully.`);
+    }
+
+    // 2. List all files under "metadata/" folder in the bucket
+    const { data: files, error: listFilesError } = await supabase.storage
+      .from(bucketName)
+      .list("metadata");
+
+    if (listFilesError) {
+      console.error("[Supabase Storage Sync] Error listing files in metadata folder:", listFilesError);
+      return;
+    }
+
+    if (files && files.length > 0) {
+      console.log(`[Supabase Storage Sync] Found ${files.length} metadata files in Supabase bucket. Syncing to local storage...`);
+      for (const file of files) {
+        if (file.name.endsWith(".json")) {
+          const filePath = path.join(FALLBACK_DIR, file.name);
+          console.log(`[Supabase Storage Sync] Downloading ${file.name} to ${filePath}...`);
+          const { data: fileData, error: downloadError } = await supabase.storage
+            .from(bucketName)
+            .download(`metadata/${file.name}`);
+
+          if (downloadError) {
+            console.error(`[Supabase Storage Sync] Error downloading ${file.name}:`, downloadError);
+            continue;
+          }
+
+          const text = await fileData.text();
+          fs.writeFileSync(filePath, text);
+          console.log(`[Supabase Storage Sync] Successfully synced ${file.name} to disk.`);
+        }
+      }
+    } else {
+      console.log("[Supabase Storage Sync] No existing metadata files found in Supabase bucket.");
+    }
+  } catch (err) {
+    console.error("[Supabase Storage Sync] Initialization failed:", err);
+  }
+};
 
 function readBatchesMetadata() {
   try {
@@ -30,7 +115,9 @@ function readBatchesMetadata() {
 
 function writeBatchesMetadata(metadata) {
   try {
-    fs.writeFileSync(BATCHES_METADATA_FILE, JSON.stringify(metadata, null, 2));
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(BATCHES_METADATA_FILE, content);
+    uploadMetadataFile("batches_metadata.json", content);
   } catch (e) {}
 }
 
@@ -50,7 +137,9 @@ function readStudentMetadata() {
 
 function writeStudentMetadata(metadata) {
   try {
-    fs.writeFileSync(STUDENT_METADATA_FILE, JSON.stringify(metadata, null, 2));
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(STUDENT_METADATA_FILE, content);
+    uploadMetadataFile("student_metadata.json", content);
   } catch (e) {}
 }
 
@@ -70,7 +159,9 @@ function readInstitutesMetadata() {
 
 function writeInstitutesMetadata(metadata) {
   try {
-    fs.writeFileSync(METADATA_FILE, JSON.stringify(metadata, null, 2));
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(METADATA_FILE, content);
+    uploadMetadataFile("institutes_metadata.json", content);
   } catch (e) {}
 }
 
@@ -99,7 +190,9 @@ function readFallbackData(tableName) {
 function writeFallbackData(tableName, data) {
   try {
     const filePath = getFallbackFile(tableName);
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    const content = JSON.stringify(data, null, 2);
+    fs.writeFileSync(filePath, content);
+    uploadMetadataFile(`${tableName}.json`, content);
   } catch (err) {
     console.error(`Error writing fallback data for ${tableName}:`, err);
   }
@@ -514,7 +607,10 @@ class SupabaseDocument {
           leadApiKey: this.leadApiKey ?? "",
           subscriptionHistory: this.subscriptionHistory ?? [],
           studentCustomFields: this.studentCustomFields ?? [],
-          studentPortalEnabled: this.studentPortalEnabled ?? true
+          studentPortalEnabled: this.studentPortalEnabled ?? true,
+          walletBalance: this.walletBalance ?? 0,
+          perMessageCharge: this.perMessageCharge ?? 0.10,
+          whatsappSettings: this.whatsappSettings ?? {}
         };
         writeInstitutesMetadata(metadata);
       }

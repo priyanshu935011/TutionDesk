@@ -24,6 +24,7 @@ import paymentRoutes from "./routes/paymentRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 import SystemSetting from "./models/SystemSetting.js";
+import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 
 connectDB();
 
@@ -125,10 +126,20 @@ app.use("/payments", paymentRoutes);
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  reconnectAllSessions().catch((err) => {
-    console.error("Failed to auto-resume WhatsApp sessions:", err);
+initializeSupabaseStorage().then(() => {
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    reconnectAllSessions().catch((err) => {
+      console.error("Failed to auto-resume WhatsApp sessions:", err);
+    });
+  });
+}).catch(err => {
+  console.error("Failed to initialize Supabase storage sync:", err);
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    reconnectAllSessions().catch((err) => {
+      console.error("Failed to auto-resume WhatsApp sessions:", err);
+    });
   });
 });
 
