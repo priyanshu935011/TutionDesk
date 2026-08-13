@@ -180,7 +180,10 @@ export const createPaymentSession = async (req, res) => {
 
     } else {
       // One-time payment flow
-      const origin = req.headers.origin || "http://localhost:8080";
+      let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
+      if (!origin.startsWith("https://")) {
+        origin = "https://classtech-v1.up.railway.app";
+      }
       const returnUrl = origin.includes("8080")
         ? `${origin}/#/subscription-expired?verify_id=${cfOrderId}`
         : `${origin}/subscription-expired?verify_id=${cfOrderId}`;
@@ -1694,7 +1697,10 @@ export const createWalletRechargeSession = async (req, res) => {
 
     const cfOrderId = "wallet_" + crypto.randomUUID().replace(/-/g, "");
 
-    const origin = req.headers.origin || "http://localhost:8080";
+    let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
+    if (!origin.startsWith("https://")) {
+      origin = "https://classtech-v1.up.railway.app";
+    }
     const returnUrl = origin.includes("8080")
       ? `${origin}/#/dashboard?verify_wallet_id=${cfOrderId}`
       : `${origin}/dashboard?verify_wallet_id=${cfOrderId}`;
