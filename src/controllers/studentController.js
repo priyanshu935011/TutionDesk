@@ -394,32 +394,61 @@ export const createStudent = async (req, res) => {
       console.warn("Cache eviction warning during student enrollment:", cacheErr);
     }
 
-    // Send WhatsApp login credentials if option requested
+    // Send WhatsApp notifications (credentials & fee reminders) if globally enabled
     const plainPassword = req.body.password || getInitialPassword(name, phone);
-    if (req.body.sendWhatsApp && portalEnabled) {
-      setImmediate(async () => {
-        try {
-          const instituteId = req.user.institute?._id || req.user.institute;
-          const inst = await Institute.findById(instituteId);
-          const instituteName = inst?.name || "Classtech";
-          const recipientPhone = parentPhone?.trim() || phone?.trim();
+    setImmediate(async () => {
+      try {
+        const instituteId = req.user.institute?._id || req.user.institute;
+        const inst = await Institute.findById(instituteId);
+        if (!inst) return;
 
-          if (recipientPhone) {
-            const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
-            await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
-              instituteName,
-              name,
-              enrollmentNumberToUse,
-              plainPassword,
-              loginUrl
-            ]);
-            console.log(`WhatsApp login credentials template sent successfully to ${name} (${recipientPhone})`);
-          }
-        } catch (wErr) {
-          console.error(`Failed to send WhatsApp credentials to ${name}:`, wErr.message);
+        const recipientPhone = parentPhone?.trim() || phone?.trim();
+        if (!recipientPhone) return;
+
+        const instituteName = inst.name || "Classtech";
+
+        // 1. Send Login Credentials if enabled
+        const sendCredentialsEnabled = inst.whatsappSettings?.sendCredentialsEnabled ?? false;
+        if (portalEnabled && sendCredentialsEnabled) {
+          const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
+          await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
+            instituteName,
+            name,
+            enrollmentNumberToUse,
+            plainPassword,
+            loginUrl
+          ]);
+          console.log(`WhatsApp login credentials template sent successfully to ${name} (${recipientPhone})`);
         }
-      });
-    }
+
+        // 2. Send Fee Reminder if enabled and due date matches criteria
+        const feeRemindersEnabled = inst.whatsappSettings?.feeRemindersEnabled ?? false;
+        const feesToUse = Number(totalFees || 0);
+        
+        if (feeRemindersEnabled && feesToUse > 0 && dueDate) {
+          const daysBefore = inst.whatsappSettings?.feeReminderDaysBefore ?? 3;
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const due = new Date(dueDate);
+          due.setHours(0, 0, 0, 0);
+          const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (diffDays <= daysBefore) {
+            const formattedDueDate = new Date(dueDate).toLocaleDateString("en-IN");
+            await sendTemplateMessage(String(instituteId), recipientPhone, "fee_reminder", [
+              parentName || "Parent",
+              String(feesToUse),
+              name,
+              instituteName,
+              formattedDueDate
+            ]);
+            console.log(`WhatsApp fee reminder template sent successfully to ${name} (${recipientPhone})`);
+          }
+        }
+      } catch (wErr) {
+        console.error(`Failed to send WhatsApp notifications for ${name}:`, wErr.message);
+      }
+    });
 
     // Return array if array requested, else single object for backward compatibility
     if (Array.isArray(req.body.batches) && req.body.batches.length > 0) {
@@ -1521,8 +1550,11 @@ export const bulkCreateStudents = async (req, res) => {
           name: student.name,
           phone: student.phone,
           parentPhone: student.parentPhone,
+          parentName: student.parentName,
           enrollmentNumber: student.enrollmentNumber,
           plainPassword: portalEnabled ? getInitialPassword(name, phone) : "",
+          totalFees: student.totalFees,
+          dueDate: student.dueDate,
         });
       } catch (err) {
         results.failCount++;
@@ -1539,32 +1571,65 @@ export const bulkCreateStudents = async (req, res) => {
       await clearCachePattern("teacher:dashboard:*");
       await clearCachePattern("teacher:students:*");
 
-      if (req.body.sendWhatsApp) {
+      const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+      const inst = await Institute.findById(instituteId);
+      const sendCredentialsEnabled = inst?.whatsappSettings?.sendCredentialsEnabled ?? false;
+      const feeRemindersEnabled = inst?.whatsappSettings?.feeRemindersEnabled ?? false;
+
+      if (sendCredentialsEnabled || feeRemindersEnabled) {
         const createdItems = [...results.created];
         setImmediate(async () => {
           try {
-            const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
-            const inst = await Institute.findById(instituteId);
             const instituteName = inst?.name || "Classtech";
-            const template = await getCredentialsTemplate();
             const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
+            const daysBefore = inst?.whatsappSettings?.feeReminderDaysBefore ?? 3;
 
             for (const item of createdItems) {
               const recipientPhone = item.parentPhone?.trim() || item.phone?.trim();
               if (!recipientPhone) continue;
 
-              try {
-                console.log(`Sending bulk WhatsApp login credentials to ${item.name} (${recipientPhone})...`);
-                await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
-                  instituteName,
-                  item.name,
-                  item.enrollmentNumber,
-                  item.plainPassword,
-                  loginUrl
-                ]);
-                await new Promise((r) => setTimeout(r, 600));
-              } catch (wErr) {
-                console.error(`Failed sending bulk WhatsApp credentials to ${item.name}:`, wErr.message);
+              // 1. Send Login Credentials if enabled
+              if (sendCredentialsEnabled && item.plainPassword) {
+                try {
+                  console.log(`Sending bulk WhatsApp login credentials to ${item.name} (${recipientPhone})...`);
+                  await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
+                    instituteName,
+                    item.name,
+                    item.enrollmentNumber,
+                    item.plainPassword,
+                    loginUrl
+                  ]);
+                  await new Promise((r) => setTimeout(r, 600));
+                } catch (wErr) {
+                  console.error(`Failed sending bulk WhatsApp credentials to ${item.name}:`, wErr.message);
+                }
+              }
+
+              // 2. Send Fee Reminder if enabled and due date matches criteria
+              const feesToUse = Number(item.totalFees || 0);
+              if (feeRemindersEnabled && feesToUse > 0 && item.dueDate) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const due = new Date(item.dueDate);
+                due.setHours(0, 0, 0, 0);
+                const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays <= daysBefore) {
+                  try {
+                    console.log(`Sending bulk WhatsApp fee reminder to ${item.name} (${recipientPhone})...`);
+                    const formattedDueDate = new Date(item.dueDate).toLocaleDateString("en-IN");
+                    await sendTemplateMessage(String(instituteId), recipientPhone, "fee_reminder", [
+                      item.parentName || "Parent",
+                      String(feesToUse),
+                      item.name,
+                      instituteName,
+                      formattedDueDate
+                    ]);
+                    await new Promise((r) => setTimeout(r, 600));
+                  } catch (wErr) {
+                    console.error(`Failed sending bulk WhatsApp fee reminder to ${item.name}:`, wErr.message);
+                  }
+                }
               }
             }
           } catch (bgErr) {
