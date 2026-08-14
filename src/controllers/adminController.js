@@ -1754,6 +1754,14 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         dueDate,
         instituteName,
       });
+    } else if (templateType === "notice" || templateType === "general_announcement") {
+      templateName = "general_announcement";
+      const title = customValues?.title || "Special Announcement";
+      const content = customValues?.content || "Classes will remain closed tomorrow. Online sessions will continue as scheduled.";
+      const recipientName = customValues?.parentName || customValues?.studentName || "Parent / Student";
+      parameters = [recipientName, title, content, instituteName];
+
+      text = `📢 *Notice & Announcement - ${instituteName}*\n\nDear ${recipientName},\n*${title}*\n\n${content}\n\nThank you!\n-${instituteName}`;
     } else if (templateType === "testMarks") {
       templateName = "test_marks";
       const studentName = customValues?.studentName || "John Doe";

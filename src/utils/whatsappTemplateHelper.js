@@ -16,6 +16,16 @@ export const DEFAULT_ABSENT_TEMPLATE = `Dear Parent, this is to inform you that 
 
 export const DEFAULT_FEE_REMINDER_TEMPLATE = `Dear {parentName}, this is a friendly reminder that INR {pendingAmount} is outstanding for student {studentName}'s tuition fee at {instituteName}. Due date: {dueDate}. Thank you!`;
 
+export const DEFAULT_NOTICE_TEMPLATE = `📢 *Notice & Announcement - {instituteName}*
+
+Dear {parentName},
+*{title}*
+
+{content}
+
+Thank you!
+-{instituteName}`;
+
 export const DEFAULT_TEST_MARKS_TEMPLATE = `Dear Parent, test results for {studentName} have been published for {testName} at {instituteName}.
 Score: {marksObtained} / {totalMarks} ({percentage}%).
 Status/Remarks: {remarks}`;
@@ -41,6 +51,7 @@ export const getGlobalTemplates = async () => {
       absent: stored.absent || DEFAULT_ABSENT_TEMPLATE,
       feeReminder: stored.feeReminder || DEFAULT_FEE_REMINDER_TEMPLATE,
       testMarks: stored.testMarks || DEFAULT_TEST_MARKS_TEMPLATE,
+      notice: stored.notice || DEFAULT_NOTICE_TEMPLATE,
     };
   } catch (err) {
     console.error("Error fetching whatsapp_global_templates from DB:", err.message);
@@ -49,6 +60,7 @@ export const getGlobalTemplates = async () => {
       absent: DEFAULT_ABSENT_TEMPLATE,
       feeReminder: DEFAULT_FEE_REMINDER_TEMPLATE,
       testMarks: DEFAULT_TEST_MARKS_TEMPLATE,
+      notice: DEFAULT_NOTICE_TEMPLATE,
     };
   }
 };
