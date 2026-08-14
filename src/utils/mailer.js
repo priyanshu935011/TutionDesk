@@ -156,6 +156,123 @@ export const sendResetEmail = async (email, name, resetLink) => {
   }
 };
 
+export const sendOTPEmail = async (email, name, otp) => {
+  const config = await getSmtpConfig();
+  const host = config.host;
+  const port = config.port;
+  const user = config.user;
+  const pass = config.pass;
+  let from = config.from;
+  if (from.includes("classtech.in")) {
+    from = from.replace("classtech.in", "classtech.in");
+  }
+
+  console.log(`\n==================================================`);
+  console.log(`PASSWORD RESET OTP REQUEST FOR: ${name} (${email})`);
+  console.log(`OTP Code: ${otp}`);
+  console.log(`==================================================\n`);
+
+  if (!host || !user || !pass) {
+    console.log("SMTP configurations not complete. Logged OTP code above.");
+    return;
+  }
+
+  let senderName = "Classtech";
+  let senderEmail = "support@classtech.in";
+  const fromMatch = from.match(/^"([^"]+)"\s*<([^>]+)>$/);
+  if (fromMatch) {
+    senderName = fromMatch[1];
+    senderEmail = fromMatch[2];
+  } else {
+    const emailOnlyMatch = from.match(/<([^>]+)>/);
+    if (emailOnlyMatch) {
+      senderEmail = emailOnlyMatch[1];
+    } else if (from.includes("@")) {
+      senderEmail = from.trim();
+    }
+  }
+
+  const emailHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px;">
+      <h2 style="color: #4f46e5; margin-bottom: 20px;">Classtech Verification Code</h2>
+      <p>Hello ${name},</p>
+      <p>Your password reset verification OTP is:</p>
+      <div style="margin: 30px 0; text-align: center;">
+        <span style="font-size: 32px; font-weight: 900; letter-spacing: 6px; color: #4f46e5; background-color: #f3f4f6; padding: 12px 24px; border-radius: 8px; display: inline-block;">${otp}</span>
+      </div>
+      <p>This code is valid for 10 minutes.</p>
+      <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
+      <p style="font-size: 12px; color: #94a3b8;">If you did not request this OTP, please ignore this email.</p>
+    </div>
+  `;
+
+  try {
+    console.log("Attempting to send OTP email via Brevo HTTP REST API (port 443)...");
+    const apiKey = config.brevoApiKey || pass;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({
+        sender: {
+          name: senderName,
+          email: senderEmail,
+        },
+        to: [
+          {
+            email: email,
+            name: name,
+          },
+        ],
+        subject: `${otp} is your Classtech OTP`,
+        htmlContent: emailHtml,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const responseData = await response.json();
+      console.log("OTP Email sent successfully via Brevo HTTP. Message ID:", responseData.messageId);
+      return;
+    } else {
+      const errorText = await response.text();
+      throw new Error(`Brevo HTTP API status ${response.status}: ${errorText}`);
+    }
+  } catch (apiError) {
+    console.warn("Brevo HTTP API failed or timed out. Falling back to SMTP connection...", apiError.message);
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port: Number(port),
+      secure: Number(port) === 465,
+      auth: {
+        user,
+        pass,
+      },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000,
+    });
+
+    const mailOptions = {
+      from,
+      to: email,
+      subject: `${otp} is your Classtech OTP`,
+      html: emailHtml,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log("OTP Email sent successfully via SMTP fallback.");
+  }
+};
+
 export const sendDemoRequestEmail = async ({
   name,
   phone,

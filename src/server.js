@@ -86,6 +86,10 @@ app.get("/", (_, res) => {
   res.json({ message: "Coaching CRM API is running" });
 });
 
+app.get("/health", (_, res) => {
+  res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date() });
+});
+
 app.get("/ads.txt", async (req, res) => {
   try {
     const setting = await SystemSetting.findOne({ key: "ads_settings" });

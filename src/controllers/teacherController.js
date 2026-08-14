@@ -816,12 +816,17 @@ export const getTestResults = async (req, res) => {
     const query = { institute: instituteId };
     if (req.query.studentId) {
       query.student = req.query.studentId;
+      const studentObj = await Student.findById(req.query.studentId).select("joinedOn");
+      if (studentObj && studentObj.joinedOn) {
+        query.examDate = { $gte: studentObj.joinedOn };
+      }
     }
     const results = await TestResult.find(query)
       .sort({ createdAt: -1 })
       .populate("student", "name enrollmentNumber email");
     return res.json(results);
   } catch (error) {
+    console.error("getTestResults error:", error);
     return res.status(500).json({ message: "Could not fetch test results" });
   }
 };

@@ -533,6 +533,7 @@ export const getCashfreeSettings = async (req, res) => {
       enableOffers: true,
       sixMonthsFreeMonths: 1,
       twelveMonthsFreeMonths: 2,
+      minWalletTopup: 10,
     };
     if (!setting) {
       return res.json(defaults);
@@ -555,7 +556,7 @@ export const getCashfreeSettings = async (req, res) => {
 
 export const updateCashfreeSettings = async (req, res) => {
   try {
-    const { appId, secretKey, environment, defaultMonthlyPrice, enableOffers, sixMonthsFreeMonths, twelveMonthsFreeMonths } = req.body;
+    const { appId, secretKey, environment, defaultMonthlyPrice, enableOffers, sixMonthsFreeMonths, twelveMonthsFreeMonths, minWalletTopup } = req.body;
     if (!appId || !secretKey || !environment) {
       return res.status(400).json({ message: "App ID, Secret Key and Environment are required." });
     }
@@ -568,6 +569,7 @@ export const updateCashfreeSettings = async (req, res) => {
       enableOffers: enableOffers !== false,
       sixMonthsFreeMonths: Number(sixMonthsFreeMonths || 1),
       twelveMonthsFreeMonths: Number(twelveMonthsFreeMonths || 2),
+      minWalletTopup: minWalletTopup !== undefined ? Number(minWalletTopup) : 10,
     };
 
     let setting = await SystemSetting.findOne({ key: "cashfree_settings" });
@@ -1692,6 +1694,10 @@ export const createWalletRechargeSession = async (req, res) => {
     }
 
     const config = await getCashfreeConfig();
+    const minAmount = config.minWalletTopup !== undefined ? Number(config.minWalletTopup) : 10;
+    if (Number(amount) < minAmount) {
+      return res.status(400).json({ message: `Minimum top up amount is ₹${minAmount}.` });
+    }
     const { appId, secretKey, environment } = config;
     const baseUrl = getBaseUrl(environment);
 
@@ -1811,5 +1817,72 @@ export const verifyWalletRecharge = async (req, res) => {
   } catch (error) {
     console.error("verifyWalletRecharge error:", error);
     return res.status(500).json({ message: "Could not verify wallet recharge." });
+  }
+};
+
+export const cronVerifyPendingRecharges = async (req, res) => {
+  const token = req.headers["x-cron-token"];
+  if (process.env.CRON_SECRET && token !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const pendingRecharges = await CashfreePayment.find({
+      status: "pending",
+      type: "wallet_recharge",
+    });
+
+    if (pendingRecharges.length === 0) {
+      return res.json({ message: "No pending recharges to verify." });
+    }
+
+    const config = await getCashfreeConfig();
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    let updatedCount = 0;
+
+    for (const payment of pendingRecharges) {
+      try {
+        const response = await axios.get(`${baseUrl}/orders/${payment.cfOrderId}`, { headers });
+        const rawData = response.data;
+        let status = "pending";
+
+        if (rawData.order_status === "PAID") {
+          status = "success";
+        } else if (["EXPIRED", "CANCELLED", "FAILED"].includes(rawData.order_status)) {
+          status = "failed";
+        }
+
+        if (status !== "pending") {
+          payment.status = status;
+          payment.cfPaymentDetails = rawData;
+          await payment.save();
+
+          if (status === "success") {
+            const institute = await Institute.findById(payment.institute);
+            if (institute) {
+              institute.walletBalance = (institute.walletBalance || 0) + Number(payment.amount);
+              await institute.save();
+              updatedCount++;
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to verify cfOrderId ${payment.cfOrderId} in cron:`, err.message);
+      }
+    }
+
+    return res.json({ message: `Pending recharges check finished. Successfully topped up ${updatedCount} wallets.` });
+  } catch (error) {
+    console.error("cronVerifyPendingRecharges error:", error);
+    return res.status(500).json({ message: "Cron recharges check failed" });
   }
 };

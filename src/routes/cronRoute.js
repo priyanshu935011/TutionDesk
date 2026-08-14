@@ -3,8 +3,11 @@ import Student from "../models/Student.js";
 import Institute from "../models/Institute.js";
 import { sendMessage } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatFeeReminderMessage } from "../utils/whatsappTemplateHelper.js";
+import { cronVerifyPendingRecharges } from "../controllers/paymentController.js";
 
 const router = express.Router();
+
+router.post("/pending-recharges", cronVerifyPendingRecharges);
 
 router.post("/fee-reminders", async (req, res) => {
   const token = req.headers["x-cron-token"];

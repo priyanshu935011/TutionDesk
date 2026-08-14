@@ -63,7 +63,7 @@ export const formatCredentialsMessage = ({
   loginUrl = "",
 }) => {
   const tpl = template || DEFAULT_CREDENTIALS_TEMPLATE;
-  const baseUrl = loginUrl || process.env.FRONTEND_URL || "https://classtech.vercel.app/student/login";
+  const baseUrl = loginUrl || process.env.FRONTEND_URL || "https://classtech.in/student/login";
 
   return tpl
     .replace(/\{student_name\}/gi, studentName)

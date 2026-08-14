@@ -5,6 +5,8 @@ import {
   forgotUserPassword,
   resetUserPassword,
   bookDemo,
+  appForgotUserPassword,
+  appResetUserPassword,
 } from "../controllers/authController.js";
 import protect from "../middleware/authMiddleware.js";
 const router = express.Router();
@@ -14,5 +16,7 @@ router.post("/change-password", protect, changeUserPassword);
 router.post("/forgot-password", forgotUserPassword);
 router.post("/reset-password", resetUserPassword);
 router.post("/book-demo", bookDemo);
+router.post("/app-forgot-password", appForgotUserPassword);
+router.post("/app-reset-password", appResetUserPassword);
 
 export default router;

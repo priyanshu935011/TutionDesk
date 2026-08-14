@@ -257,13 +257,56 @@ export const sendDocument = async (instituteId, to, fileBuffer, fileName, captio
 };
 
 export const sendTemplateMessage = async (instituteId, to, templateName, parameters) => {
+  const cleanNumber = formatPhoneNumber(to);
+  let inst = null;
+  let charge = 0.10;
+
+  if (instituteId !== "admin_test") {
+    inst = await Institute.findById(instituteId);
+    if (!inst) {
+      console.warn(`WhatsApp template skip to ${to}: Institute ${instituteId} not found.`);
+      return { success: false, message: "Institute not found." };
+    }
+
+    const allowedFeatures = inst.allowedFeatures || [];
+    if (!allowedFeatures.includes("whatsapp")) {
+      console.warn(`WhatsApp template skip to ${to}: Feature is disabled for institute ${instituteId}.`);
+      return { success: false, message: "WhatsApp feature is disabled." };
+    }
+
+    charge = inst.perMessageCharge ?? 0.10;
+    if ((inst.walletBalance ?? 0) < charge) {
+      console.warn(`WhatsApp template skip to ${to}: Insufficient wallet balance for institute ${instituteId}. Balance: ${inst.walletBalance}`);
+      await WhatsappLog.create({
+        institute: instituteId,
+        to: cleanNumber,
+        messageText: `Template: ${templateName} | Parameters: ${JSON.stringify(parameters)}`,
+        msgType: "template",
+        status: "failed",
+        cost: 0,
+        error: "Insufficient wallet balance."
+      });
+      return { success: false, message: "Insufficient wallet balance." };
+    }
+  }
+
   const creds = await getMetaCredentials();
   if (!creds) {
     console.warn(`WhatsApp template skip to ${to}: Meta Cloud API not configured.`);
+    if (instituteId !== "admin_test") {
+      await WhatsappLog.create({
+        institute: instituteId,
+        to: cleanNumber,
+        messageText: `Template: ${templateName} | Parameters: ${JSON.stringify(parameters)}`,
+        msgType: "template",
+        status: "failed",
+        cost: 0,
+        error: "Meta Cloud API not configured."
+      });
+    }
     return { success: false, message: "Meta API not configured." };
   }
 
-  const cleanNumber = formatPhoneNumber(to);
   const { accessToken, phoneNumberId, languageCode } = creds;
   const targetLang = (languageCode || "en").trim();
 
@@ -304,9 +347,35 @@ export const sendTemplateMessage = async (instituteId, to, templateName, paramet
       throw new Error(data.error?.message || "Failed to send WhatsApp template message via Meta API");
     }
 
+    if (instituteId !== "admin_test" && inst) {
+      // Deduct charge
+      inst.walletBalance = Math.max(0, (inst.walletBalance || 0) - charge);
+      await inst.save();
+
+      await WhatsappLog.create({
+        institute: instituteId,
+        to: cleanNumber,
+        messageText: `Template: ${templateName} | Parameters: ${JSON.stringify(parameters)}`,
+        msgType: "template",
+        status: "sent",
+        cost: charge
+      });
+    }
+
     return { success: true, messageId: data.messages?.[0]?.id };
   } catch (err) {
     console.error(`Meta WhatsApp template error to ${cleanNumber}:`, err.message);
+    if (instituteId !== "admin_test") {
+      await WhatsappLog.create({
+        institute: instituteId,
+        to: cleanNumber,
+        messageText: `Template: ${templateName} | Parameters: ${JSON.stringify(parameters)}`,
+        msgType: "template",
+        status: "failed",
+        cost: 0,
+        error: err.message || "Meta API Error"
+      });
+    }
     throw err;
   }
 };

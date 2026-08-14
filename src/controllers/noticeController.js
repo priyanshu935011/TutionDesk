@@ -2,7 +2,7 @@ import Notice from "../models/Notice.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import Institute from "../models/Institute.js";
-import { sendMessage, getSessionStatus } from "../services/whatsappService.js";
+import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
 import { getCache, setCache, clearCachePattern } from "../utils/cache.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
@@ -81,13 +81,63 @@ export const createNotice = async (req, res) => {
             if (b) batchName = b.name;
           }
 
-          let whatsappText = "";
-          if (noticeType === "holiday") {
-            whatsappText = `🏖️ *Holiday Announcement - ${inst?.name || "Classtech"}*\nTitle: *${title}*\nDate of Holiday: *${formatDate(holidayDate)}*\n${content ? `Details: ${content}\n` : ""}Thank you!`;
-          } else if (noticeType === "reschedule") {
-            whatsappText = `⏰ *Class Reschedule Alert - ${batchName}*\nTitle: *${title}*\nOriginal Time: *${originalTime || "-"}*\nRescheduled Date: *${formatDate(rescheduledDate)}*\nNew Time: *${rescheduledTime || "-"}*\n${content ? `Note: ${content}\n` : ""}Thank you!`;
-          } else {
-            whatsappText = `📢 *Announcement - ${inst?.name || "Classtech"}*\n*${title}*\n${content || ""}\nThank you!`;
+          let templateName = "";
+          let getParameters = (s) => [];
+          let fallbackText = "";
+
+          const instName = inst?.name || "Classtech";
+
+          if (noticeType === "general") {
+            templateName = "general_announcement";
+            getParameters = (s) => [
+              (s.parentPhone && s.parentPhone.trim() && s.parentName && s.parentName.trim()) ? s.parentName.trim() : s.name,
+              title,
+              content || "-",
+              instName
+            ];
+            fallbackText = `📢 *Announcement - ${instName}*\n*${title}*\n${content || ""}\nThank you!`;
+          } else if (noticeType === "reschedule" || noticeType === "reschedule") {
+            templateName = "class_rescheduled";
+            getParameters = (s) => [
+              (s.parentPhone && s.parentPhone.trim() && s.parentName && s.parentName.trim()) ? s.parentName.trim() : s.name,
+              batchName,
+              originalTime || "-",
+              rescheduledDate ? formatDate(rescheduledDate) : "-",
+              rescheduledTime || "-",
+              instName
+            ];
+            fallbackText = `⏰ *Class Reschedule Alert - ${batchName}*\nTitle: *${title}*\nOriginal Time: *${originalTime || "-"}*\nRescheduled Date: *${formatDate(rescheduledDate)}*\nNew Time: *${rescheduledTime || "-"}*\n${content ? `Note: ${content}\n` : ""}Thank you!`;
+          } else if (noticeType === "homework") {
+            templateName = "homework_update";
+            getParameters = (s) => [
+              (s.parentPhone && s.parentPhone.trim() && s.parentName && s.parentName.trim()) ? s.parentName.trim() : "Parent",
+              batchName,
+              content || "-",
+              holidayDate ? formatDate(holidayDate) : "-",
+              instName
+            ];
+            fallbackText = `📝 *Homework Update - ${batchName}*\nSubject: *${batchName}*\nTopic: *${content || "-"}*\nDue Date: *${holidayDate ? formatDate(holidayDate) : "-"}*\nThank you!`;
+          } else if (noticeType === "exam") {
+            templateName = "exam_announcement";
+            getParameters = (s) => [
+              (s.parentPhone && s.parentPhone.trim() && s.parentName && s.parentName.trim()) ? s.parentName.trim() : s.name,
+              batchName,
+              holidayDate ? formatDate(holidayDate) : "-",
+              originalTime || "-",
+              content || "-",
+              instName
+            ];
+            fallbackText = `📝 *Exam Announcement - ${batchName}*\nSubject: *${batchName}*\nDate: *${holidayDate ? formatDate(holidayDate) : "-"}*\nTime: *${originalTime || "-"}*\nSyllabus: *${content || "-"}*\nThank you!`;
+          } else if (noticeType === "holiday") {
+            templateName = "holiday_announcement";
+            getParameters = (s) => [
+              (s.parentPhone && s.parentPhone.trim() && s.parentName && s.parentName.trim()) ? s.parentName.trim() : s.name,
+              holidayDate ? formatDate(holidayDate) : "-",
+              title,
+              rescheduledDate ? formatDate(rescheduledDate) : "-",
+              instName
+            ];
+            fallbackText = `🏖️ *Holiday Announcement - ${instName}*\nTitle: *${title}*\nDate of Holiday: *${formatDate(holidayDate)}*\n${content ? `Details: ${content}\n` : ""}Thank you!`;
           }
 
           // Individual staggered dispatch with 500ms delay
@@ -95,7 +145,12 @@ export const createNotice = async (req, res) => {
             const targetPhone = (s.parentPhone && s.parentPhone.trim()) ? s.parentPhone.trim() : s.phone;
             if (targetPhone) {
               try {
-                await sendMessage(String(instituteId), targetPhone, whatsappText);
+                if (templateName) {
+                  const params = getParameters(s);
+                  await sendTemplateMessage(String(instituteId), targetPhone, templateName, params);
+                } else {
+                  await sendMessage(String(instituteId), targetPhone, fallbackText);
+                }
                 await new Promise((r) => setTimeout(r, 500));
               } catch (err) {
                 console.error(`Notice WhatsApp broadcast failed for student ${s._id}:`, err.message);

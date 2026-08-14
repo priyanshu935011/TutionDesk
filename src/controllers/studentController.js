@@ -10,7 +10,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
-import { sendMessage, sendDocument, sendTemplateMessage } from "../services/whatsappService.js";
+import { sendMessage, sendDocument, sendTemplateMessage, getSessionStatus } from "../services/whatsappService.js";
 import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 
@@ -410,7 +410,7 @@ export const createStudent = async (req, res) => {
         // 1. Send Login Credentials if enabled
         const sendCredentialsEnabled = inst.whatsappSettings?.sendCredentialsEnabled ?? false;
         if (portalEnabled && sendCredentialsEnabled) {
-          const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
+          const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
           await sendTemplateMessage(String(instituteId), recipientPhone, "student_credentials", [
             instituteName,
             name,
@@ -1581,7 +1581,7 @@ export const bulkCreateStudents = async (req, res) => {
         setImmediate(async () => {
           try {
             const instituteName = inst?.name || "Classtech";
-            const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
+            const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
             const daysBefore = inst?.whatsappSettings?.feeReminderDaysBefore ?? 3;
 
             for (const item of createdItems) {
@@ -1667,7 +1667,7 @@ export const sendStudentCredentialsWhatsApp = async (req, res) => {
     }
 
     const plainPassword = getInitialPassword(student.name, student.phone);
-    const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.vercel.app"}/student/login`;
+    const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
 
     const targetTemplate = await getCredentialsTemplate();
     const messageText = formatCredentialsMessage({
@@ -1769,6 +1769,59 @@ export const sendPaymentReceiptWhatsApp = async (req, res) => {
   } catch (error) {
     console.error("sendPaymentReceiptWhatsApp error:", error);
     return res.status(500).json({ message: error.message || "Could not send receipt PDF via WhatsApp" });
+  }
+};
+
+export const sendFeeReminderWhatsApp = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with account." });
+    }
+
+    const student = await Student.findOne({ _id: req.params.id, user: instituteId });
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const inst = await Institute.findById(instituteId);
+    const allowedFeatures = inst?.allowedFeatures || [];
+    if (!allowedFeatures.includes("whatsapp")) {
+      return res.status(403).json({ message: "WhatsApp messaging feature is disabled for your institute by Super Admin." });
+    }
+
+    const statusObj = await getSessionStatus(String(instituteId));
+    if (statusObj.status !== "connected") {
+      return res.status(400).json({ message: "Your institute's WhatsApp is not connected. Please connect WhatsApp from Settings first." });
+    }
+
+    const recipientPhone = student.parentPhone && student.parentPhone.trim()
+      ? student.parentPhone.trim()
+      : student.phone;
+
+    if (!recipientPhone) {
+      return res.status(400).json({ message: "No phone number available for this student or parent." });
+    }
+
+    const pendingAmount = Number(student.totalFees || 0) - student.paidAmount;
+    if (pendingAmount <= 0) {
+      return res.status(400).json({ message: "This student has no pending fee amount." });
+    }
+
+    const dueDate = student.dueDate ? formatDate(student.dueDate) : "-";
+
+    await sendTemplateMessage(String(instituteId), recipientPhone, "fee_reminder", [
+      (student.parentName && student.parentName.trim()) ? student.parentName.trim() : student.name,
+      pendingAmount.toString(),
+      student.name,
+      dueDate,
+      inst.name || "Classtech"
+    ]);
+
+    return res.json({ message: "Fee reminder sent via WhatsApp successfully!" });
+  } catch (error) {
+    console.error("sendFeeReminderWhatsApp error:", error);
+    return res.status(500).json({ message: error.message || "Failed to send fee reminder" });
   }
 };
 

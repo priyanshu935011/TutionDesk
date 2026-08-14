@@ -1,9 +1,10 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import redisClient from "../config/redis.js";
-import { sendResetEmail, sendDemoRequestEmail } from "../utils/mailer.js";
+import { sendResetEmail, sendDemoRequestEmail, sendOTPEmail } from "../utils/mailer.js";
 
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@classtech.com").toLowerCase();
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
@@ -247,5 +248,83 @@ export const bookDemo = async (req, res) => {
   } catch (error) {
     console.error("Book demo error:", error);
     return res.status(500).json({ message: "Could not submit demo request. Please try again." });
+  }
+};
+
+export const appForgotUserPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: "Email is required." });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ message: "User with this email not found." });
+    }
+
+    // Generate random 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    // Sign a temporary reset token valid for 10 minutes containing the hash of the OTP
+    const otpToken = jwt.sign(
+      { email: user.email, otpHash },
+      process.env.JWT_SECRET,
+      { expiresIn: "10m" }
+    );
+
+    // Send the OTP via email
+    await sendOTPEmail(user.email, user.name || "Educator", otp);
+
+    return res.json({
+      message: "A 6-digit OTP verification code has been sent to your email address.",
+      otpToken
+    });
+  } catch (error) {
+    console.error("App forgot password error:", error);
+    return res.status(500).json({ message: "Could not send verification OTP. Please try again." });
+  }
+};
+
+export const appResetUserPassword = async (req, res) => {
+  try {
+    const { email, otp, otpToken, password } = req.body;
+    if (!email || !otp || !otpToken || !password) {
+      return res.status(400).json({ message: "Email, OTP code, otpToken, and new password are required." });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(otpToken, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({ message: "Verification session has expired or is invalid." });
+    }
+
+    if (decoded.email.toLowerCase() !== email.toLowerCase()) {
+      return res.status(400).json({ message: "Session email mismatch." });
+    }
+
+    const inputHash = crypto.createHash("sha256").update(String(otp).trim()).digest("hex");
+    if (decoded.otpHash !== inputHash) {
+      return res.status(400).json({ message: "Incorrect or invalid OTP code." });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters long." });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    user.password = await bcrypt.hash(password, 10);
+    await user.save();
+
+    return res.json({ message: "Your password has been reset successfully! You can now log in." });
+  } catch (error) {
+    console.error("App reset password error:", error);
+    return res.status(500).json({ message: "Could not reset password. Please try again." });
   }
 };
