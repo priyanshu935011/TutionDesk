@@ -1634,7 +1634,7 @@ export const getWalletInfo = async (req, res) => {
       return res.status(404).json({ message: "Institute not found." });
     }
 
-    const payments = await CashfreePayment.find({ institute: instituteId, type: "wallet_recharge" }).sort({ createdAt: -1 });
+    const payments = await CashfreePayment.find({ institute: instituteId, type: "wallet_recharge" }).sort({ createdAt: 1 });
 
     return res.json({
       walletBalance: institute.walletBalance || 0,
@@ -1660,7 +1660,7 @@ export const getWhatsappLogs = async (req, res) => {
       filter.msgType = msgType;
     }
 
-    const logs = await WhatsappLog.find(filter).sort({ createdAt: -1 }).limit(100);
+    const logs = await WhatsappLog.find(filter).sort({ createdAt: 1 }).limit(100);
     const mappedLogs = logs.map(l => {
       const doc = typeof l.toObject === "function" ? l.toObject() : l;
       return {
