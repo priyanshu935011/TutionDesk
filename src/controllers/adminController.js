@@ -1846,3 +1846,43 @@ export const updateInstituteMessageCharge = async (req, res) => {
   }
 };
 
+
+
+export const getGlobalWalletSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "global_wallet_settings" });
+    const minRechargeAmount = setting?.value?.minRechargeAmount ?? 100;
+    return res.json({ minRechargeAmount });
+  } catch (error) {
+    console.error("getGlobalWalletSettings error:", error);
+    return res.status(500).json({ message: "Could not fetch global wallet settings" });
+  }
+};
+
+export const updateGlobalWalletSettings = async (req, res) => {
+  try {
+    const { minRechargeAmount } = req.body;
+    if (minRechargeAmount === undefined || Number(minRechargeAmount) < 0) {
+      return res.status(400).json({ message: "Minimum recharge amount must be 0 or higher." });
+    }
+
+    let setting = await SystemSetting.findOne({ key: "global_wallet_settings" });
+    if (setting) {
+      setting.value = { minRechargeAmount: Number(minRechargeAmount) };
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "global_wallet_settings",
+        value: { minRechargeAmount: Number(minRechargeAmount) },
+      });
+    }
+
+    return res.json({
+      message: "Global wallet settings updated successfully!",
+      minRechargeAmount: setting.value.minRechargeAmount,
+    });
+  } catch (error) {
+    console.error("updateGlobalWalletSettings error:", error);
+    return res.status(500).json({ message: "Could not update global wallet settings" });
+  }
+};

@@ -1694,7 +1694,9 @@ export const createWalletRechargeSession = async (req, res) => {
     }
 
     const config = await getCashfreeConfig();
-    const minAmount = config.minWalletTopup !== undefined ? Number(config.minWalletTopup) : 10;
+    const globalSetting = await SystemSetting.findOne({ key: "global_wallet_settings" });
+    const globalMin = globalSetting?.value?.minRechargeAmount;
+    const minAmount = globalMin !== undefined ? Number(globalMin) : (config.minWalletTopup !== undefined ? Number(config.minWalletTopup) : 10);
     if (Number(amount) < minAmount) {
       return res.status(400).json({ message: `Minimum top up amount is ₹${minAmount}.` });
     }

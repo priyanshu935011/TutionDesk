@@ -81,6 +81,10 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
+    if (["staff", "sales", "employee", "sub_admin"].includes(user.role?.toLowerCase())) {
+      return res.status(403).json({ message: "Staff / Sales members are not permitted to log in." });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {

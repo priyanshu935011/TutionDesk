@@ -38,6 +38,8 @@ import {
   getActivityLogs,
   topupInstituteWallet,
   updateInstituteMessageCharge,
+  getGlobalWalletSettings,
+  updateGlobalWalletSettings,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -105,7 +107,11 @@ router.put("/institutes/:id", updateInstitute);
 router.post("/institutes/upload-logo", upload.single("logo"), uploadInstituteLogo);
 router.post("/institutes/:id/renew", renewInstituteSubscription);
 router.post("/institutes/:id/wallet-topup", topupInstituteWallet);
+router.post("/institutes/:id/message-charge", updateInstituteMessageCharge);
 router.put("/institutes/:id/message-charge", updateInstituteMessageCharge);
+router.get("/global-wallet-settings", getGlobalWalletSettings);
+router.post("/global-wallet-settings", updateGlobalWalletSettings);
+router.put("/global-wallet-settings", updateGlobalWalletSettings);
 router.delete("/institutes/:id", deleteInstitute);
 
 // Custom Pages Routes

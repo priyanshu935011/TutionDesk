@@ -1779,7 +1779,7 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
       return res.status(400).json({ message: "No institute associated with account." });
     }
 
-    const student = await Student.findOne({ _id: req.params.id, user: instituteId });
+    const student = await Student.findById(req.params.id);
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
