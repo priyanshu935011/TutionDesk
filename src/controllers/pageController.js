@@ -205,6 +205,7 @@ export const getPublicPages = async (req, res) => {
 
 export const getPublicPageBySlug = async (req, res) => {
   try {
+    await seedDefaultPagesIfNeeded();
     const { slug } = req.params;
     const page = await CustomPage.findOne({ slug, isActive: true });
     if (!page) {
