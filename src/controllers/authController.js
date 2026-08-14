@@ -81,7 +81,7 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
-    const allowedAppRoles = ["admin", "teacher", "super_admin"];
+    const allowedAppRoles = ["institute_admin", "admin", "teacher", "super_admin"];
     if (!allowedAppRoles.includes(user.role?.toLowerCase())) {
       return res.status(403).json({ message: "Access denied. Only Institute Owners and Teachers are permitted to log in." });
     }
