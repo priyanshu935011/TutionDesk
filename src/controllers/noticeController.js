@@ -172,21 +172,23 @@ export const createNotice = async (req, res) => {
 
 export const getNotices = async (req, res) => {
   try {
+    const instituteId = req.user.institute?._id || req.user.institute;
     const ownerId = req.user.role === "teacher"
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const cacheKey = `teacher:notices:${ownerId}`;
-    const cached = await getCache(cacheKey);
-    if (cached && req.query.nocache !== "true") {
-      return res.json(cached);
-    }
+    const queryFilter = {
+      $or: [
+        { user: ownerId },
+        { user: instituteId },
+        { institute: instituteId }
+      ].filter(Boolean)
+    };
 
-    const notices = await Notice.find({ user: ownerId }).sort({ createdAt: -1 });
-    await setCache(cacheKey, notices, 86400);
-
+    const notices = await Notice.find(queryFilter).sort({ createdAt: -1 });
     return res.json(notices);
   } catch (error) {
+    console.error("getNotices error:", error);
     return res.status(500).json({ message: "Could not fetch notices" });
   }
 };
@@ -229,7 +231,18 @@ export const getStudentNotices = async (req, res) => {
 export const deleteNotice = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    await Notice.findOneAndDelete({ _id: req.params.id, user: instituteId });
+    const ownerId = req.user.role === "teacher"
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    await Notice.findOneAndDelete({
+      _id: req.params.id,
+      $or: [
+        { user: ownerId },
+        { user: instituteId },
+        { institute: instituteId }
+      ].filter(Boolean)
+    });
 
     await clearCachePattern("teacher:*");
     await clearCachePattern("student:*");
