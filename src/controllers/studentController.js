@@ -14,6 +14,8 @@ import { sendMessage, sendDocument, sendTemplateMessage, getSessionStatus } from
 import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 
+const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
+
 export const getInitialPassword = (name, phone) => {
   return "123456";
 };
