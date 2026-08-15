@@ -22,70 +22,91 @@ export const streamRemoteFileAsAttachment = ({
   res,
   url,
   filename,
+  maxRedirects = 5,
 }) =>
   new Promise((resolve, reject) => {
-    if (!url) {
-      reject(new Error("Missing remote file URL"));
-      return;
-    }
+    const fetchUrl = (currentUrl, redirectsLeft) => {
+      if (redirectsLeft <= 0) {
+        if (!res.headersSent) {
+          res.status(502).json({ message: "Too many redirects fetching remote note file" });
+        }
+        reject(new Error("Too many redirects"));
+        return;
+      }
 
-    let remoteRequest;
+      let remoteRequest;
+      try {
+        const client = getRemoteClient(currentUrl);
+        remoteRequest = client.get(currentUrl, (remoteResponse) => {
+          const statusCode = remoteResponse.statusCode || 500;
 
-    try {
-      const client = getRemoteClient(url);
-      remoteRequest = client.get(url, (remoteResponse) => {
-        const statusCode = remoteResponse.statusCode || 500;
-
-        if (statusCode < 200 || statusCode >= 300) {
-          remoteResponse.resume();
-
-          if (!res.headersSent) {
-            res.status(502).json({ message: "Could not fetch remote note file" });
+          // Handle 3xx Redirects (301, 302, 307, 308)
+          if (statusCode >= 300 && statusCode < 400 && remoteResponse.headers.location) {
+            remoteResponse.resume();
+            let redirectUrl = remoteResponse.headers.location;
+            if (redirectUrl.startsWith("/")) {
+              const origin = new URL(currentUrl).origin;
+              redirectUrl = `${origin}${redirectUrl}`;
+            }
+            fetchUrl(redirectUrl, redirectsLeft - 1);
+            return;
           }
 
-          reject(new Error(`Failed to fetch remote file: ${statusCode}`));
-          return;
-        }
+          if (statusCode < 200 || statusCode >= 300) {
+            remoteResponse.resume();
 
-        const contentType =
-          remoteResponse.headers["content-type"] || "application/pdf";
-        const contentLength = remoteResponse.headers["content-length"];
+            if (!res.headersSent) {
+              res.status(502).json({ message: `Could not fetch remote note file (HTTP ${statusCode})` });
+            }
 
-        res.setHeader("Content-Type", contentType);
-        res.setHeader("Content-Disposition", buildAttachmentHeader(filename));
-        if (contentLength) {
-          res.setHeader("Content-Length", contentLength);
-        }
+            reject(new Error(`Failed to fetch remote file: ${statusCode}`));
+            return;
+          }
 
-        remoteResponse.on("error", (error) => {
+          const contentType =
+            remoteResponse.headers["content-type"] || "application/pdf";
+          const contentLength = remoteResponse.headers["content-length"];
+
+          res.setHeader("Content-Type", contentType);
+          res.setHeader("Content-Disposition", buildAttachmentHeader(filename));
+          if (contentLength) {
+            res.setHeader("Content-Length", contentLength);
+          }
+
+          remoteResponse.on("error", (error) => {
+            if (!res.headersSent) {
+              res.status(502).json({ message: "Could not fetch remote note file" });
+            } else {
+              res.destroy(error);
+            }
+            reject(error);
+          });
+
+          res.on("close", () => {
+            if (!remoteResponse.destroyed) {
+              remoteResponse.destroy();
+            }
+          });
+
+          remoteResponse.pipe(res);
+          remoteResponse.on("end", resolve);
+        });
+
+        remoteRequest.on("error", (error) => {
           if (!res.headersSent) {
             res.status(502).json({ message: "Could not fetch remote note file" });
-          } else {
-            res.destroy(error);
           }
           reject(error);
         });
-
-        res.on("close", () => {
-          if (!remoteResponse.destroyed) {
-            remoteResponse.destroy();
-          }
-        });
-
-        remoteResponse.pipe(res);
-        remoteResponse.on("end", resolve);
-      });
-    } catch (error) {
-      reject(error);
-      return;
-    }
-
-    remoteRequest.on("error", (error) => {
-      if (!res.headersSent) {
-        res.status(502).json({ message: "Could not fetch remote note file" });
+      } catch (error) {
+        if (!res.headersSent) {
+          res.status(502).json({ message: error.message || "Invalid remote file URL" });
+        }
+        reject(error);
       }
-      reject(error);
-    });
+    };
+
+    fetchUrl(url, maxRedirects);
   });
 
 export const buildNoteDownloadFilename = (note) => {
