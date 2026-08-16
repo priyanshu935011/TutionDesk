@@ -19,10 +19,19 @@ const protectStudent = async (req, res, next) => {
       return res.status(401).json({ message: "Invalid student token" });
     }
 
-    // Fetch all student records for this student identity
-    const query = decoded.enrollmentNumber
-      ? { enrollmentNumber: decoded.enrollmentNumber }
-      : { email: decoded.email.toLowerCase() };
+    // Fetch all sibling student records for this identity so portal contains all enrolled profiles
+    const siblingQueries = [];
+    if (decoded.email && decoded.email.trim() !== "") {
+      siblingQueries.push({ email: decoded.email.toLowerCase().trim() });
+    }
+    if (decoded.phone && decoded.phone.trim() !== "") {
+      siblingQueries.push({ phone: decoded.phone.trim() });
+    }
+    if (decoded.enrollmentNumber) {
+      siblingQueries.push({ enrollmentNumber: decoded.enrollmentNumber });
+    }
+
+    const query = siblingQueries.length > 0 ? { $or: siblingQueries } : {};
 
     const students = await Student.find(query).populate({
       path: "batch",

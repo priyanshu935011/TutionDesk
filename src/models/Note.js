@@ -43,8 +43,19 @@ const noteSchema = new mongoose.Schema(
         ref: "Student",
       },
     ],
+    category: {
+      type: String,
+      default: "Chapter Notes",
+      trim: true,
+    },
+    type: {
+      type: String,
+      default: "Chapter Notes",
+      trim: true,
+    },
   },
   { timestamps: true }
+
 );
 
 const Note = mongoose.model("Note", noteSchema);

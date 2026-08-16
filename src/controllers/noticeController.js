@@ -2,6 +2,7 @@ import Notice from "../models/Notice.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import Institute from "../models/Institute.js";
+import SystemSetting from "../models/SystemSetting.js";
 import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
 import { getCache, setCache, clearCachePattern } from "../utils/cache.js";
 
@@ -209,7 +210,19 @@ export const getStudentNotices = async (req, res) => {
       return res.json(cached);
     }
 
-    const allNotices = await Notice.find({ user: instituteId }).sort({ createdAt: -1 });
+    const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+    const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
+
+    let noticeFilter = {
+      $or: [{ user: instituteId }, { institute: instituteId }]
+    };
+
+    if (expiryDays > 0) {
+      const cutoffDate = new Date(Date.now() - expiryDays * 24 * 60 * 60 * 1000);
+      noticeFilter.createdAt = { $gte: cutoffDate };
+    }
+
+    const allNotices = await Notice.find(noticeFilter).sort({ createdAt: -1 });
 
     // Filter relevant notices for student
     const relevantNotices = allNotices.filter((n) => {

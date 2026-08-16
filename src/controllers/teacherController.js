@@ -613,7 +613,8 @@ export const uploadNote = async (req, res) => {
     if (!instituteId) {
       instituteId = String(req.user._id || req.user.id || "");
     }
-    const { title, batchId, targetType, studentIds } = req.body;
+    const { title, batchId, targetType, studentIds, category, noteType } = req.body;
+    const noteCategory = category || noteType || "Chapter Notes";
 
     if (!title || !req.file) {
       return res
@@ -707,6 +708,8 @@ export const uploadNote = async (req, res) => {
       target_type: targetType || "batch",
       batch_id: targetType === "student" ? null : (batchId || null),
       student_ids: targetType === "student" ? resolvedStudentIds : [],
+      category: noteCategory,
+      type: noteCategory,
     };
 
     const { data: noteData, error: noteError } = await sb
@@ -834,7 +837,7 @@ export const getTestResults = async (req, res) => {
 export const createTestResult = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { studentId, title, score, totalMarks, examDate, remarks, subject } = req.body;
+    const { studentId, title, score, totalMarks, examDate, remarks, subject, testType, category, chapter } = req.body;
 
     if (
       !studentId ||
@@ -859,6 +862,8 @@ export const createTestResult = async (req, res) => {
       examDate,
       remarks: remarks || "",
       subject: subject.trim(),
+      testType: testType || category || "Unit Test",
+      chapter: chapter || "",
     });
 
     await invalidateUserDashboard(req);
@@ -933,12 +938,38 @@ export const createTestResultsBulk = async (req, res) => {
       return res.status(500).json({ message: insertError.message || "Could not save test marks" });
     }
 
+    const resolvedTestType = req.body.testType || req.body.category || "Unit Test";
+    const resolvedChapter = req.body.chapter || "";
+
+    // Also persist TestResult records for student portal
+    for (const entry of entries) {
+      if (entry.studentId) {
+        try {
+          await TestResult.create({
+            institute: instituteId,
+            createdBy: req.user._id,
+            student: entry.studentId,
+            title: title.trim(),
+            score: Number(entry.score || 0),
+            totalMarks: Number(totalMarks),
+            examDate,
+            remarks: entry.remarks || "",
+            subject: subject.trim(),
+            testType: resolvedTestType,
+            chapter: resolvedChapter,
+          });
+        } catch (_) {}
+      }
+    }
+
     // Build a response shaped like the website expects (array of per-student results)
     const populatedResults = studentIds.map((sid) => ({
       _id: `${insertedRow?.id || "new"}_${sid}`,
       student: { _id: sid, name: "", enrollmentNumber: "" },
       title: title.trim(),
       subject: subject.trim(),
+      testType: resolvedTestType,
+      chapter: resolvedChapter,
       score: marksMap[sid] ?? 0,
       totalMarks: Number(totalMarks),
       examDate,

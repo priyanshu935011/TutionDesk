@@ -29,6 +29,8 @@ import {
   updateAdsSettings,
   getWebsiteSettings,
   updateWebsiteSettings,
+  getNoticeExpirySettings,
+  updateNoticeExpirySettings,
   getWalletInfo,
   getWhatsappLogs,
   createWalletRechargeSession,
@@ -85,5 +87,9 @@ router.put("/ads-settings", protect, staffOnly, updateAdsSettings);
 // Custom Website settings / Meta tags routes
 router.get("/website-settings", protect, staffOnly, getWebsiteSettings);
 router.put("/website-settings", protect, staffOnly, updateWebsiteSettings);
+
+// Notice Expiry settings routes (Super Admin)
+router.get("/notice-expiry-settings", protect, staffOnly, getNoticeExpirySettings);
+router.put("/notice-expiry-settings", protect, staffOnly, updateNoticeExpirySettings);
 
 export default router;

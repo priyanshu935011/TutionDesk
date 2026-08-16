@@ -45,8 +45,19 @@ const testResultSchema = new mongoose.Schema(
       trim: true,
       default: "General",
     },
+    testType: {
+      type: String,
+      default: "Unit Test",
+      trim: true,
+    },
+    chapter: {
+      type: String,
+      default: "",
+      trim: true,
+    },
   },
   { timestamps: true }
+
 );
 
 const TestResult = mongoose.model("TestResult", testResultSchema);

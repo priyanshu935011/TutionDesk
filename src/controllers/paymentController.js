@@ -1888,3 +1888,51 @@ export const cronVerifyPendingRecharges = async (req, res) => {
     return res.status(500).json({ message: "Cron recharges check failed" });
   }
 };
+
+export const getNoticeExpirySettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+    if (!setting) {
+      return res.json({ globalExpiryDays: 7, enabled: true });
+    }
+    return res.json(setting.value);
+  } catch (error) {
+    console.error("getNoticeExpirySettings error:", error);
+    return res.status(500).json({ message: "Could not fetch notice expiry settings." });
+  }
+};
+
+export const updateNoticeExpirySettings = async (req, res) => {
+  try {
+    const { globalExpiryDays, enabled = true } = req.body;
+    const updatedValue = {
+      globalExpiryDays: Number(globalExpiryDays ?? 7),
+      enabled: Boolean(enabled),
+    };
+
+    let setting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      await SystemSetting.create({
+        key: "notice_global_expiry_settings",
+        value: updatedValue,
+        description: "Global Notice Expiry Settings configured by Super Admin",
+      });
+    }
+
+    try {
+      await clearCachePattern("student:*");
+    } catch (_) {}
+
+    return res.json(updatedValue);
+  } catch (error) {
+    console.error("updateNoticeExpirySettings error:", error);
+    return res.status(500).json({ message: "Could not save notice expiry settings." });
+  }
+};
+

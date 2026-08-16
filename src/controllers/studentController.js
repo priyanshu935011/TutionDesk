@@ -7,6 +7,7 @@ import User from "../models/User.js";
 import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
 import SystemSetting from "../models/SystemSetting.js";
+import Notice from "../models/Notice.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
@@ -1251,6 +1252,32 @@ export const getStudentPortalData = async (req, res) => {
         dueDate: student.dueDate,
       };
 
+      const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+      const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
+
+      let noticeFilter = {
+        $or: [
+          { user: instituteId },
+          { institute: instituteId }
+        ]
+      };
+
+      if (expiryDays > 0) {
+        const cutoffDate = new Date(Date.now() - expiryDays * 24 * 60 * 60 * 1000);
+        noticeFilter.createdAt = { $gte: cutoffDate };
+      }
+
+      const rawNotices = await Notice.find(noticeFilter).sort({ createdAt: -1 });
+
+      const batchIdStr = String(batch?._id || batch?.id || batch || "");
+      const studentNotices = rawNotices.filter((n) => {
+        if (n.targetType === "all" || !n.targetType) return true;
+        if (n.targetType === "batch" && Array.isArray(n.batchIds)) {
+          return n.batchIds.some((bId) => String(bId) === batchIdStr);
+        }
+        return true;
+      });
+
       classes.push({
         studentId: student._id,
         student: {
@@ -1282,6 +1309,18 @@ export const getStudentPortalData = async (req, res) => {
         attendance: student.attendanceRecords || [],
         notes,
         testResults,
+        notices: studentNotices.map((n) => ({
+          _id: n._id,
+          title: n.title,
+          content: n.content,
+          noticeType: n.noticeType || "general",
+          targetType: n.targetType,
+          createdAt: n.createdAt,
+          holidayDate: n.holidayDate,
+          originalTime: n.originalTime,
+          rescheduledDate: n.rescheduledDate,
+          rescheduledTime: n.rescheduledTime,
+        })),
         liveQuiz,
         quizzes,
         quizFeatureEnabled: isQuizEnabled,
@@ -1320,6 +1359,35 @@ export const getStudentPortalData = async (req, res) => {
         }
       });
       siblingProfiles = Array.from(profilesMap.values());
+    }
+
+        if (classes.length === 0 && students.length > 0) {
+      const s = students[0];
+      const inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor");
+      classes.push({
+        studentId: s._id,
+        student: {
+          id: s._id,
+          name: s.name,
+          email: s.email,
+          phone: s.phone,
+          enrollmentNumber: s.enrollmentNumber,
+          batch: s.batch,
+          paidAmount: s.paidAmount || 0,
+          pendingAmount: s.pendingAmount || 0,
+          totalFees: s.totalFees || 0,
+          paymentHistory: s.paymentHistory || [],
+        },
+        teacherName: inst ? inst.name : "Tuition Teacher",
+        instituteName: inst ? inst.name : "Classtech Tuition",
+        batchName: s.batch ? s.batch.name : "General Batch",
+        attendance: s.attendanceRecords || [],
+        notes: [],
+        testResults: [],
+        brandingEnabled: inst ? inst.brandingEnabled !== false : true,
+        logoUrl: inst ? inst.logoUrl : null,
+        themeColor: inst ? inst.themeColor || "#4C3FBE" : "#4C3FBE",
+      });
     }
 
     const responsePayload = { classes, siblingProfiles };
