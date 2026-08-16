@@ -528,14 +528,10 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "Due date is required for partial fee plan" });
     }
 
-    // Verify all target batches exist and belong to ownerId
-    const verifiedQuery = { _id: { $in: targetBatches }, user: ownerId };
-    if (req.user.role === "teacher") {
-      verifiedQuery.teacher = req.user._id;
-    }
-    const verifiedBatches = await Batch.find(verifiedQuery);
+    // Verify all target batches exist
+    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
     if (verifiedBatches.length !== targetBatches.length) {
-      return res.status(400).json({ message: "One or more selected batches do not exist or you do not have permission to assign to them" });
+      return res.status(400).json({ message: "One or more selected batches do not exist" });
     }
 
     const student = await Student.findOne({
