@@ -213,22 +213,24 @@ export const getStudentNotices = async (req, res) => {
     const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
     const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
 
-    let noticeFilter = {
-      $or: [{ user: instituteId }, { institute: instituteId }]
-    };
+    const allNotices = await Notice.find({}).sort({ createdAt: -1 });
 
-    if (expiryDays > 0) {
-      const cutoffDate = new Date(Date.now() - expiryDays * 24 * 60 * 60 * 1000);
-      noticeFilter.createdAt = { $gte: cutoffDate };
-    }
+    const instIdStr = String(instituteId);
+    const batchIdStr = String(studentBatchId || "");
+    const cutoffTime = expiryDays > 0 ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
 
-    const allNotices = await Notice.find(noticeFilter).sort({ createdAt: -1 });
-
-    // Filter relevant notices for student
     const relevantNotices = allNotices.filter((n) => {
+      const nInst = String(n.institute || n.user || n.institute_id || n.instituteId || "");
+      if (nInst !== instIdStr) return false;
+
+      if (cutoffTime > 0 && n.createdAt) {
+        const createdTime = new Date(n.createdAt).getTime();
+        if (!isNaN(createdTime) && createdTime < cutoffTime) return false;
+      }
+
       if (n.targetType === "all" || !n.targetType) return true;
       if (n.targetType === "batch" && Array.isArray(n.batchIds)) {
-        return n.batchIds.some((bId) => String(bId) === String(studentBatchId));
+        return n.batchIds.some((bId) => String(bId) === batchIdStr);
       }
       return true;
     });
