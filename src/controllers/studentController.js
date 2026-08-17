@@ -348,44 +348,37 @@ export const createStudent = async (req, res) => {
       }
     }
 
-    const createdStudents = [];
+    const primaryBatch = targetBatches[0];
+    const formattedPayments = paymentHistory.map(p => ({
+      _id: p._id || crypto.randomUUID(),
+      amount: Number(p.amount),
+      paymentDate: p.paymentDate,
+      paymentType: p.paymentType,
+      note: p.note || ""
+    }));
 
-    for (let i = 0; i < targetBatches.length; i++) {
-      const currentBatchId = targetBatches[i];
-      
-      // Store full fees/payment on the first batch, 0 on the rest to maintain collective fee total
-      const currentTotalFees = i === 0 ? total : 0;
-      const currentPaymentHistory = i === 0 ? paymentHistory.map(p => ({
-        _id: p._id || crypto.randomUUID(),
-        amount: Number(p.amount),
-        paymentDate: p.paymentDate,
-        paymentType: p.paymentType,
-        note: p.note || ""
-      })) : [];
+    const student = await Student.create({
+      user: ownerId,
+      name,
+      phone,
+      parentName,
+      parentPhone,
+      email: email ? email.toLowerCase() : "",
+      address,
+      enrollmentNumber: enrollmentNumberToUse,
+      batch: primaryBatch,
+      batches: targetBatches,
+      joinedOn,
+      totalFees: total,
+      feePlanType,
+      dueDate: resolveDueDate({ feePlanType, joinedOn, dueDate, feeStatus }),
+      paymentHistory: formattedPayments,
+      attendanceRecords,
+      password: hashedPasswordToUse,
+      customFields,
+    });
 
-      const student = await Student.create({
-        user: ownerId,
-        name,
-        phone,
-        parentName,
-        parentPhone,
-        email: email ? email.toLowerCase() : "",
-        address,
-        enrollmentNumber: enrollmentNumberToUse,
-        batch: currentBatchId,
-        joinedOn,
-        totalFees: currentTotalFees,
-        feePlanType,
-        dueDate: i === 0 ? resolveDueDate({ feePlanType, joinedOn, dueDate, feeStatus }) : null,
-        paymentHistory: currentPaymentHistory,
-        attendanceRecords: i === 0 ? attendanceRecords : [],
-        password: hashedPasswordToUse,
-        customFields: i === 0 ? customFields : {},
-      });
-
-      const populatedStudent = await populateStudent(Student.findById(student._id));
-      createdStudents.push(populatedStudent);
-    }
+    const populatedStudent = await populateStudent(Student.findById(student._id));
     
     try {
       if (enrollmentNumberToUse) {
@@ -551,58 +544,8 @@ export const updateStudent = async (req, res) => {
       }
     }
 
-    const originalEmail = student.email ? student.email.toLowerCase() : "";
+    const primaryBatch = targetBatches[0];
     const newEmail = email ? email.toLowerCase() : "";
-
-    // Find all student records for this student by enrollment number & studentUser
-    const studentRecords = await Student.find({ enrollmentNumber: student.enrollmentNumber, user: studentUser });
-
-    const currentBatches = studentRecords.map((s) => String(s.batch));
-    const targetBatchIds = targetBatches.map(String);
-
-    const batchesToAdd = targetBatchIds.filter((b) => !currentBatches.includes(b));
-    const batchesToRemove = currentBatches.filter((b) => !targetBatchIds.includes(b));
-
-    // Remove unchecked batches
-    if (batchesToRemove.length > 0) {
-      await Student.deleteMany({
-        enrollmentNumber: student.enrollmentNumber,
-        user: studentUser,
-        batch: { $in: batchesToRemove },
-      });
-    }
-
-    // Create newly checked batches
-    const initialPassword = student.password;
-    const enrollmentNumberToUse = student.enrollmentNumber;
-    for (const newBatchId of batchesToAdd) {
-      await Student.create({
-        user: studentUser,
-        name,
-        phone,
-        parentName,
-        parentPhone,
-        email: newEmail,
-        address,
-        enrollmentNumber: enrollmentNumberToUse,
-        batch: newBatchId,
-        joinedOn,
-        totalFees: 0,
-        feePlanType,
-        dueDate: null,
-        paymentHistory: [],
-        attendanceRecords: [],
-        password: initialPassword,
-        customFields: {},
-      });
-    }
-
-    // Update remaining/existing records
-    const remainingRecords = await Student.find({
-      enrollmentNumber: student.enrollmentNumber,
-      user: studentUser,
-      batch: { $in: targetBatchIds },
-    });
 
     const inst = await Institute.findById(studentUser) || await Institute.findById(ownerId);
     const customFieldsObj = customFields || {};
@@ -613,36 +556,28 @@ export const updateStudent = async (req, res) => {
       }
     }
 
-    for (let i = 0; i < remainingRecords.length; i++) {
-      const rec = remainingRecords[i];
-      rec.name = name;
-      rec.phone = phone;
-      rec.parentName = parentName;
-      rec.parentPhone = parentPhone || "";
-      rec.email = newEmail;
-      rec.address = address || "";
-      rec.joinedOn = joinedOn;
-      rec.feePlanType = feePlanType;
+    student.name = name;
+    student.phone = phone;
+    student.parentName = parentName;
+    student.parentPhone = parentPhone || "";
+    student.email = newEmail;
+    student.address = address || "";
+    student.batch = primaryBatch;
+    student.batches = targetBatches;
+    student.joinedOn = joinedOn;
+    student.feePlanType = feePlanType;
+    student.totalFees = total;
+    student.paymentHistory = paymentHistory.map(p => ({
+      _id: p._id || crypto.randomUUID(),
+      amount: Number(p.amount),
+      paymentDate: p.paymentDate,
+      paymentType: p.paymentType,
+      note: p.note || ""
+    }));
+    student.dueDate = resolveDueDate({ feePlanType, joinedOn, dueDate });
+    student.customFields = customFieldsObj;
 
-      if (i === 0) {
-        rec.totalFees = total;
-        rec.paymentHistory = paymentHistory.map(p => ({
-          _id: p._id || crypto.randomUUID(),
-          amount: Number(p.amount),
-          paymentDate: p.paymentDate,
-          paymentType: p.paymentType,
-          note: p.note || ""
-        }));
-        rec.dueDate = resolveDueDate({ feePlanType, joinedOn, dueDate });
-        rec.customFields = customFieldsObj;
-      } else {
-        rec.totalFees = 0;
-        rec.paymentHistory = [];
-        rec.dueDate = null;
-        rec.customFields = {};
-      }
-      await rec.save();
-    }
+    await student.save();
 
     if (student.enrollmentNumber) {
       await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
@@ -650,16 +585,7 @@ export const updateStudent = async (req, res) => {
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("teacher:students:*");
 
-    // Find and return a populated active student record for response compatibility
-    const responseRecord = remainingRecords.find((r) => String(r._id) === String(student._id)) || remainingRecords[0];
-    
-    if (!responseRecord) {
-      // Fallback if all were somehow deleted or not found
-      return res.json({ message: "Student updated successfully" });
-    }
-
-    const populatedStudent = await populateStudent(Student.findById(responseRecord._id));
-
+    const populatedStudent = await populateStudent(Student.findById(student._id));
     return res.json(populatedStudent);
   } catch (error) {
     console.error("updateStudent error:", error);

@@ -6,7 +6,11 @@
   "nodemonConfig": {
     "ignore": [
       "sessions/*",
-      "sessions"
+      "sessions",
+      "scratch/*",
+      "scratch",
+      "data/*",
+      "data"
     ]
   },
   "scripts": {

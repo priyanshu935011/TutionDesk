@@ -88,6 +88,12 @@ const studentSchema = new mongoose.Schema(
       ref: "Batch",
       required: true,
     },
+    batches: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Batch",
+      },
+    ],
     joinedOn: {
       type: Date,
       required: true,
