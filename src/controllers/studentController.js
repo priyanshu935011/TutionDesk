@@ -534,14 +534,13 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "One or more selected batches do not exist" });
     }
 
-    const student = await Student.findOne({
-      _id: req.params.id,
-      user: ownerId,
-    });
+    const student = await Student.findById(req.params.id);
 
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
+
+    const studentUser = student.user;
 
     // If teacher, verify they own at least one of the student's current batches
     if (req.user.role === "teacher") {
@@ -555,8 +554,8 @@ export const updateStudent = async (req, res) => {
     const originalEmail = student.email ? student.email.toLowerCase() : "";
     const newEmail = email ? email.toLowerCase() : "";
 
-    // Find all student records for this student by enrollment number
-    const studentRecords = await Student.find({ enrollmentNumber: student.enrollmentNumber, user: ownerId });
+    // Find all student records for this student by enrollment number & studentUser
+    const studentRecords = await Student.find({ enrollmentNumber: student.enrollmentNumber, user: studentUser });
 
     const currentBatches = studentRecords.map((s) => String(s.batch));
     const targetBatchIds = targetBatches.map(String);
@@ -568,7 +567,7 @@ export const updateStudent = async (req, res) => {
     if (batchesToRemove.length > 0) {
       await Student.deleteMany({
         enrollmentNumber: student.enrollmentNumber,
-        user: ownerId,
+        user: studentUser,
         batch: { $in: batchesToRemove },
       });
     }
@@ -578,7 +577,7 @@ export const updateStudent = async (req, res) => {
     const enrollmentNumberToUse = student.enrollmentNumber;
     for (const newBatchId of batchesToAdd) {
       await Student.create({
-        user: ownerId,
+        user: studentUser,
         name,
         phone,
         parentName,
@@ -601,11 +600,11 @@ export const updateStudent = async (req, res) => {
     // Update remaining/existing records
     const remainingRecords = await Student.find({
       enrollmentNumber: student.enrollmentNumber,
-      user: ownerId,
+      user: studentUser,
       batch: { $in: targetBatchIds },
     });
 
-    const inst = await Institute.findById(ownerId);
+    const inst = await Institute.findById(studentUser) || await Institute.findById(ownerId);
     const customFieldsObj = customFields || {};
     const customFieldConfigs = inst?.studentCustomFields || [];
     for (const field of customFieldConfigs) {
@@ -663,6 +662,7 @@ export const updateStudent = async (req, res) => {
 
     return res.json(populatedStudent);
   } catch (error) {
+    console.error("updateStudent error:", error);
     if (error?.code === 11000 && error?.keyPattern?.enrollmentNumber) {
       return res.status(409).json({
         message:
@@ -670,7 +670,7 @@ export const updateStudent = async (req, res) => {
       });
     }
 
-    return res.status(500).json({ message: "Could not update student" });
+    return res.status(500).json({ message: error?.message || "Could not update student" });
   }
 };
 

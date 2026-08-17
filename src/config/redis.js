@@ -8,7 +8,13 @@ const redisClient = createClient({
     tls: redisUrl.startsWith("rediss://"),
     rejectUnauthorized: false,
     connectTimeoutMs: 2000,
-    reconnectStrategy: (retries) => Math.min(retries * 50, 1000),
+    reconnectStrategy: (retries) => {
+      if (retries > 3) {
+        console.warn("Redis max reconnect retries reached. Operating without Redis cache.");
+        return new Error("Redis connection failed");
+      }
+      return Math.min(retries * 50, 500);
+    },
   },
 });
 
