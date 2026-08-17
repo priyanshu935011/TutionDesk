@@ -413,6 +413,13 @@ class SupabaseDocument {
       const meta = metadata[this._id] || {};
       this.customFields = meta.customFields ?? this.customFields ?? {};
       this.custom_fields = this.customFields;
+      // Restore batches from metadata (since batch_ids column may not exist in Supabase)
+      if (meta.batches && meta.batches.length > 0) {
+        this.batches = meta.batches;
+      } else if (!this.batches || this.batches.length === 0) {
+        // Fallback: if no batches in metadata, default to [batch_id]
+        this.batches = this.batch ? [this.batch] : [];
+      }
     }
 
     if (tableName === "batches" && this._id) {
@@ -493,6 +500,9 @@ class SupabaseDocument {
     if (this._tableName === "students") {
       delete payload.custom_fields;
       delete payload.customFields;
+      // batch_ids column does not exist in Supabase; store batches in metadata instead
+      delete payload.batch_ids;
+      delete payload.batches;
     }
 
     if (this._tableName === "batches") {
@@ -553,7 +563,8 @@ class SupabaseDocument {
       if (this._tableName === "students" && this._id) {
         const metadata = readStudentMetadata();
         metadata[this._id] = {
-          customFields: this.customFields ?? {}
+          customFields: this.customFields ?? {},
+          batches: this.batches ?? []
         };
         writeStudentMetadata(metadata);
       }
@@ -617,7 +628,8 @@ class SupabaseDocument {
       if (this._tableName === "students" && this._id) {
         const metadata = readStudentMetadata();
         metadata[this._id] = {
-          customFields: this.customFields ?? {}
+          customFields: this.customFields ?? {},
+          batches: this.batches ?? []
         };
         writeStudentMetadata(metadata);
       }
