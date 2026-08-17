@@ -1111,147 +1111,176 @@ export const getStudentPortalData = async (req, res) => {
         : null;
 
       const instituteId = institute._id;
-      const batch = student.batch;
-      let teacherName = academyAdmin ? academyAdmin.name : institute.name;
 
-      if (batch && batch.teacher) {
-        if (batch.teacher.name) {
-          teacherName = batch.teacher.name;
-        } else {
-          const teacherUser = await User.findById(batch.teacher).select("name");
-          if (teacherUser) {
-            teacherName = teacherUser.name;
-          }
-        }
+      // Extract all assigned batch objects/IDs for this student record
+      let rawBatches = [];
+      if (student.batches && student.batches.length > 0) {
+        rawBatches = student.batches;
+      } else if (student.batch) {
+        rawBatches = [student.batch];
+      } else {
+        rawBatches = [null];
       }
 
-      const isQuizEnabled = institute.quizFeatureEnabled !== false;
+      // Deduplicate assigned batches by batch ID
+      const batchMap = new Map();
+      for (const b of rawBatches) {
+        const bKey = b ? String(b._id || b.id || b) : "unassigned";
+        if (!batchMap.has(bKey)) {
+          batchMap.set(bKey, b);
+        }
+      }
+      const uniqueBatches = Array.from(batchMap.values());
 
-       const [notes, testResults, liveQuiz, rawQuizzes] = await Promise.all([
-        Note.find({
-          institute: instituteId,
-          $or: [
-            { targetType: "batch", batch: batch?._id || batch?.id || batch },
-            { targetType: "batch", batch: null },
-            { targetType: "student", students: student._id },
-            { targetType: null, batch: batch?._id || batch?.id || batch },
-            { targetType: null, batch: null }
-          ],
-        })
-          .sort({ createdAt: -1 })
-          .populate("batch", "name"),
-        TestResult.find({ institute: instituteId, student: student._id }).sort({
-          createdAt: -1,
-        }),
-        isQuizEnabled ? Promise.resolve(getLiveStateForStudent(student)) : Promise.resolve(null),
-        isQuizEnabled ? Quiz.find({
-          institute: instituteId,
-          $or: [
-            { batches: batch?._id || batch?.id || batch },
-            { batches: { $size: 0 } }
-          ],
-          status: { $ne: "archived" },
-        }).sort({ createdAt: -1 }) : Promise.resolve([]),
-      ]);
-
-      const quizzes = rawQuizzes.map((q) => ({
-        _id: q._id,
-        title: q.title,
-        status: q.status,
-        durationSeconds: q.durationSeconds,
-        restSeconds: q.restSeconds,
-        liveSessionId: q.liveSessionId,
-        questionsCount: q.questions?.length || 0,
-      }));
-
-      const instUserKey = String(student.user);
-      const collectiveFees = instituteFeesMap[instUserKey] || {
-        totalFees: student.totalFees,
-        paymentHistory: student.paymentHistory || [],
-        paidAmount: student.paidAmount,
-        pendingAmount: student.pendingAmount,
-        dueDate: student.dueDate,
-      };
-
-      const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
-      const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
-
-      const allNotices = await Notice.find({}).sort({ createdAt: -1 });
-
-      const instIdStr = String(instituteId);
-      const batchIdStr = String(batch?._id || batch?.id || batch || "");
-      const cutoffTime = expiryDays > 0 ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
-
-      const studentNotices = allNotices.filter((n) => {
-        const nInst = String(n.institute || n.user || n.institute_id || n.instituteId || "");
-        if (nInst !== instIdStr) return false;
-
-        if (cutoffTime > 0 && n.createdAt) {
-          const createdTime = new Date(n.createdAt).getTime();
-          if (!isNaN(createdTime) && createdTime < cutoffTime) return false;
+      for (const currentBatchItem of uniqueBatches) {
+        let batch = typeof currentBatchItem === "object" ? currentBatchItem : null;
+        if (!batch && currentBatchItem && currentBatchItem !== "unassigned") {
+          batch = await Batch.findById(currentBatchItem).populate("teacher", "name email");
         }
 
-        if (n.targetType === "all" || !n.targetType) return true;
-        if (n.targetType === "batch" && Array.isArray(n.batchIds)) {
-          return n.batchIds.some((bId) => String(bId) === batchIdStr);
-        }
-        return true;
-      });
+        let teacherName = academyAdmin ? academyAdmin.name : institute.name;
 
-      classes.push({
-        studentId: student._id,
-        student: {
-          id: student._id,
-          name: student.name,
-          email: student.email,
-          phone: student.phone,
-          enrollmentNumber: student.enrollmentNumber,
-          batch: student.batch,
-          paidAmount: collectiveFees.paidAmount,
-          pendingAmount: collectiveFees.pendingAmount,
-          totalFees: collectiveFees.totalFees,
-          feePlanType: student.feePlanType,
-          paymentHistory: collectiveFees.paymentHistory,
-          dueDate: collectiveFees.dueDate,
-        },
-        teacherName,
-        instituteName: institute.name,
-        batchName: batch ? batch.name : "Unassigned",
-        timetable: batch
-          ? {
-              batchName: batch.name,
-              scheduleDays: batch.scheduleDays || [],
-              startTime: batch.startTime,
-              endTime: batch.endTime,
+        if (batch && batch.teacher) {
+          if (batch.teacher.name) {
+            teacherName = batch.teacher.name;
+          } else {
+            const teacherUser = await User.findById(batch.teacher).select("name");
+            if (teacherUser) {
+              teacherName = teacherUser.name;
             }
-          : null,
-        feesHistory: collectiveFees.paymentHistory,
-        attendance: student.attendanceRecords || [],
-        notes,
-        testResults,
-        notices: studentNotices.map((n) => ({
-          _id: n._id,
-          title: n.title,
-          content: n.content,
-          noticeType: n.noticeType || "general",
-          targetType: n.targetType,
-          createdAt: n.createdAt,
-          holidayDate: n.holidayDate,
-          originalTime: n.originalTime,
-          rescheduledDate: n.rescheduledDate,
-          rescheduledTime: n.rescheduledTime,
-        })),
-        liveQuiz,
-        quizzes,
-        quizFeatureEnabled: isQuizEnabled,
-        brandingEnabled: institute.brandingEnabled !== false,
-        logoUrl: institute.logoUrl || null,
-        themeColor: institute.themeColor || "#6366f1",
-        allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
-        showAds: adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId)),
-        adsenseClientId: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseClientId : "",
-        adsenseCodeSnippet: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseCodeSnippet : "",
-      });
+          }
+        }
+
+        const isQuizEnabled = institute.quizFeatureEnabled !== false;
+
+        const currentBatchIdVal = batch ? (batch._id || batch.id) : null;
+
+        const [notes, testResults, liveQuiz, rawQuizzes] = await Promise.all([
+          Note.find({
+            institute: instituteId,
+            $or: [
+              { targetType: "batch", batch: currentBatchIdVal },
+              { targetType: "batch", batch: null },
+              { targetType: "student", students: student._id },
+              { targetType: null, batch: currentBatchIdVal },
+              { targetType: null, batch: null }
+            ],
+          })
+            .sort({ createdAt: -1 })
+            .populate("batch", "name"),
+          TestResult.find({ institute: instituteId, student: student._id }).sort({
+            createdAt: -1,
+          }),
+          isQuizEnabled ? Promise.resolve(getLiveStateForStudent(student)) : Promise.resolve(null),
+          isQuizEnabled ? Quiz.find({
+            institute: instituteId,
+            $or: [
+              { batches: currentBatchIdVal },
+              { batches: { $size: 0 } }
+            ],
+            status: { $ne: "archived" },
+          }).sort({ createdAt: -1 }) : Promise.resolve([]),
+        ]);
+
+        const quizzes = rawQuizzes.map((q) => ({
+          _id: q._id,
+          title: q.title,
+          status: q.status,
+          durationSeconds: q.durationSeconds,
+          restSeconds: q.restSeconds,
+          liveSessionId: q.liveSessionId,
+          questionsCount: q.questions?.length || 0,
+        }));
+
+        const instUserKey = String(student.user);
+        const collectiveFees = instituteFeesMap[instUserKey] || {
+          totalFees: student.totalFees,
+          paymentHistory: student.paymentHistory || [],
+          paidAmount: student.paidAmount,
+          pendingAmount: student.pendingAmount,
+          dueDate: student.dueDate,
+        };
+
+        const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+        const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
+
+        const allNotices = await Notice.find({}).sort({ createdAt: -1 });
+
+        const instIdStr = String(instituteId);
+        const batchIdStr = String(currentBatchIdVal || "");
+        const cutoffTime = expiryDays > 0 ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
+
+        const studentNotices = allNotices.filter((n) => {
+          const nInst = String(n.institute || n.user || n.institute_id || n.instituteId || "");
+          if (nInst !== instIdStr) return false;
+
+          if (cutoffTime > 0 && n.createdAt) {
+            const createdTime = new Date(n.createdAt).getTime();
+            if (!isNaN(createdTime) && createdTime < cutoffTime) return false;
+          }
+
+          if (n.targetType === "all" || !n.targetType) return true;
+          if (n.targetType === "batch" && Array.isArray(n.batchIds)) {
+            return n.batchIds.some((bId) => String(bId) === batchIdStr);
+          }
+          return true;
+        });
+
+        classes.push({
+          studentId: student._id,
+          student: {
+            id: student._id,
+            name: student.name,
+            email: student.email,
+            phone: student.phone,
+            enrollmentNumber: student.enrollmentNumber,
+            batch: batch || student.batch,
+            paidAmount: collectiveFees.paidAmount,
+            pendingAmount: collectiveFees.pendingAmount,
+            totalFees: collectiveFees.totalFees,
+            feePlanType: student.feePlanType,
+            paymentHistory: collectiveFees.paymentHistory,
+            dueDate: collectiveFees.dueDate,
+          },
+          teacherName,
+          instituteName: institute.name,
+          batchName: batch ? batch.name : "Unassigned",
+          timetable: batch
+            ? {
+                batchName: batch.name,
+                scheduleDays: batch.scheduleDays || [],
+                startTime: batch.startTime,
+                endTime: batch.endTime,
+              }
+            : null,
+          feesHistory: collectiveFees.paymentHistory,
+          attendance: student.attendanceRecords || [],
+          notes,
+          testResults,
+          notices: studentNotices.map((n) => ({
+            _id: n._id,
+            title: n.title,
+            content: n.content,
+            noticeType: n.noticeType || "general",
+            targetType: n.targetType,
+            createdAt: n.createdAt,
+            holidayDate: n.holidayDate,
+            originalTime: n.originalTime,
+            rescheduledDate: n.rescheduledDate,
+            rescheduledTime: n.rescheduledTime,
+          })),
+          liveQuiz,
+          quizzes,
+          quizFeatureEnabled: isQuizEnabled,
+          brandingEnabled: institute.brandingEnabled !== false,
+          logoUrl: institute.logoUrl || null,
+          themeColor: institute.themeColor || "#6366f1",
+          allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+          showAds: adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId)),
+          adsenseClientId: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseClientId : "",
+          adsenseCodeSnippet: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseCodeSnippet : "",
+        });
+      }
     }
 
     // Query all sibling profiles sharing same email or phone (must be non-empty)

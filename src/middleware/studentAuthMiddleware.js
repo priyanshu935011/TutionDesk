@@ -33,14 +33,23 @@ const protectStudent = async (req, res, next) => {
 
     const query = siblingQueries.length > 0 ? { $or: siblingQueries } : {};
 
-    const students = await Student.find(query).populate({
-      path: "batch",
-      select: "name scheduleDays startTime endTime teacher",
-      populate: {
-        path: "teacher",
-        select: "name email",
-      },
-    });
+    const students = await Student.find(query)
+      .populate({
+        path: "batch",
+        select: "name scheduleDays startTime endTime teacher",
+        populate: {
+          path: "teacher",
+          select: "name email",
+        },
+      })
+      .populate({
+        path: "batches",
+        select: "name scheduleDays startTime endTime teacher",
+        populate: {
+          path: "teacher",
+          select: "name email",
+        },
+      });
 
     if (!students || students.length === 0) {
       return res.status(401).json({ message: "Student not found" });
