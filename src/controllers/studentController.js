@@ -68,7 +68,8 @@ const validateAttendance = (attendanceRecords = []) => {
 };
 
 const populateStudent = (query) =>
-  query.populate("batch", "name scheduleDays startTime endTime");
+  query.populate("batch", "name scheduleDays startTime endTime")
+       .populate("batches", "name scheduleDays startTime endTime");
 
 const addOneMonth = (dateValue) => {
   const date = new Date(dateValue);
@@ -192,11 +193,9 @@ export const getStudentById = async (req, res) => {
       await student._model.populateStudentRecords([student], { includeAttendance: true });
     } catch (e) {}
 
-    const allRecords = await Student.find({
-      enrollmentNumber: student.enrollmentNumber,
-      user: ownerId,
-    }).select("batch");
-    const enrolledBatchIds = allRecords.map((r) => r.batch);
+    const enrolledBatchIds = (student.batches && student.batches.length > 0)
+      ? student.batches.map((b) => (b?._id || b).toString())
+      : (student.batch ? [(student.batch?._id || student.batch).toString()] : []);
 
     const obj = student.toJSON();
     obj.enrolledBatchIds = enrolledBatchIds;
