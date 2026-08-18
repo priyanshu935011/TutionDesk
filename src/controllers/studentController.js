@@ -1117,11 +1117,13 @@ export const getStudentPortalData = async (req, res) => {
 
       // Extract all assigned batch objects/IDs for this student record
       let rawBatches = [];
-      if (student.batches && student.batches.length > 0) {
-        rawBatches = student.batches;
-      } else if (student.batch) {
-        rawBatches = [student.batch];
-      } else {
+      if (Array.isArray(student.batches) && student.batches.length > 0) {
+        rawBatches.push(...student.batches);
+      }
+      if (student.batch) {
+        rawBatches.push(student.batch);
+      }
+      if (rawBatches.length === 0) {
         rawBatches = [null];
       }
 

@@ -958,18 +958,18 @@ class SupabaseQuery {
       for (const doc of docs) {
         // Map references
         const idKey = path === "teacher" ? "teacher_id" : 
-                      path === "batch" ? "batch_id" : 
+                      (path === "batch" || path === "batches") ? "batch_id" : 
                       path === "institute" ? "institute_id" : 
-                      path === "student" ? "student_id" : path;
+                      (path === "student" || path === "students") ? "student_id" : path;
         
-        const refId = doc[idKey] || doc[path];
+        const refId = doc[path] || doc[idKey];
         if (!refId) continue;
 
         let refTable = "";
         if (path === "teacher" || path === "user") refTable = "users";
-        else if (path === "batch") refTable = "batches";
+        else if (path === "batch" || path === "batches") refTable = "batches";
         else if (path === "institute") refTable = "institutes";
-        else if (path === "student") refTable = "students";
+        else if (path === "student" || path === "students") refTable = "students";
         else continue;
 
         let selectStr = "*";
