@@ -55,6 +55,11 @@ const testResultSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    batch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Batch",
+      default: null,
+    },
   },
   { timestamps: true }
 

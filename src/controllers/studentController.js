@@ -887,9 +887,10 @@ export const markBatchAttendance = async (req, res) => {
       if (existingRecord) {
         isUpdate = true;
         existingRecord.status = newStatus;
+        if (batchId) existingRecord.batchId = String(batchId);
       } else {
         if (!student.attendanceRecords) student.attendanceRecords = [];
-        student.attendanceRecords.unshift({ date: targetDateStr, status: newStatus });
+        student.attendanceRecords.unshift({ date: targetDateStr, status: newStatus, batchId: String(batchId) });
       }
 
       // Also sync to Supabase attendance table directly
@@ -905,12 +906,12 @@ export const markBatchAttendance = async (req, res) => {
           isUpdate = true;
           await supabase
             .from("attendance")
-            .update({ status: newStatus })
+            .update({ status: newStatus, batch_id: String(batchId) })
             .eq("id", existingDbRec.id);
         } else {
           await supabase
             .from("attendance")
-            .insert({ student_id: student._id, date: targetDateStr, status: newStatus });
+            .insert({ student_id: student._id, batch_id: String(batchId), date: targetDateStr, status: newStatus });
         }
       } catch (dbErr) {
         console.error("Direct attendance table sync error:", dbErr.message);
@@ -1034,9 +1035,11 @@ export const getStudentPortalData = async (req, res) => {
     const studentEnrollment = req.student?.enrollmentNumber || req.students[0]?.enrollmentNumber || req.studentEmail;
     const cacheKey = `student:dashboard:${studentEnrollment}`;
     
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    if (req.query.nocache !== "true" && req.query.refresh !== "true") {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const adsSetting = await SystemSetting.findOne({ key: "ads_settings" });
@@ -1210,6 +1213,27 @@ export const getStudentPortalData = async (req, res) => {
         const batchIdStr = String(currentBatchIdVal || "");
         const cutoffTime = expiryDays > 0 ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
 
+        // Filter notes for current batch
+        const batchNotes = notes.filter((n) => {
+          const nBatch = n.batch ? String(n.batch._id || n.batch.id || n.batch) : null;
+          if (!nBatch) return true; // General note for all batches
+          return nBatch === batchIdStr;
+        });
+
+        // Filter test results for current batch
+        const batchTestResults = testResults.filter((t) => {
+          const tBatch = t.batch ? String(t.batch._id || t.batch.id || t.batch) : "";
+          if (!tBatch) return true; // Untagged test result
+          return tBatch === batchIdStr;
+        });
+
+        // Filter attendance records for current batch
+        const batchAttendanceRecords = (student.attendanceRecords || []).filter((r) => {
+          const rBatch = r.batchId || r.batch ? String(r.batchId || r.batch) : "";
+          if (!rBatch) return true; // Untagged attendance record
+          return rBatch === batchIdStr;
+        });
+
         const studentNotices = allNotices.filter((n) => {
           const nInst = String(n.institute || n.user || n.institute_id || n.instituteId || "");
           if (nInst !== instIdStr) return false;
@@ -1221,6 +1245,7 @@ export const getStudentPortalData = async (req, res) => {
 
           if (n.targetType === "all" || !n.targetType) return true;
           if (n.targetType === "batch" && Array.isArray(n.batchIds)) {
+            if (n.batchIds.length === 0) return true;
             return n.batchIds.some((bId) => String(bId) === batchIdStr);
           }
           return true;
@@ -1254,9 +1279,9 @@ export const getStudentPortalData = async (req, res) => {
               }
             : null,
           feesHistory: collectiveFees.paymentHistory,
-          attendance: student.attendanceRecords || [],
-          notes,
-          testResults,
+          attendance: batchAttendanceRecords,
+          notes: batchNotes,
+          testResults: batchTestResults,
           notices: studentNotices.map((n) => ({
             _id: n._id,
             title: n.title,
@@ -1340,7 +1365,7 @@ export const getStudentPortalData = async (req, res) => {
     }
 
     const responsePayload = { classes, siblingProfiles };
-    await setCache(cacheKey, responsePayload, 3600); // Cache for 1 hour
+    await setCache(cacheKey, responsePayload, 300); // Cache for 5 minutes
 
     return res.json(responsePayload);
   } catch (error) {
