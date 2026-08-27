@@ -135,10 +135,18 @@ export const getStudents = async (req, res) => {
       const batchIds = allBatches
         .filter((b) => b.status !== "archived" && String(b.teacher) === String(req.user._id))
         .map((b) => b._id);
-      query.batch = { $in: batchIds };
+      query.$or = [
+        { batch: { $in: batchIds } },
+        { batches: { $in: batchIds } },
+        { enrolledBatchIds: { $in: batchIds } },
+      ];
     } else {
       if (archivedBatchIds.length > 0) {
-        query.batch = { $nin: archivedBatchIds };
+        query.$or = [
+          { batch: { $nin: archivedBatchIds } },
+          { batches: { $nin: archivedBatchIds } },
+          { enrolledBatchIds: { $nin: archivedBatchIds } },
+        ];
       }
     }
 

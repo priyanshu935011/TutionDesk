@@ -131,8 +131,19 @@ export const getTeacherDashboard = async (req, res) => {
       batchQuery.teacher = req.user._id;
 
       if (batchIds.length > 0) {
-        studentQuery.batch = { $in: batchIds };
-        const myStudents = await Student.find({ user: ownerId, batch: { $in: batchIds } }).select("_id");
+        studentQuery.$or = [
+          { batch: { $in: batchIds } },
+          { batches: { $in: batchIds } },
+          { enrolledBatchIds: { $in: batchIds } },
+        ];
+        const myStudents = await Student.find({
+          user: ownerId,
+          $or: [
+            { batch: { $in: batchIds } },
+            { batches: { $in: batchIds } },
+            { enrolledBatchIds: { $in: batchIds } },
+          ],
+        }).select("_id");
         const studentIds = myStudents.map((s) => String(s._id || s.id || s)).filter(Boolean);
 
         testQuery.student = studentIds.length > 0 ? { $in: studentIds } : null;
@@ -152,10 +163,9 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     const [students, batches, quizzes, notes, testResults] = await Promise.all([
-      Student.find(studentQuery).populate(
-        "batch",
-        "name scheduleDays startTime endTime",
-      ),
+      Student.find(studentQuery)
+        .populate("batch", "name scheduleDays startTime endTime")
+        .populate("batches", "name scheduleDays startTime endTime"),
       Batch.find(batchQuery).sort({ createdAt: -1 }).populate("teacher", "name email"),
       Quiz.find(quizQuery).sort({ createdAt: -1 }),
       Note.find(noteQuery)

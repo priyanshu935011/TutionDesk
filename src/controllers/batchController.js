@@ -29,9 +29,13 @@ export const getBatches = async (req, res) => {
     ]);
 
     const processedBatches = batches.map((batch) => {
-      const count = students.filter(
-        (s) => s.batch && String(s.batch) === String(batch._id)
-      ).length;
+      const count = students.filter((s) => {
+        const bIdStr = String(batch._id);
+        if (s.batch && String(s.batch) === bIdStr) return true;
+        if (Array.isArray(s.batches) && s.batches.some(b => String(b._id || b) === bIdStr)) return true;
+        if (Array.isArray(s.enrolledBatchIds) && s.enrolledBatchIds.some(b => String(b) === bIdStr)) return true;
+        return false;
+      }).length;
       return {
         ...batch.toJSON(),
         studentCount: count,
