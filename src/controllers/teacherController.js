@@ -225,9 +225,28 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     const processedBatches = batches.map((batch) => {
-      const count = students.filter(
-        (s) => s.batch && String(s.batch._id || s.batch) === String(batch._id)
-      ).length;
+      const bIdStr = String(batch._id || batch.id);
+      const bNameStr = String(batch.name || "").trim().toLowerCase();
+
+      const count = students.filter((s) => {
+        if (s.batch) {
+          const sBId = String(s.batch._id || s.batch.id || s.batch);
+          const sBName = String(s.batch.name || s.batchName || "").trim().toLowerCase();
+          if (sBId === bIdStr || (bNameStr.length > 0 && sBName === bNameStr)) return true;
+        }
+        if (Array.isArray(s.batches)) {
+          if (s.batches.some(b => {
+            const bId = String(b._id || b.id || b);
+            const bName = String(b.name || b).trim().toLowerCase();
+            return bId === bIdStr || (bNameStr.length > 0 && bName === bNameStr);
+          })) return true;
+        }
+        if (Array.isArray(s.enrolledBatchIds)) {
+          if (s.enrolledBatchIds.some(b => String(b) === bIdStr)) return true;
+        }
+        return false;
+      }).length;
+
       const bObj = typeof batch?.toJSON === "function" ? batch.toJSON() : (typeof batch?.toObject === "function" ? batch.toObject() : { ...batch });
       return {
         ...bObj,
