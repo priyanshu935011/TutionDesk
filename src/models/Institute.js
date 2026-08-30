@@ -69,9 +69,21 @@ const instituteSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    recordedLecturesFeatureEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    maxVideoStorageGb: {
+      type: Number,
+      default: 50,
+    },
+    usedVideoStorageBytes: {
+      type: Number,
+      default: 0,
+    },
     allowedFeatures: {
       type: [String],
-      default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads"],
+      default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads", "recorded_lectures"],
     },
     flexibleDueDate: {
       type: Boolean,

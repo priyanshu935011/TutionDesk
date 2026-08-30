@@ -21,6 +21,7 @@ import noticeRoutes from "./routes/noticeRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import leadRoutes from "./routes/leadRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
+import videoRoutes from "./routes/videoRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 import SystemSetting from "./models/SystemSetting.js";
@@ -134,6 +135,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/payment", paymentRoutes);
+app.use("/videos", videoRoutes);
+app.use("/api/videos", videoRoutes);
 
 const PORT = process.env.PORT || 5000;
 

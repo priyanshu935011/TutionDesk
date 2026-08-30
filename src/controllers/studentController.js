@@ -8,6 +8,7 @@ import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
 import SystemSetting from "../models/SystemSetting.js";
 import Notice from "../models/Notice.js";
+import VideoLecture from "../models/VideoLecture.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
@@ -1165,10 +1166,11 @@ export const getStudentPortalData = async (req, res) => {
         }
 
         const isQuizEnabled = institute.quizFeatureEnabled !== false;
+        const isVideosEnabled = institute.recordedLecturesFeatureEnabled !== false;
 
         const currentBatchIdVal = batch ? (batch._id || batch.id) : null;
 
-        const [notes, testResults, liveQuiz, rawQuizzes] = await Promise.all([
+        const [notes, testResults, liveQuiz, rawQuizzes, rawVideos] = await Promise.all([
           Note.find({
             institute: instituteId,
             $or: [
@@ -1193,7 +1195,37 @@ export const getStudentPortalData = async (req, res) => {
             ],
             status: { $ne: "archived" },
           }).sort({ createdAt: -1 }) : Promise.resolve([]),
+          isVideosEnabled
+            ? VideoLecture.find({
+                institute: instituteId,
+                status: "active",
+                $or: [
+                  { targetType: "all" },
+                  { targetType: "batch", batches: currentBatchIdVal },
+                  { targetType: "batch", batches: { $size: 0 } },
+                  { targetType: "student", students: student._id },
+                  { targetType: null },
+                ],
+              }).sort({ createdAt: -1 })
+            : Promise.resolve([]),
         ]);
+
+        const now = new Date();
+        const recordedLectures = (rawVideos || [])
+          .filter((v) => !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime())
+          .map((v) => ({
+            _id: v._id,
+            title: v.title,
+            description: v.description,
+            bunnyVideoId: v.bunnyVideoId,
+            videoUrl: v.videoUrl,
+            hlsUrl: v.hlsUrl,
+            thumbnailUrl: v.thumbnailUrl,
+            durationSeconds: v.durationSeconds,
+            fileSizeBytes: v.fileSizeBytes,
+            createdAt: v.createdAt,
+            expiryDate: v.expiryDate,
+          }));
 
         const quizzes = rawQuizzes.map((q) => ({
           _id: q._id,
@@ -1319,6 +1351,8 @@ export const getStudentPortalData = async (req, res) => {
           liveQuiz,
           quizzes,
           quizFeatureEnabled: isQuizEnabled,
+          recordedLectures,
+          recordedLecturesFeatureEnabled: isVideosEnabled,
           brandingEnabled: institute.brandingEnabled !== false,
           logoUrl: institute.logoUrl || null,
           themeColor: institute.themeColor || "#6366f1",
