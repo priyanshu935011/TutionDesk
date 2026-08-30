@@ -5,7 +5,7 @@ import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import SystemSetting from "../models/SystemSetting.js";
-import { invalidateUserDashboard } from "../utils/cache.js";
+import { clearCachePattern } from "../utils/cache.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -268,7 +268,7 @@ export const createVideoLecture = async (req, res) => {
     institute.usedVideoStorageBytes = currentUsed + addedBytes;
     await institute.save();
 
-    await invalidateUserDashboard(req);
+    await clearCachePattern("*");
 
     return res.status(201).json(video);
   } catch (error) {
@@ -392,7 +392,7 @@ export const updateVideoLecture = async (req, res) => {
     }
 
     await video.save();
-    await invalidateUserDashboard(req);
+    await clearCachePattern("*");
 
     return res.json({ message: "Video lecture updated successfully", video });
   } catch (error) {
@@ -437,7 +437,7 @@ export const deleteVideoLecture = async (req, res) => {
       await institute.save();
     }
 
-    await invalidateUserDashboard(req);
+    await clearCachePattern("*");
 
     return res.json({ message: "Video lecture deleted successfully" });
   } catch (error) {
