@@ -560,6 +560,7 @@ export const getNotes = async (req, res) => {
       pdfUrl: row.file_url,
       pdfPublicId: row.pdf_public_id,
       targetType: row.target_type || "batch",
+      fileSizeBytes: row.file_size_bytes || row.file_size || 1572864,
       batch: row.batch_id
         ? { _id: row.batch_id, name: batchMap[row.batch_id] || row.batch_id }
         : null,
