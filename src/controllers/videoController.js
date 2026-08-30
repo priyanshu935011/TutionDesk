@@ -170,7 +170,7 @@ export const getBunnyUploadSignature = async (req, res) => {
 
     const directUploadUrl = `https://video.bunnycdn.com/library/${libraryId}/videos/${videoId}`;
     const hlsUrl = `https://${cdnHostname}/${videoId}/playlist.m3u8`;
-    const embedUrl = `https://${cdnHostname}/embed/${libraryId}/${videoId}`;
+    const embedUrl = `https://iframe.mediadelivery.net/embed/${libraryId}/${videoId}`;
     const thumbnailUrl = `https://${cdnHostname}/${videoId}/thumbnail.jpg`;
 
     return res.json({
