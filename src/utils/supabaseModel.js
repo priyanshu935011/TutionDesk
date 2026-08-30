@@ -563,8 +563,10 @@ class SupabaseDocument {
       if (this._tableName === "students" && this._id) {
         const metadata = readStudentMetadata();
         metadata[this._id] = {
-          customFields: this.customFields ?? {},
-          batches: this.batches ?? []
+          ...(metadata[this._id] || {}),
+          customFields: this.customFields ?? metadata[this._id]?.customFields ?? {},
+          batches: this.batches ?? metadata[this._id]?.batches ?? [],
+          profilePicture: this.profilePicture ?? metadata[this._id]?.profilePicture ?? ""
         };
         writeStudentMetadata(metadata);
       }
@@ -1082,7 +1084,17 @@ class SupabaseQuery {
       });
     }
 
+    const studentMetadata = readStudentMetadata();
     for (const doc of docs) {
+      const meta = studentMetadata[doc.id] || {};
+      if (meta.profilePicture) {
+        doc.profilePicture = meta.profilePicture;
+        doc.profile_picture = meta.profilePicture;
+      }
+      if (meta.customFields && (!doc.customFields || Object.keys(doc.customFields).length === 0)) {
+        doc.customFields = meta.customFields;
+        doc.custom_fields = meta.customFields;
+      }
       doc.paymentHistory = paymentsByStudent[doc.id] || [];
       doc.payment_history = doc.paymentHistory;
       doc.attendanceRecords = attendanceByStudent[doc.id] || [];

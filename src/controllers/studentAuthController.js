@@ -442,6 +442,13 @@ export const uploadStudentProfilePicture = async (req, res) => {
     await student.save();
 
     if (student.enrollmentNumber) {
+      try {
+        const matchingStudents = await Student.find({ enrollmentNumber: student.enrollmentNumber });
+        for (const st of matchingStudents) {
+          st.profilePicture = imageUrl;
+          await st.save();
+        }
+      } catch (e) {}
       await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
     }
 
