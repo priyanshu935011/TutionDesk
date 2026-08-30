@@ -1,3 +1,4 @@
+import { Readable } from "stream";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
@@ -5,6 +6,8 @@ import Student from "../models/Student.js";
 import { getInitialPassword } from "./studentController.js";
 import { sendResetEmail } from "../utils/mailer.js";
 import redisClient from "../config/redis.js";
+import cloudinary from "../utils/cloudinary.js";
+import { deleteCache } from "../utils/cache.js";
 
 const generateToken = (payload) =>
   jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "30d" });
@@ -18,10 +21,14 @@ export const studentLogin = async (req, res) => {
     }
 
     const loginIdentifier = email.toLowerCase().trim();
+    const cleanPhone = loginIdentifier.replace(/\D/g, "");
+
     const students = await Student.find({
       $or: [
         { email: loginIdentifier },
-        { phone: loginIdentifier }
+        { phone: loginIdentifier },
+        { parentPhone: loginIdentifier },
+        ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }, { parentPhone: cleanPhone }] : [])
       ]
     }).populate(
       "batch",
@@ -29,7 +36,7 @@ export const studentLogin = async (req, res) => {
     );
 
     if (!students || students.length === 0) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res.status(401).json({ message: "Invalid email/phone or password" });
     }
 
     // Verify password against matching records
@@ -357,5 +364,94 @@ export const switchProfile = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Could not switch profile", error: error.message });
+  }
+};
+
+export const updateStudentProfile = async (req, res) => {
+  try {
+    const student = req.student;
+    if (!student) {
+      return res.status(401).json({ message: "Student not found" });
+    }
+
+    const { email, parentName, parentPhone, address, profilePicture, customFields } = req.body;
+
+    if (email !== undefined) student.email = email.toLowerCase().trim();
+    if (parentName !== undefined) student.parentName = parentName.trim();
+    if (parentPhone !== undefined) student.parentPhone = parentPhone.trim();
+    if (address !== undefined) student.address = address.trim();
+    if (profilePicture !== undefined) student.profilePicture = profilePicture;
+    if (customFields !== undefined && typeof customFields === "object") {
+      student.customFields = { ...(student.customFields || {}), ...customFields };
+    }
+
+    await student.save();
+
+    if (student.enrollmentNumber) {
+      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+    }
+
+    return res.json({
+      message: "Profile updated successfully",
+      student: {
+        id: student._id,
+        name: student.name,
+        email: student.email,
+        phone: student.phone,
+        parentName: student.parentName,
+        parentPhone: student.parentPhone,
+        address: student.address,
+        profilePicture: student.profilePicture,
+        customFields: student.customFields,
+      },
+    });
+  } catch (error) {
+    console.error("updateStudentProfile error:", error);
+    return res.status(500).json({ message: "Could not update profile", error: error.message });
+  }
+};
+
+export const uploadStudentProfilePicture = async (req, res) => {
+  try {
+    const student = req.student;
+    if (!student) {
+      return res.status(401).json({ message: "Student not found" });
+    }
+
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ message: "Image file is required" });
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: "classtech/student_avatars",
+          resource_type: "image",
+          transformation: [{ width: 400, height: 400, crop: "fill", gravity: "face" }],
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      Readable.from(req.file.buffer).pipe(uploadStream);
+    });
+
+    const imageUrl = result.secure_url || result.url;
+    student.profilePicture = imageUrl;
+    await student.save();
+
+    if (student.enrollmentNumber) {
+      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+    }
+
+    return res.json({
+      message: "Profile picture uploaded successfully",
+      profilePicture: imageUrl,
+      url: imageUrl,
+    });
+  } catch (error) {
+    console.error("uploadStudentProfilePicture error:", error);
+    return res.status(500).json({ message: "Could not upload profile picture", error: error.message });
   }
 };

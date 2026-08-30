@@ -55,10 +55,11 @@ export const loginUser = async (req, res) => {
         .json({ message: "Email and password are required" });
     }
 
-    const normalizedEmail = email.toLowerCase();
+    const normalizedIdentifier = (email || "").toLowerCase().trim();
+    const cleanPhone = normalizedIdentifier.replace(/\D/g, "");
 
     if (
-      normalizedEmail === SUPER_ADMIN_EMAIL &&
+      normalizedIdentifier === SUPER_ADMIN_EMAIL &&
       password === SUPER_ADMIN_PASSWORD
     ) {
       return res.json({
@@ -75,10 +76,16 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({
+      $or: [
+        { email: normalizedIdentifier },
+        { phone: normalizedIdentifier },
+        ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }] : [])
+      ]
+    });
 
     if (!user) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res.status(401).json({ message: "Invalid email/phone or password" });
     }
 
     const allowedAppRoles = ["institute_admin", "admin", "teacher", "super_admin"];

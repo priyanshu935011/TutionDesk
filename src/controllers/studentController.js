@@ -1105,7 +1105,7 @@ export const getStudentPortalData = async (req, res) => {
 
     for (const student of students) {
       const institute = await Institute.findById(student.user).select(
-        "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser allowedFeatures"
+        "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser allowedFeatures studentCustomFields"
       );
       if (!institute) continue;
 
@@ -1268,6 +1268,11 @@ export const getStudentPortalData = async (req, res) => {
             name: student.name,
             email: student.email,
             phone: student.phone,
+            parentName: student.parentName,
+            parentPhone: student.parentPhone,
+            address: student.address,
+            profilePicture: student.profilePicture || "",
+            customFields: student.customFields || {},
             enrollmentNumber: student.enrollmentNumber,
             batch: batch || student.batch,
             paidAmount: collectiveFees.paidAmount,
@@ -1292,6 +1297,7 @@ export const getStudentPortalData = async (req, res) => {
           attendance: batchAttendanceRecords,
           notes: batchNotes,
           testResults: batchTestResults,
+          studentCustomFields: institute.studentCustomFields || [],
           notices: studentNotices.map((n) => ({
             _id: n._id,
             title: n.title,
@@ -1347,7 +1353,7 @@ export const getStudentPortalData = async (req, res) => {
 
         if (classes.length === 0 && students.length > 0) {
       const s = students[0];
-      const inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor");
+      const inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor studentCustomFields");
       classes.push({
         studentId: s._id,
         student: {
@@ -1355,6 +1361,11 @@ export const getStudentPortalData = async (req, res) => {
           name: s.name,
           email: s.email,
           phone: s.phone,
+          parentName: s.parentName || "",
+          parentPhone: s.parentPhone || "",
+          address: s.address || "",
+          profilePicture: s.profilePicture || "",
+          customFields: s.customFields || {},
           enrollmentNumber: s.enrollmentNumber,
           batch: s.batch,
           paidAmount: s.paidAmount || 0,
@@ -1363,7 +1374,8 @@ export const getStudentPortalData = async (req, res) => {
           paymentHistory: s.paymentHistory || [],
         },
         teacherName: inst ? inst.name : "Tuition Teacher",
-        instituteName: inst ? inst.name : "Classtech Tuition",
+        instituteName: inst ? inst.name : "Classtech",
+        studentCustomFields: inst?.studentCustomFields || [],
         batchName: s.batch ? s.batch.name : "General Batch",
         attendance: s.attendanceRecords || [],
         notes: [],

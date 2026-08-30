@@ -140,6 +140,10 @@ const studentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    profilePicture: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,

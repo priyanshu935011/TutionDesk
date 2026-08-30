@@ -146,10 +146,16 @@ export const createNotice = async (req, res) => {
             const targetPhone = (s.parentPhone && s.parentPhone.trim()) ? s.parentPhone.trim() : s.phone;
             if (targetPhone) {
               try {
+                let sent = false;
                 if (templateName) {
-                  const params = getParameters(s);
-                  await sendTemplateMessage(String(instituteId), targetPhone, templateName, params);
-                } else {
+                  try {
+                    await sendTemplateMessage(String(instituteId), targetPhone, templateName, getParameters(s));
+                    sent = true;
+                  } catch (tplErr) {
+                    console.warn(`Template message failed for ${targetPhone}, trying direct text fallback:`, tplErr.message);
+                  }
+                }
+                if (!sent) {
                   await sendMessage(String(instituteId), targetPhone, fallbackText);
                 }
                 await new Promise((r) => setTimeout(r, 500));
