@@ -6,6 +6,8 @@ import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
+import { supabase } from "../utils/supabaseModel.js";
+import cloudinary from "../utils/cloudinary.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -309,19 +311,62 @@ export const createVideoLecture = async (req, res) => {
 export const uploadThumbnail = async (req, res) => {
   try {
     const { imageBase64 } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ message: "No image data provided" });
+    }
+
     let uploadUrl = "";
 
-    if (imageBase64) {
-      const result = await cloudinary.uploader.upload(imageBase64, {
-        folder: "video_thumbnails",
-      });
-      uploadUrl = result.secure_url;
+    // 1. Try Cloudinary if configured
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    if (cloudName && cloudName !== "your_cloud_name") {
+      try {
+        const result = await cloudinary.uploader.upload(imageBase64, {
+          folder: "video_thumbnails",
+        });
+        uploadUrl = result.secure_url;
+      } catch (cloudinaryErr) {
+        console.warn("Cloudinary upload failed, trying Supabase fallback:", cloudinaryErr.message);
+      }
+    }
+
+    // 2. Try Supabase Storage if Cloudinary didn't produce a URL
+    if (!uploadUrl) {
+      try {
+        const bucketName = process.env.SUPABASE_BUCKET || "notes";
+        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        const filename = `thumbnails/thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+
+        const { data, error } = await supabase.storage
+          .from(bucketName)
+          .upload(filename, buffer, {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
+
+        if (!error && data) {
+          const { data: publicUrlData } = supabase.storage
+            .from(bucketName)
+            .getPublicUrl(filename);
+          uploadUrl = publicUrlData?.publicUrl || "";
+        } else if (error) {
+          console.warn("Supabase thumbnail upload error:", error.message);
+        }
+      } catch (supabaseErr) {
+        console.warn("Supabase upload exception:", supabaseErr.message);
+      }
+    }
+
+    // 3. Fallback: Return data URL if cloud storages are unavailable
+    if (!uploadUrl) {
+      uploadUrl = imageBase64;
     }
 
     return res.json({ thumbnailUrl: uploadUrl });
   } catch (error) {
     console.error("uploadThumbnail error:", error);
-    return res.status(500).json({ message: "Could not upload thumbnail to Cloudinary" });
+    return res.status(500).json({ message: error.message || "Could not upload thumbnail" });
   }
 };
 
