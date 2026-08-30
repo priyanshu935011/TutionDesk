@@ -948,14 +948,22 @@ export const createTestResultsBulk = async (req, res) => {
     }
 
     // Directly upsert into the test_marks table using Supabase client
-    // (which stores one row per test with marks as a JSON map)
     const { supabase: sb } = await import("../utils/supabase.js");
+    const { readTestsMetadata, writeTestsMetadata } = await import("../utils/supabaseModel.js");
+
+    const resolvedSubject = subject ? subject.trim() : "General";
+    const resolvedTestType = req.body.testType || req.body.category || "Unit Test";
+    const resolvedChapter = req.body.chapter || "";
+    const formattedTestTitle = resolvedSubject !== "General" && !title.includes(`(${resolvedSubject})`)
+        ? `${title.trim()} (${resolvedSubject})`
+        : title.trim();
+
     const { data: insertedRow, error: insertError } = await sb
       .from("test_marks")
       .insert({
         institute_id: String(instituteId),
         batch_id: String(batchId),
-        test_name: title.trim(),
+        test_name: formattedTestTitle,
         max_marks: Number(totalMarks),
         test_date: new Date(examDate).toISOString().substring(0, 10),
         marks: marksMap,
@@ -968,8 +976,15 @@ export const createTestResultsBulk = async (req, res) => {
       return res.status(500).json({ message: insertError.message || "Could not save test marks" });
     }
 
-    const resolvedTestType = req.body.testType || req.body.category || "Unit Test";
-    const resolvedChapter = req.body.chapter || "";
+    if (insertedRow && insertedRow.id) {
+      const testMetadata = readTestsMetadata();
+      testMetadata[insertedRow.id] = {
+        subject: resolvedSubject,
+        testType: resolvedTestType,
+        chapter: resolvedChapter,
+      };
+      writeTestsMetadata(testMetadata);
+    }
 
     // Also persist TestResult records for student portal
     for (const entry of entries) {

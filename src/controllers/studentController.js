@@ -1261,6 +1261,12 @@ export const getStudentPortalData = async (req, res) => {
           return true;
         });
 
+        studentNotices.sort((a, b) => {
+          const dtA = new Date(a.createdAt || a.created_at || a.date || 0).getTime();
+          const dtB = new Date(b.createdAt || b.created_at || b.date || 0).getTime();
+          return dtB - dtA;
+        });
+
         classes.push({
           studentId: student._id,
           student: {

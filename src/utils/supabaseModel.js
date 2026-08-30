@@ -165,6 +165,30 @@ function writeInstitutesMetadata(metadata) {
   } catch (e) {}
 }
 
+const TESTS_METADATA_FILE = path.join(FALLBACK_DIR, "tests_metadata.json");
+
+export function readTestsMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(TESTS_METADATA_FILE)) {
+      fs.writeFileSync(TESTS_METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(TESTS_METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+export function writeTestsMetadata(metadata) {
+  try {
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(TESTS_METADATA_FILE, content);
+    uploadMetadataFile("tests_metadata.json", content);
+  } catch (e) {}
+}
+
 function getFallbackFile(tableName) {
   if (!fs.existsSync(FALLBACK_DIR)) {
     fs.mkdirSync(FALLBACK_DIR, { recursive: true });
@@ -577,6 +601,17 @@ class SupabaseDocument {
         };
         writeBatchesMetadata(metadata);
       }
+      if (this._tableName === "test_marks" && this._id) {
+        const metadata = readTestsMetadata();
+        const realId = String(this._id).split("_")[0];
+        metadata[realId] = {
+          ...(metadata[realId] || {}),
+          subject: this.subject ?? metadata[realId]?.subject ?? "",
+          testType: this.testType ?? metadata[realId]?.testType ?? "",
+          chapter: this.chapter ?? metadata[realId]?.chapter ?? ""
+        };
+        writeTestsMetadata(metadata);
+      }
       return this;
     } else {
       // Insert
@@ -868,11 +903,16 @@ class SupabaseQuery {
         if (tableName === "test_marks") {
           const studentUuid = currentFilter.student || (currentFilter._id && String(currentFilter._id).includes("_") ? String(currentFilter._id).split("_")[1] : Object.keys(row.marks || {})[0]);
           if (!studentUuid) return null;
+          const testMeta = readTestsMetadata()[row.id] || {};
+          const bracketSubject = row.test_name && row.test_name.includes("(") && row.test_name.includes(")") ? row.test_name.split("(").pop().replace(")", "").trim() : "";
           targetRow = {
             id: `${row.id}_${studentUuid}`,
             student: studentUuid,
             student_id: studentUuid,
             title: row.test_name,
+            subject: row.subject || testMeta.subject || bracketSubject || "General",
+            testType: row.test_type || testMeta.testType || "Unit Test",
+            chapter: row.chapter || testMeta.chapter || "",
             score: Number(row.marks?.[studentUuid] || 0),
             totalMarks: Number(row.max_marks || 100),
             examDate: row.test_date || row.created_at,
@@ -925,15 +965,22 @@ class SupabaseQuery {
 
         let rows = data || [];
         if (tableName === "test_marks") {
+          const testMetadata = readTestsMetadata();
           const flattened = [];
           for (const row of rows) {
+            const testMeta = testMetadata[row.id] || {};
             const marksMap = row.marks || {};
+            const bracketSubject = row.test_name && row.test_name.includes("(") && row.test_name.includes(")") ? row.test_name.split("(").pop().replace(")", "").trim() : "";
+            const resolvedSubject = row.subject || testMeta.subject || bracketSubject || "General";
             for (const [studentUuid, score] of Object.entries(marksMap)) {
               flattened.push({
                 id: `${row.id}_${studentUuid}`,
                 student: studentUuid,
                 student_id: studentUuid,
                 title: row.test_name,
+                subject: resolvedSubject,
+                testType: row.test_type || testMeta.testType || "Unit Test",
+                chapter: row.chapter || testMeta.chapter || "",
                 score: Number(score || 0),
                 totalMarks: Number(row.max_marks || 100),
                 examDate: row.test_date || row.created_at,
