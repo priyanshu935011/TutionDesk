@@ -12,21 +12,29 @@ export const getBunnySettingsHelper = async () => {
   try {
     const setting = await SystemSetting.findOne({ key: "bunny_stream_settings" });
     if (setting && setting.value) {
-      return {
-        apiKey: setting.value.apiKey || "",
-        libraryId: setting.value.libraryId || "",
-        cdnHostname: setting.value.cdnHostname || "",
-        tokenSecurityKey: setting.value.tokenSecurityKey || "",
-      };
+      let val = setting.value;
+      if (typeof val === "string") {
+        try {
+          val = JSON.parse(val);
+        } catch (_) {}
+      }
+      if (val && typeof val === "object") {
+        return {
+          apiKey: (val.apiKey || "").trim(),
+          libraryId: (val.libraryId || "").trim(),
+          cdnHostname: (val.cdnHostname || "iframe.mediadelivery.net").trim(),
+          tokenSecurityKey: (val.tokenSecurityKey || "").trim(),
+        };
+      }
     }
   } catch (err) {
     console.error("Error reading Bunny settings:", err);
   }
   return {
-    apiKey: process.env.BUNNY_API_KEY || "",
-    libraryId: process.env.BUNNY_LIBRARY_ID || "",
-    cdnHostname: process.env.BUNNY_CDN_HOSTNAME || "iframe.mediadelivery.net",
-    tokenSecurityKey: process.env.BUNNY_TOKEN_SECURITY_KEY || "",
+    apiKey: (process.env.BUNNY_API_KEY || "").trim(),
+    libraryId: (process.env.BUNNY_LIBRARY_ID || "").trim(),
+    cdnHostname: (process.env.BUNNY_CDN_HOSTNAME || "iframe.mediadelivery.net").trim(),
+    tokenSecurityKey: (process.env.BUNNY_TOKEN_SECURITY_KEY || "").trim(),
   };
 };
 
@@ -139,7 +147,9 @@ export const getBunnyUploadSignature = async (req, res) => {
       });
     }
 
-    // Call Bunny Stream Create Video API
+    const apiKeyMasked = apiKey.length > 8 ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : apiKey;
+
+    // Call Bunny Stream Create Video API with both header and query param for maximum compatibility
     const response = await axios.post(
       `https://video.bunnycdn.com/library/${libraryId}/videos`,
       { title: title || "Untitled Lecture" },
@@ -148,6 +158,9 @@ export const getBunnyUploadSignature = async (req, res) => {
           AccessKey: apiKey,
           accept: "application/json",
           "content-type": "application/json",
+        },
+        params: {
+          AccessKey: apiKey,
         },
       }
     );
@@ -170,12 +183,14 @@ export const getBunnyUploadSignature = async (req, res) => {
       apiKey: apiKey,
     });
   } catch (error) {
-    console.error("getBunnyUploadSignature error:", error.response?.data || error.message);
+    const apiKey = (req.body?.apiKey || "").trim();
     const bunnyErr = error.response?.data;
+    console.error("getBunnyUploadSignature error:", bunnyErr || error.message);
     if (bunnyErr && bunnyErr.StatusCode === 401) {
       return res.status(401).json({
-        message: "Bunny CDN Authentication Failed (401). Please check the API Access Key and Library ID in Super Admin -> Recorded Lectures -> Bunny Settings. Make sure to use the 'API Access Key' from Bunny Stream -> API settings.",
+        message: "Bunny Stream Authentication Failed (401). Please check Super Admin -> Recorded Lectures -> Bunny Credentials.",
         error: bunnyErr,
+        libraryIdUsed: req.body?.libraryId || undefined,
       });
     }
     return res.status(500).json({
