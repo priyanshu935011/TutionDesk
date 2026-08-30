@@ -129,7 +129,11 @@ export const getBunnyUploadSignature = async (req, res) => {
     const bunny = await getBunnySettingsHelper();
     const { title } = req.body;
 
-    if (!bunny.apiKey || !bunny.libraryId) {
+    const apiKey = (bunny.apiKey || "").trim();
+    const libraryId = (bunny.libraryId || "").trim();
+    const cdnHostname = (bunny.cdnHostname || "iframe.mediadelivery.net").trim();
+
+    if (!apiKey || !libraryId) {
       return res.status(400).json({
         message: "Bunny.net credentials are not configured in Super Admin settings.",
       });
@@ -137,12 +141,13 @@ export const getBunnyUploadSignature = async (req, res) => {
 
     // Call Bunny Stream Create Video API
     const response = await axios.post(
-      `https://video.bunnycdn.com/library/${bunny.libraryId}/videos`,
+      `https://video.bunnycdn.com/library/${libraryId}/videos`,
       { title: title || "Untitled Lecture" },
       {
         headers: {
-          AccessKey: bunny.apiKey,
-          "Content-Type": "application/json",
+          AccessKey: apiKey,
+          accept: "application/json",
+          "content-type": "application/json",
         },
       }
     );
@@ -150,25 +155,32 @@ export const getBunnyUploadSignature = async (req, res) => {
     const videoData = response.data;
     const videoId = videoData.guid;
 
-    const directUploadUrl = `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${videoId}`;
-    const hlsUrl = `https://${bunny.cdnHostname}/${videoId}/playlist.m3u8`;
-    const embedUrl = `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${videoId}`;
-    const thumbnailUrl = `https://${bunny.cdnHostname}/${videoId}/thumbnail.jpg`;
+    const directUploadUrl = `https://video.bunnycdn.com/library/${libraryId}/videos/${videoId}`;
+    const hlsUrl = `https://${cdnHostname}/${videoId}/playlist.m3u8`;
+    const embedUrl = `https://${cdnHostname}/embed/${libraryId}/${videoId}`;
+    const thumbnailUrl = `https://${cdnHostname}/${videoId}/thumbnail.jpg`;
 
     return res.json({
       bunnyVideoId: videoId,
-      libraryId: bunny.libraryId,
-      apiKey: bunny.apiKey,
+      libraryId: libraryId,
       directUploadUrl,
       hlsUrl,
       embedUrl,
       thumbnailUrl,
+      apiKey: apiKey,
     });
   } catch (error) {
-    console.error("getBunnyUploadSignature error:", error?.response?.data || error.message);
+    console.error("getBunnyUploadSignature error:", error.response?.data || error.message);
+    const bunnyErr = error.response?.data;
+    if (bunnyErr && bunnyErr.StatusCode === 401) {
+      return res.status(401).json({
+        message: "Bunny CDN Authentication Failed (401). Please check the API Access Key and Library ID in Super Admin -> Recorded Lectures -> Bunny Settings. Make sure to use the 'API Access Key' from Bunny Stream -> API settings.",
+        error: bunnyErr,
+      });
+    }
     return res.status(500).json({
       message: "Could not generate Bunny upload signature",
-      error: error?.response?.data || error.message,
+      error: bunnyErr || error.message,
     });
   }
 };
