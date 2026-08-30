@@ -270,7 +270,9 @@ export const createVideoLecture = async (req, res) => {
     const bunny = await getBunnySettingsHelper();
     const finalHlsUrl = hlsUrl || `https://${bunny.cdnHostname}/${bunnyVideoId}/playlist.m3u8`;
     const finalVideoUrl = videoUrl || `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${bunnyVideoId}`;
-    const finalThumbnailUrl = thumbnailUrl || `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
+    const finalThumbnailUrl = (thumbnailUrl && thumbnailUrl.trim().length > 0)
+      ? thumbnailUrl.trim()
+      : `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
 
     const video = await VideoLecture.create({
       institute: instituteId,
@@ -282,7 +284,7 @@ export const createVideoLecture = async (req, res) => {
       hlsUrl: finalHlsUrl,
       thumbnailUrl: finalThumbnailUrl,
       durationSeconds: Number(durationSeconds || 0),
-      fileSizeBytes: addedBytes,
+      fileSizeBytes: Number(fileSizeBytes || addedBytes || 0),
       targetType,
       batches: Array.isArray(batchIds) ? batchIds.filter(Boolean) : [],
       students: Array.isArray(studentIds) ? studentIds.filter(Boolean) : [],
@@ -292,7 +294,7 @@ export const createVideoLecture = async (req, res) => {
     });
 
     // Update institute used storage
-    institute.usedVideoStorageBytes = currentUsed + addedBytes;
+    institute.usedVideoStorageBytes = currentUsed + Number(fileSizeBytes || addedBytes || 0);
     await institute.save();
 
     await clearCachePattern("*");
@@ -301,6 +303,25 @@ export const createVideoLecture = async (req, res) => {
   } catch (error) {
     console.error("createVideoLecture error:", error);
     return res.status(500).json({ message: error.message || "Could not save video lecture" });
+  }
+};
+
+export const uploadThumbnail = async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    let uploadUrl = "";
+
+    if (imageBase64) {
+      const result = await cloudinary.uploader.upload(imageBase64, {
+        folder: "video_thumbnails",
+      });
+      uploadUrl = result.secure_url;
+    }
+
+    return res.json({ thumbnailUrl: uploadUrl });
+  } catch (error) {
+    console.error("uploadThumbnail error:", error);
+    return res.status(500).json({ message: "Could not upload thumbnail to Cloudinary" });
   }
 };
 
@@ -323,6 +344,7 @@ export const getTeacherVideos = async (req, res) => {
     const now = new Date();
     const activeVideos = [];
     const expiredVideos = [];
+    let computedTotalBytes = 0;
 
     videos.forEach((v) => {
       const isExpired = v.expiryDate && new Date(v.expiryDate).getTime() < now.getTime();
@@ -330,6 +352,8 @@ export const getTeacherVideos = async (req, res) => {
         v.status = "expired";
       }
       const vObj = typeof v.toObject === "function" ? v.toObject() : v;
+      computedTotalBytes += Number(vObj.fileSizeBytes || 0);
+
       if (isExpired) {
         expiredVideos.push(vObj);
       } else {
@@ -338,7 +362,7 @@ export const getTeacherVideos = async (req, res) => {
     });
 
     const maxGb = Number(institute.maxVideoStorageGb || 50);
-    const usedBytes = Number(institute.usedVideoStorageBytes || 0);
+    const usedBytes = Math.max(Number(institute.usedVideoStorageBytes || 0), computedTotalBytes);
     const usedGb = Number((usedBytes / (1024 * 1024 * 1024)).toFixed(2));
     const freeGb = Number(Math.max(0, maxGb - usedGb).toFixed(2));
     const usagePercentage = maxGb > 0 ? Math.min(100, Math.round((usedGb / maxGb) * 100)) : 0;

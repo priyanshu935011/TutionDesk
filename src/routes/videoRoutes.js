@@ -5,6 +5,7 @@ import {
   updateInstituteVideoSettings,
   getBunnyUploadSignature,
   createVideoLecture,
+  uploadThumbnail,
   getTeacherVideos,
   updateVideoLecture,
   deleteVideoLecture,
@@ -28,6 +29,7 @@ router.get("/super-admin/institute-stats/:instituteId", getInstituteVideoStatsSu
 
 // Teacher Video Management & Upload Signature
 router.post("/bunny/signature", getBunnyUploadSignature);
+router.post("/thumbnail", uploadThumbnail);
 router.get("/teacher", getTeacherVideos);
 router.post("/teacher", createVideoLecture);
 router.put("/teacher/:id", updateVideoLecture);
