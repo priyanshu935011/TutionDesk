@@ -8,7 +8,13 @@ const supabaseKey = process.env.SUPABASE_KEY || "";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-const MISSING_TABLES = new Set(["leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages", "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs", "whatsapplog", "whatsapp_logs", "whatsapp_log"]);
+const MISSING_TABLES = new Set([
+  "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
+  "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs",
+  "whatsapplog", "whatsapp_logs", "whatsapp_log", "system_settings", "systemsettings",
+  "system_setting", "systemsetting", "video_lectures", "videolectures", "video_lecture",
+  "videolecture", "video_watch_logs", "videowatchlogs", "video_watch_log", "videowatchlog"
+]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
 const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
@@ -1661,6 +1667,61 @@ class SupabaseModel {
     return data ? new SupabaseDocument(this.tableName, data, this) : null;
   }
 
+  async findOneAndUpdate(filter = {}, update = {}, options = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      let index = fallbackData.findIndex(doc => matchFilter(doc, filter));
+
+      if (index === -1) {
+        if (options.upsert) {
+          const newDoc = {
+            id: crypto.randomUUID(),
+            _id: crypto.randomUUID(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          applyUpdateJson(newDoc, update);
+          if (filter.key && !newDoc.key) newDoc.key = filter.key;
+          fallbackData.push(newDoc);
+          writeFallbackData(this.tableName, fallbackData);
+          return new SupabaseDocument(this.tableName, newDoc, this);
+        }
+        return null;
+      }
+
+      const updated = applyUpdateJson(fallbackData[index], update);
+      fallbackData[index] = updated;
+      writeFallbackData(this.tableName, fallbackData);
+      return new SupabaseDocument(this.tableName, updated, this);
+    }
+
+    let existing = await this.findOne(filter);
+    if (!existing) {
+      if (options.upsert) {
+        const payload = update.$set ? update.$set : update;
+        return await this.create({ ...filter, ...payload });
+      }
+      return null;
+    }
+
+    const payload = update.$set ? update.$set : update;
+    const dbPayload = {};
+    for (const [key, val] of Object.entries(payload)) {
+      const dbKey = camelToSnake(key);
+      dbPayload[dbKey] = val;
+    }
+
+    const { data, error } = await this.supabase
+      .from(this.tableName)
+      .update(dbPayload)
+      .eq("id", existing.id || existing._id)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    return data ? new SupabaseDocument(this.tableName, data, this) : null;
+  }
+
   async countDocuments(filter = {}) {
     if (MISSING_TABLES.has(this.tableName)) {
       const fallbackData = readFallbackData(this.tableName);
@@ -1838,7 +1899,8 @@ const mockMongoose = {
     else if (modelName === "QuizAttempt") tableName = "quiz_attempts";
     else if (modelName === "TestResult") tableName = "test_marks";
     else if (modelName === "UptimeEvent") tableName = "uptime_events";
-    else if (modelName === "SystemMetric" || modelName === "SystemSetting") tableName = "system_metrics";
+    else if (modelName === "SystemMetric") tableName = "system_metrics";
+    else if (modelName === "SystemSetting") tableName = "system_settings";
     else if (modelName === "Notice") tableName = "notices";
     else if (modelName === "SystemLog") tableName = "system_logs";
     else if (modelName === "Lead") tableName = "leads";
