@@ -76,13 +76,19 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({
-      $or: [
-        { email: normalizedIdentifier },
-        { phone: normalizedIdentifier },
-        ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }] : [])
-      ]
-    });
+    let user = null;
+    try {
+      user = await User.findOne({
+        $or: [
+          { email: normalizedIdentifier },
+          { phone: normalizedIdentifier },
+          ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }] : [])
+        ]
+      });
+    } catch (err) {
+      console.warn("User lookup $or query warning, falling back to email query:", err.message);
+      user = await User.findOne({ email: normalizedIdentifier });
+    }
 
     if (!user) {
       return res.status(401).json({ message: "Invalid email/phone or password" });

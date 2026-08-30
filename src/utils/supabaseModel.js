@@ -838,10 +838,21 @@ class SupabaseQuery {
             if (badCol.includes(".")) {
               badCol = badCol.split(".")[1];
             }
-            const filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
+            let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
               console.warn(`Stripping missing filter column "${filterKey}" from ${tableName} findOne query.`);
               delete currentFilter[filterKey];
+              attempt++;
+              continue;
+            }
+            if (currentFilter.$or && Array.isArray(currentFilter.$or)) {
+              console.warn(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
+              currentFilter.$or = currentFilter.$or.filter(item => {
+                return !Object.keys(item).some(k => camelToSnake(k) === badCol);
+              });
+              if (currentFilter.$or.length === 0) {
+                delete currentFilter.$or;
+              }
               attempt++;
               continue;
             }
@@ -888,10 +899,21 @@ class SupabaseQuery {
             if (badCol.includes(".")) {
               badCol = badCol.split(".")[1];
             }
-            const filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
+            let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
               console.warn(`Stripping missing filter column "${filterKey}" from ${tableName} find query.`);
               delete currentFilter[filterKey];
+              attempt++;
+              continue;
+            }
+            if (currentFilter.$or && Array.isArray(currentFilter.$or)) {
+              console.warn(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
+              currentFilter.$or = currentFilter.$or.filter(item => {
+                return !Object.keys(item).some(k => camelToSnake(k) === badCol);
+              });
+              if (currentFilter.$or.length === 0) {
+                delete currentFilter.$or;
+              }
               attempt++;
               continue;
             }
