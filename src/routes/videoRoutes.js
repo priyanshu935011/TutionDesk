@@ -13,6 +13,7 @@ import {
   getVideoWatchAnalytics,
   getSuperAdminVideoStats,
   getInstituteVideoStatsSuperAdmin,
+  getStudentVideos,
 } from "../controllers/videoController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -36,7 +37,8 @@ router.put("/teacher/:id", updateVideoLecture);
 router.delete("/teacher/:id", deleteVideoLecture);
 router.get("/teacher/:id/analytics", getVideoWatchAnalytics);
 
-// Student Watch Log Endpoint
+// Student Watch Log & Video Feed Endpoint
+router.get("/student", getStudentVideos);
 router.post("/student/progress", recordStudentWatchProgress);
 
 export default router;

@@ -452,11 +452,13 @@ export const updateVideoLecture = async (req, res) => {
       expiryType,
       expiryDate,
       presetExpiry,
+      thumbnailUrl,
     } = req.body;
 
     if (title !== undefined) video.title = title.trim();
     if (description !== undefined) video.description = description.trim();
     if (targetType !== undefined) video.targetType = targetType;
+    if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : "";
     if (Array.isArray(batchIds)) video.batches = batchIds.filter(Boolean);
     if (Array.isArray(studentIds)) video.students = studentIds.filter(Boolean);
 
@@ -828,5 +830,56 @@ export const getInstituteVideoStatsSuperAdmin = async (req, res) => {
   } catch (error) {
     console.error("getInstituteVideoStatsSuperAdmin error:", error);
     return res.status(500).json({ message: "Could not fetch institute video stats" });
+  }
+};
+
+export const getStudentVideos = async (req, res) => {
+  try {
+    const student = req.user;
+    const instituteId = student.institute?._id || student.institute || student.user;
+    const studentId = String(student._id || student.id || "");
+    const studentBatchId = student.batch?._id ? String(student.batch._id) : String(student.batch || "");
+
+    const now = new Date();
+    const videos = await VideoLecture.find({ institute: instituteId }).sort({ createdAt: -1 });
+
+    const visibleVideos = videos.filter((v) => {
+      // 1. Expiry check: Hide if expired
+      if (v.expiryDate && new Date(v.expiryDate).getTime() < now.getTime()) {
+        return false;
+      }
+
+      // 2. Target audience check:
+      if (v.targetType === "all" || !v.targetType) {
+        return true;
+      }
+
+      if (v.targetType === "batch") {
+        if (Array.isArray(v.batches) && v.batches.length > 0) {
+          const bStrs = v.batches.map((b) => String(b._id || b));
+          if (studentBatchId && bStrs.includes(studentBatchId)) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      if (v.targetType === "student") {
+        if (Array.isArray(v.students) && v.students.length > 0) {
+          const sStrs = v.students.map((s) => String(s._id || s));
+          if (studentId && sStrs.includes(studentId)) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      return true;
+    });
+
+    return res.json({ videos: visibleVideos });
+  } catch (error) {
+    console.error("getStudentVideos error:", error);
+    return res.status(500).json({ message: "Could not fetch student video lectures" });
   }
 };
