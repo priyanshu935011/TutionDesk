@@ -1,4 +1,5 @@
 import axios from "axios";
+import mongoose from "mongoose";
 import VideoLecture from "../models/VideoLecture.js";
 import VideoWatchLog from "../models/VideoWatchLog.js";
 import Institute from "../models/Institute.js";
@@ -555,21 +556,29 @@ export const recordStudentWatchProgress = async (req, res) => {
       return res.status(400).json({ message: "Video ID is required" });
     }
 
-    const video = await VideoLecture.findById(videoId);
+    let video;
+    if (mongoose.Types.ObjectId.isValid(videoId)) {
+      video = await VideoLecture.findById(videoId);
+    }
+    if (!video) {
+      video = await VideoLecture.findOne({ bunnyVideoId: String(videoId) });
+    }
+
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
 
+    const userId = student._id || student.id;
     const duration = Number(totalDurationSeconds || video.durationSeconds || 1);
     const watched = Math.min(duration, Number(watchTimeSeconds || 0));
     const percentage = duration > 0 ? Math.min(100, Math.round((watched / duration) * 100)) : 0;
 
-    let log = await VideoWatchLog.findOne({ video: videoId, student: student._id });
+    let log = await VideoWatchLog.findOne({ video: video._id, student: userId });
 
     if (!log) {
       log = new VideoWatchLog({
-        video: videoId,
-        student: student._id,
+        video: video._id,
+        student: userId,
         institute: video.institute,
         batch: student.batch || null,
         watchTimeSeconds: watched,
