@@ -1,4 +1,8 @@
 const staffMiddleware = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Not authorized" });
+  }
+
   const staffRoles = [
     "super_admin",
     "tech_admin",
@@ -6,13 +10,17 @@ const staffMiddleware = (req, res, next) => {
     "sales_person",
     "marketing_admin",
     "marketing_person",
+    "admin",
+    "teacher",
+    "institute_admin",
+    "owner",
   ];
 
-  if (!req.user || !staffRoles.includes(req.user.role)) {
-    return res.status(403).json({ message: "Access denied. Staff clearance required." });
+  if (staffRoles.includes(req.user.role) || req.user.isAdmin || req.user.institute) {
+    return next();
   }
 
-  next();
+  return res.status(403).json({ message: "Access denied. Staff clearance required." });
 };
 
 export default staffMiddleware;

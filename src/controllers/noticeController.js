@@ -192,7 +192,20 @@ export const getNotices = async (req, res) => {
       ].filter(Boolean)
     };
 
-    const notices = await Notice.find(queryFilter).sort({ createdAt: -1 });
+    const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+    const isEnabled = noticeSetting?.value?.enabled !== false;
+    const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
+    const cutoffTime = (isEnabled && expiryDays > 0) ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
+
+    let notices = await Notice.find(queryFilter).sort({ createdAt: -1 });
+    if (cutoffTime > 0) {
+      notices = notices.filter((n) => {
+        if (!n.createdAt) return true;
+        const t = new Date(n.createdAt).getTime();
+        return isNaN(t) || t >= cutoffTime;
+      });
+    }
+
     return res.json(notices);
   } catch (error) {
     console.error("getNotices error:", error);
@@ -217,13 +230,14 @@ export const getStudentNotices = async (req, res) => {
     }
 
     const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
+    const isEnabled = noticeSetting?.value?.enabled !== false;
     const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
+    const cutoffTime = (isEnabled && expiryDays > 0) ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
 
     const allNotices = await Notice.find({}).sort({ createdAt: -1 });
 
     const instIdStr = String(instituteId);
     const batchIdStr = String(studentBatchId || "");
-    const cutoffTime = expiryDays > 0 ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
 
     const relevantNotices = allNotices.filter((n) => {
       const nInst = String(n.institute || n.user || n.institute_id || n.instituteId || "");
