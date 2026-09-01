@@ -6,6 +6,7 @@ import {
   getQuizLeaderboard,
   getStudentNotifications,
   markNotificationRead,
+  updateStudentFcmToken,
 } from "../controllers/studentController.js";
 import {
   changeStudentPassword,
@@ -24,6 +25,7 @@ router.get("/dashboard", getStudentPortalData);
 router.get("/notes/:id/download", downloadStudentNote);
 router.get("/notifications", getStudentNotifications);
 router.put("/notifications/:id/read", markNotificationRead);
+router.post("/fcm-token", updateStudentFcmToken);
 router.post("/change-password", changeStudentPassword);
 router.post("/switch-profile", switchProfile);
 router.put("/profile", updateStudentProfile);

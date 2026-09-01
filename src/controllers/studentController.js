@@ -2061,4 +2061,29 @@ export const markNotificationRead = async (req, res) => {
   }
 };
 
+export const updateStudentFcmToken = async (req, res) => {
+  try {
+    const studentId = req.student._id;
+    const { fcmToken } = req.body;
+    if (!fcmToken) {
+      return res.status(400).json({ message: "fcmToken is required" });
+    }
+
+    const { supabase: sb } = await import("../utils/supabase.js");
+    try {
+      await sb
+        .from("students")
+        .update({ fcm_token: String(fcmToken).trim() })
+        .eq("id", String(studentId));
+    } catch (_) {}
+
+    await Student.findByIdAndUpdate(studentId, { fcmToken: String(fcmToken).trim() });
+
+    return res.json({ message: "FCM token registered successfully!" });
+  } catch (error) {
+    console.error("updateStudentFcmToken error:", error);
+    return res.status(500).json({ message: "Could not register FCM token" });
+  }
+};
+
 

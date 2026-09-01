@@ -31,6 +31,8 @@ import {
   sendWhatsAppTestMessage,
   getMetaWhatsAppSettings,
   updateMetaWhatsAppSettings,
+  getFcmSettings,
+  updateFcmSettings,
   getStaff,
   createStaff,
   updateStaff,
@@ -82,6 +84,9 @@ router.post("/whatsapp-send-test", sendWhatsAppTestMessage);
 
 router.get("/whatsapp-settings", getMetaWhatsAppSettings);
 router.put("/whatsapp-settings", updateMetaWhatsAppSettings);
+
+router.get("/fcm-settings", getFcmSettings);
+router.put("/fcm-settings", updateFcmSettings);
 
 router.get("/demo-accounts", getDemoAccounts);
 router.post("/demo-accounts", createDemoAccount);

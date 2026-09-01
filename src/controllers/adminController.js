@@ -1894,3 +1894,55 @@ export const updateGlobalWalletSettings = async (req, res) => {
     return res.status(500).json({ message: "Could not update global wallet settings" });
   }
 };
+
+export const getFcmSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "fcm_settings" });
+    const settings = setting?.value || {
+      projectId: "",
+      clientEmail: "",
+      privateKey: "",
+      serverKey: "",
+      enabled: true,
+    };
+    return res.json(settings);
+  } catch (error) {
+    console.error("getFcmSettings error:", error);
+    return res.status(500).json({ message: "Could not fetch FCM settings" });
+  }
+};
+
+export const updateFcmSettings = async (req, res) => {
+  try {
+    const { projectId, clientEmail, privateKey, serverKey, enabled } = req.body;
+    let setting = await SystemSetting.findOne({ key: "fcm_settings" });
+    const updatedValue = {
+      projectId: projectId ? String(projectId).trim() : "",
+      clientEmail: clientEmail ? String(clientEmail).trim() : "",
+      privateKey: privateKey ? String(privateKey).trim() : "",
+      serverKey: serverKey ? String(serverKey).trim() : "",
+      enabled: enabled !== false,
+    };
+
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "fcm_settings",
+        value: updatedValue,
+      });
+    }
+
+    return res.json({
+      message: "FCM Push Notification settings updated successfully!",
+      settings: setting.value,
+    });
+  } catch (error) {
+    console.error("updateFcmSettings error:", error);
+    return res.status(500).json({ message: "Could not update FCM settings" });
+  }
+};

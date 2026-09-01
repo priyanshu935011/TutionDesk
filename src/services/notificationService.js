@@ -68,6 +68,39 @@ export const sendStudentNotification = async ({
         console.error("Mongo notifications fallback error:", mErr.message);
       }
     }
+
+    // Fetch FCM Tokens for target students & send Push Notification to device status bar
+    try {
+      const Student = (await import("../models/Student.js")).default;
+      const { sendFcmPushNotification } = await import("./fcmService.js");
+
+      let fcmTokens = [];
+      try {
+        const { data: stRows } = await sb
+          .from("students")
+          .select("fcm_token")
+          .in("id", validTargets);
+        if (stRows && stRows.length > 0) {
+          fcmTokens = stRows.map((r) => r.fcm_token).filter(Boolean);
+        }
+      } catch (_) {}
+
+      if (fcmTokens.length === 0) {
+        const mongoStudents = await Student.find({ _id: { $in: validTargets } }).select("fcmToken");
+        fcmTokens = mongoStudents.map((s) => s.fcmToken).filter(Boolean);
+      }
+
+      if (fcmTokens.length > 0) {
+        await sendFcmPushNotification({
+          fcmTokens,
+          title: title.trim(),
+          body: message.trim(),
+          data: { type, ...data },
+        });
+      }
+    } catch (fcmErr) {
+      console.error("FCM dispatch error in notificationService:", fcmErr.message);
+    }
   } catch (err) {
     console.error("sendStudentNotification error:", err.message);
   }
