@@ -450,6 +450,13 @@ class SupabaseDocument {
         // Fallback: if no batches in metadata, default to [batch_id]
         this.batches = this.batch ? [this.batch] : [];
       }
+      if (meta.totalFees !== undefined) this.totalFees = meta.totalFees;
+      if (meta.paidAmount !== undefined) this.paidAmount = meta.paidAmount;
+      if (meta.pendingAmount !== undefined) this.pendingAmount = meta.pendingAmount;
+      if (meta.feePlanType !== undefined) this.feePlanType = meta.feePlanType;
+      if (meta.dueDate !== undefined) this.dueDate = meta.dueDate;
+      if (meta.paymentHistory !== undefined) this.paymentHistory = meta.paymentHistory;
+      if (meta.profilePicture !== undefined) this.profilePicture = meta.profilePicture;
     }
 
     if (tableName === "batches" && this._id) {
@@ -596,7 +603,13 @@ class SupabaseDocument {
           ...(metadata[this._id] || {}),
           customFields: this.customFields ?? metadata[this._id]?.customFields ?? {},
           batches: this.batches ?? metadata[this._id]?.batches ?? [],
-          profilePicture: this.profilePicture ?? metadata[this._id]?.profilePicture ?? ""
+          profilePicture: this.profilePicture ?? metadata[this._id]?.profilePicture ?? "",
+          totalFees: this.totalFees ?? metadata[this._id]?.totalFees ?? 0,
+          paidAmount: this.paidAmount ?? metadata[this._id]?.paidAmount ?? 0,
+          pendingAmount: this.pendingAmount ?? metadata[this._id]?.pendingAmount ?? 0,
+          feePlanType: this.feePlanType ?? metadata[this._id]?.feePlanType ?? "monthly",
+          dueDate: this.dueDate ?? metadata[this._id]?.dueDate ?? "",
+          paymentHistory: this.paymentHistory ?? metadata[this._id]?.paymentHistory ?? []
         };
         writeStudentMetadata(metadata);
       }
@@ -1463,7 +1476,14 @@ class SupabaseModel {
     if (this.tableName === "students" && data) {
       const metadata = readStudentMetadata();
       metadata[data.id] = {
-        customFields: doc.customFields ?? {}
+        customFields: doc.customFields ?? {},
+        batches: doc.batches ?? (doc.batch ? [doc.batch] : []),
+        totalFees: doc.totalFees ?? 0,
+        paidAmount: doc.paidAmount ?? 0,
+        pendingAmount: doc.pendingAmount ?? 0,
+        feePlanType: doc.feePlanType ?? "monthly",
+        dueDate: doc.dueDate ?? "",
+        paymentHistory: doc.paymentHistory ?? []
       };
       writeStudentMetadata(metadata);
     }
