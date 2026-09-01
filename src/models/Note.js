@@ -55,7 +55,7 @@ const noteSchema = new mongoose.Schema(
     },
     fileSizeBytes: {
       type: Number,
-      default: 1572864,
+      default: 0,
     },
   },
   { timestamps: true }

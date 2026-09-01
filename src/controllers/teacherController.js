@@ -561,7 +561,7 @@ export const getNotes = async (req, res) => {
       pdfUrl: row.file_url,
       pdfPublicId: row.pdf_public_id,
       targetType: row.target_type || "batch",
-      fileSizeBytes: row.file_size_bytes || row.file_size || 1572864,
+      fileSizeBytes: row.file_size_bytes || row.file_size || row.fileSizeBytes || 0,
       batch: row.batch_id
         ? { _id: row.batch_id, name: batchMap[row.batch_id] || row.batch_id }
         : null,
@@ -741,7 +741,7 @@ export const uploadNote = async (req, res) => {
       student_ids: targetType === "student" ? resolvedStudentIds : [],
       category: noteCategory,
       type: noteCategory,
-      file_size_bytes: req.file?.size || req.file?.buffer?.length || 1572864,
+      file_size_bytes: req.file?.size || req.file?.buffer?.length || Number(req.body.fileSizeBytes) || Number(req.body.fileSize) || 0,
     };
 
     const { data: noteData, error: noteError } = await sb
