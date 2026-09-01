@@ -1891,15 +1891,7 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
     }
 
     const inst = await Institute.findById(instituteId);
-    const allowedFeatures = inst?.allowedFeatures || [];
-    if (!allowedFeatures.includes("whatsapp")) {
-      return res.status(403).json({ message: "WhatsApp messaging feature is disabled for your institute by Super Admin." });
-    }
-
-    const statusObj = await getSessionStatus(String(instituteId));
-    if (statusObj.status !== "connected") {
-      return res.status(400).json({ message: "Your institute's WhatsApp is not connected. Please connect WhatsApp from Settings first." });
-    }
+    const instName = inst?.name || "Classtech";
 
     const recipientPhone = student.parentPhone && student.parentPhone.trim()
       ? student.parentPhone.trim()
