@@ -54,8 +54,12 @@ export const sendMessage = async (instituteId, to, text, msgType = "custom", tem
   let inst = null;
   let charge = 0.10;
 
-  if (instituteId !== "admin_test") {
-    inst = await Institute.findById(instituteId).catch(() => null);
+  if (instituteId !== "admin_test" && instituteId) {
+    try {
+      inst = await Institute.findById(instituteId);
+    } catch (e) {
+      inst = null;
+    }
     charge = inst?.perMessageCharge ?? 0.10;
   }
 
@@ -222,8 +226,12 @@ export const sendTemplateMessage = async (instituteId, to, templateName, paramet
   let inst = null;
   let charge = 0.10;
 
-  if (instituteId !== "admin_test") {
-    inst = await Institute.findById(instituteId).catch(() => null);
+  if (instituteId !== "admin_test" && instituteId) {
+    try {
+      inst = await Institute.findById(instituteId);
+    } catch (e) {
+      inst = null;
+    }
     charge = inst?.perMessageCharge ?? 0.10;
   }
 
