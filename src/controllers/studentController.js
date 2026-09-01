@@ -157,22 +157,8 @@ export const getStudents = async (req, res) => {
       })
     );
 
-    let result = students;
-    if (req.user.role === "teacher") {
-      result = students.map((s) => {
-        const obj = s.toJSON();
-        delete obj.totalFees;
-        delete obj.feePlanType;
-        delete obj.paymentHistory;
-        delete obj.paidAmount;
-        delete obj.pendingAmount;
-        delete obj.dueDate;
-        return obj;
-      });
-    }
-
-    await setCache(cacheKey, result, 86400);
-    return res.json(result);
+    await setCache(cacheKey, students, 86400);
+    return res.json(students);
   } catch (error) {
     console.error("getStudents catch block error:", error);
     return res.status(500).json({ message: "Could not fetch students" });
@@ -181,13 +167,15 @@ export const getStudents = async (req, res) => {
 
 export const getStudentById = async (req, res) => {
   try {
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
+      : req.user._id;
     const query = { _id: req.params.id, user: ownerId };
 
     if (req.user.role === "teacher") {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const batchIds = myBatches.map((b) => b._id);
-      query.batch = { $in: batchIds };
+      query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }];
     }
 
     const student = await populateStudent(
@@ -208,16 +196,6 @@ export const getStudentById = async (req, res) => {
 
     const obj = student.toJSON();
     obj.enrolledBatchIds = enrolledBatchIds;
-
-    if (req.user.role === "teacher") {
-      delete obj.totalFees;
-      delete obj.feePlanType;
-      delete obj.paymentHistory;
-      delete obj.paidAmount;
-      delete obj.pendingAmount;
-      delete obj.dueDate;
-      return res.json(obj);
-    }
 
     return res.json(obj);
   } catch (error) {
@@ -486,7 +464,12 @@ export const updateStudent = async (req, res) => {
     if (req.user.role === "teacher") {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const myBatchIds = myBatches.map(b => String(b._id));
-      if (!myBatchIds.includes(String(student.batch))) {
+      const studentBatchIds = (student.batches && student.batches.length > 0)
+        ? student.batches.map(b => (b?._id || b?.id || b).toString())
+        : (student.batch ? [(student.batch?._id || student.batch?.id || student.batch).toString()] : []);
+      
+      const hasMatch = studentBatchIds.some(bId => myBatchIds.includes(bId));
+      if (myBatchIds.length > 0 && !hasMatch) {
         return res.status(403).json({ message: "Access denied. You can only modify students in your assigned batches." });
       }
     }
