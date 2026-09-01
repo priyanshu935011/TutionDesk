@@ -9,6 +9,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { supabase } from "../utils/supabaseModel.js";
 import cloudinary from "../utils/cloudinary.js";
+import { sendStudentNotification } from "../services/notificationService.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -299,6 +300,24 @@ export const createVideoLecture = async (req, res) => {
     // Update institute used storage
     institute.usedVideoStorageBytes = currentUsed + Number(fileSizeBytes || addedBytes || 0);
     await institute.save();
+
+    try {
+      let targetStudentIds = Array.isArray(studentIds) ? studentIds.filter(Boolean) : [];
+      if (targetType === "batch") {
+        const bIds = Array.isArray(batchIds) ? batchIds.filter(Boolean) : [];
+        const bQuery = bIds.length > 0 ? { batch: { $in: bIds } } : {};
+        const bStudents = await Student.find(bQuery).select("_id");
+        targetStudentIds = bStudents.map((s) => s._id);
+      }
+      sendStudentNotification({
+        studentIds: targetStudentIds,
+        instituteId,
+        title: "New Video Lecture",
+        message: `New video lecture available: ${title.trim()}.`,
+        type: "video",
+        data: { videoId: video._id, title: title.trim() },
+      });
+    } catch (nErr) {}
 
     await clearCachePattern("*");
 

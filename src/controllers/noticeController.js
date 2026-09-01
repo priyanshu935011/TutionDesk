@@ -5,6 +5,7 @@ import Institute from "../models/Institute.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
 import { getCache, setCache, clearCachePattern } from "../utils/cache.js";
+import { sendStudentNotification } from "../services/notificationService.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -53,6 +54,24 @@ export const createNotice = async (req, res) => {
       sendWhatsApp: Boolean(sendWhatsApp),
       createdBy: req.user._id,
     });
+
+    try {
+      let bQuery = { user: instituteId };
+      if (targetType === "batch" && Array.isArray(batchIds) && batchIds.length > 0) {
+        bQuery.batch = { $in: batchIds };
+      }
+      const targetStudents = await Student.find(bQuery).select("_id");
+      const stIds = targetStudents.map((s) => s._id);
+
+      sendStudentNotification({
+        studentIds: stIds,
+        instituteId,
+        title: "New Notice",
+        message: `${title}: ${content || "Check notice board for details."}`,
+        type: "notice",
+        data: { noticeId: notice._id, noticeType },
+      });
+    } catch (nErr) {}
 
     // Invalidate L1 Cache
     await clearCachePattern("teacher:*");

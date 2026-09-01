@@ -4,6 +4,8 @@ import {
   downloadStudentNote,
   getStudentPortalData,
   getQuizLeaderboard,
+  getStudentNotifications,
+  markNotificationRead,
 } from "../controllers/studentController.js";
 import {
   changeStudentPassword,
@@ -20,6 +22,8 @@ router.use(protectStudent);
 
 router.get("/dashboard", getStudentPortalData);
 router.get("/notes/:id/download", downloadStudentNote);
+router.get("/notifications", getStudentNotifications);
+router.put("/notifications/:id/read", markNotificationRead);
 router.post("/change-password", changeStudentPassword);
 router.post("/switch-profile", switchProfile);
 router.put("/profile", updateStudentProfile);

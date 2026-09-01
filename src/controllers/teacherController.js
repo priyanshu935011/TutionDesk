@@ -14,6 +14,7 @@ import {
   streamRemoteFileAsAttachment,
 } from "../utils/noteDownload.js";
 import { supabase, supabaseBucket } from "../utils/supabase.js";
+import { sendStudentNotification } from "../services/notificationService.js";
 
 import {
   forceStopLiveQuiz,
@@ -781,6 +782,23 @@ export const uploadNote = async (req, res) => {
       });
     }
 
+    try {
+      let targetStudentIds = resolvedStudentIds;
+      if (targetType !== "student") {
+        const sQuery = batchId ? { batch: batchId } : {};
+        const batchStudents = await Student.find(sQuery).select("_id");
+        targetStudentIds = batchStudents.map((s) => s._id);
+      }
+      sendStudentNotification({
+        studentIds: targetStudentIds,
+        instituteId,
+        title: "New Study Material",
+        message: `New study material uploaded: ${title.trim()}.`,
+        type: "notes",
+        data: { title: title.trim() },
+      });
+    } catch (nErr) {}
+
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
@@ -1097,6 +1115,23 @@ export const createTestResultsBulk = async (req, res) => {
         }
       });
     }
+
+    try {
+      const totalNum = Number(totalMarks || 100);
+      for (const entry of entries) {
+        if (!entry.studentId) continue;
+        const scoreNum = Number(entry.score || 0);
+        const percentage = totalNum > 0 ? Math.round((scoreNum / totalNum) * 100) : 0;
+        sendStudentNotification({
+          studentIds: [entry.studentId],
+          instituteId,
+          title: "New Test Result",
+          message: `Your score for ${formattedTestTitle}: ${scoreNum}/${totalNum} (${percentage}%).`,
+          type: "marks",
+          data: { title: formattedTestTitle, score: scoreNum, totalMarks: totalNum, percentage },
+        });
+      }
+    } catch (nErr) {}
 
     return res.status(201).json(populatedResults);
   } catch (error) {

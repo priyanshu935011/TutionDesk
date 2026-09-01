@@ -15,6 +15,8 @@ import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cac
 import { sendMessage, sendDocument, sendTemplateMessage, getSessionStatus } from "../services/whatsappService.js";
 import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
+import Notification from "../models/Notification.js";
+import { sendStudentNotification } from "../services/notificationService.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -714,6 +716,18 @@ export const addPayment = async (req, res) => {
 
     await student.save();
 
+    try {
+      const remaining = Math.max(0, Number(student.totalFees || 0) - (student.paidAmount || 0));
+      sendStudentNotification({
+        studentIds: [student._id],
+        instituteId: req.user.institute?._id || req.user.institute,
+        title: "Fee Payment Received",
+        message: `Payment of ₹${amount} received. Remaining balance: ₹${remaining}.`,
+        type: "fee_paid",
+        data: { amount, remaining },
+      });
+    } catch (nErr) {}
+
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
     try {
@@ -768,6 +782,18 @@ export const markAttendance = async (req, res) => {
     }
 
     await student.save();
+
+    try {
+      const formattedStatus = status === "present" ? "Present" : "Absent";
+      sendStudentNotification({
+        studentIds: [student._id],
+        instituteId,
+        title: status === "present" ? "Attendance Marked" : "Attendance Alert",
+        message: `Your attendance for ${targetDay} has been marked as ${formattedStatus}.`,
+        type: "attendance",
+        data: { status, date: targetDay },
+      });
+    } catch (nErr) {}
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
 
@@ -926,6 +952,15 @@ export const markBatchAttendance = async (req, res) => {
 
       try {
         await student.save();
+        const formattedStatus = newStatus === "present" ? "Present" : "Absent";
+        sendStudentNotification({
+          studentIds: [student._id],
+          instituteId,
+          title: newStatus === "present" ? "Attendance Marked" : "Attendance Alert",
+          message: `Your attendance for ${targetDateStr} has been marked as ${formattedStatus}.`,
+          type: "attendance",
+          data: { status: newStatus, date: targetDateStr },
+        });
       } catch (sErr) {}
     }
 
@@ -1906,18 +1941,109 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
 
     const dueDate = student.dueDate ? formatDate(student.dueDate) : "-";
 
-    await sendTemplateMessage(String(instituteId), recipientPhone, "fee_reminder", [
-      (student.parentName && student.parentName.trim()) ? student.parentName.trim() : student.name,
-      pendingAmount.toString(),
-      student.name,
-      dueDate,
-      inst.name || "Classtech"
-    ]);
+    try {
+      await sendTemplateMessage(String(instituteId), recipientPhone, "fee_reminder", [
+        (student.parentName && student.parentName.trim()) ? student.parentName.trim() : student.name,
+        pendingAmount.toString(),
+        student.name,
+        dueDate,
+        inst.name || "Classtech"
+      ]);
+    } catch (wErr) {
+      console.error("WhatsApp fee reminder send failed, triggering in-app notification:", wErr.message);
+    }
+
+    try {
+      sendStudentNotification({
+        studentIds: [student._id],
+        instituteId,
+        title: "Fee Payment Reminder",
+        message: `Fee Reminder: Pending dues of ₹${pendingAmount}. Please pay at your earliest convenience.`,
+        type: "fee_reminder",
+        data: { pendingAmount, dueDate },
+      });
+    } catch (nErr) {}
 
     return res.json({ message: "Fee reminder sent via WhatsApp successfully!" });
   } catch (error) {
     console.error("sendFeeReminderWhatsApp error:", error);
     return res.status(500).json({ message: error.message || "Failed to send fee reminder" });
+  }
+};
+
+export const getStudentNotifications = async (req, res) => {
+  try {
+    const studentId = req.student._id;
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    const { data: rows, error } = await sb
+      .from("notifications")
+      .select("*")
+      .eq("student_id", String(studentId))
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    let notifications = [];
+    if (!error && rows) {
+      notifications = rows.map((r) => ({
+        id: r.id,
+        _id: r.id,
+        title: r.title,
+        message: r.message,
+        type: r.type || "general",
+        data: r.data ? (typeof r.data === "string" ? JSON.parse(r.data) : r.data) : {},
+        isRead: r.is_read || false,
+        createdAt: r.created_at,
+      }));
+    } else {
+      const docs = await Notification.find({ student: studentId })
+        .sort({ createdAt: -1 })
+        .limit(50);
+      notifications = docs.map((d) => ({
+        id: d._id,
+        _id: d._id,
+        title: d.title,
+        message: d.message,
+        type: d.type,
+        data: d.data,
+        isRead: d.isRead,
+        createdAt: d.createdAt,
+      }));
+    }
+
+    const unreadCount = notifications.filter((n) => !n.isRead).length;
+    return res.json({ notifications, unreadCount });
+  } catch (error) {
+    console.error("getStudentNotifications error:", error.message);
+    return res.status(500).json({ message: "Could not fetch notifications" });
+  }
+};
+
+export const markNotificationRead = async (req, res) => {
+  try {
+    const studentId = req.student._id;
+    const notificationId = req.params.id;
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    if (notificationId === "read-all") {
+      await sb
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("student_id", String(studentId));
+      await Notification.updateMany({ student: studentId }, { isRead: true });
+    } else {
+      await sb
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("id", notificationId)
+        .eq("student_id", String(studentId));
+      await Notification.updateOne({ _id: notificationId, student: studentId }, { isRead: true });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("markNotificationRead error:", error.message);
+    return res.status(500).json({ message: "Could not update notification" });
   }
 };
 
