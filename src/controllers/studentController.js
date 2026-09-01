@@ -477,73 +477,12 @@ export const updateStudent = async (req, res) => {
   try {
     const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
 
-    const {
-      name,
-      phone,
-      parentName,
-      parentPhone,
-      email,
-      address,
-      batch,
-      batches = [],
-      joinedOn,
-      totalFees,
-      feePlanType,
-      dueDate,
-      paymentHistory = [],
-      attendanceRecords = [],
-      customFields,
-    } = req.body;
-
-    const targetBatches = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
-
-    if (
-      !name ||
-      !phone ||
-      !parentName ||
-      targetBatches.length === 0 ||
-      !joinedOn ||
-      totalFees === undefined ||
-      !feePlanType
-    ) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
-    const total = Number(totalFees);
-    const amountError = validatePayments(total, paymentHistory);
-    const attendanceError = validateAttendance(attendanceRecords);
-
-    if (amountError) {
-      return res.status(400).json({ message: amountError });
-    }
-
-    if (attendanceError) {
-      return res.status(400).json({ message: attendanceError });
-    }
-
-    if (!allowedFeeTypes.includes(feePlanType)) {
-      return res.status(400).json({ message: "Invalid fee plan type" });
-    }
-
-    if (feePlanType === "partial" && !dueDate) {
-      return res.status(400).json({ message: "Due date is required for partial fee plan" });
-    }
-
-    // Verify all target batches exist
-    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
-    if (verifiedBatches.length !== targetBatches.length) {
-      return res.status(400).json({ message: "One or more selected batches do not exist" });
-    }
-
     const student = await Student.findById(req.params.id);
-
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    const studentUser = student.user;
-
-    // If teacher, verify they own at least one of the student's current batches
+    // Teacher ownership check
     if (req.user.role === "teacher") {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const myBatchIds = myBatches.map(b => String(b._id));
@@ -552,11 +491,80 @@ export const updateStudent = async (req, res) => {
       }
     }
 
-    const primaryBatch = targetBatches[0];
-    const newEmail = email ? email.toLowerCase() : "";
+    const extractBatchId = (b) => {
+      if (!b) return null;
+      if (typeof b === "object") {
+        return (b._id || b.id || b.value || "").toString().trim() || null;
+      }
+      return String(b).trim() || null;
+    };
 
-    const inst = await Institute.findById(studentUser) || await Institute.findById(ownerId);
-    const customFieldsObj = customFields || {};
+    const {
+      name = student.name,
+      phone = student.phone,
+      parentName = student.parentName || "Parent",
+      parentPhone = student.parentPhone || "",
+      email = student.email || "",
+      address = student.address || "",
+      batch,
+      batches,
+      joinedOn = student.joinedOn || student.createdAt,
+      totalFees = student.totalFees,
+      feePlanType = student.feePlanType || "monthly",
+      dueDate = student.dueDate,
+      paymentHistory,
+      attendanceRecords,
+      customFields,
+    } = req.body;
+
+    const rawBatches = Array.isArray(batches) && batches.length > 0 
+      ? batches 
+      : (batch ? [batch] : (student.batches?.length ? student.batches : [student.batch]));
+    
+    const targetBatches = rawBatches.map(extractBatchId).filter(Boolean);
+
+    if (targetBatches.length === 0) {
+      return res.status(400).json({ message: "At least one batch must be assigned" });
+    }
+
+    const total = Number(totalFees !== undefined ? totalFees : student.totalFees);
+    const finalPaymentHistory = paymentHistory !== undefined 
+      ? paymentHistory 
+      : (student.paymentHistory || []);
+
+    const amountError = validatePayments(total, finalPaymentHistory);
+    if (amountError) {
+      return res.status(400).json({ message: amountError });
+    }
+
+    if (attendanceRecords !== undefined) {
+      const attendanceError = validateAttendance(attendanceRecords);
+      if (attendanceError) {
+        return res.status(400).json({ message: attendanceError });
+      }
+    }
+
+    if (!allowedFeeTypes.includes(feePlanType)) {
+      return res.status(400).json({ message: "Invalid fee plan type" });
+    }
+
+    // Verify target batches exist
+    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
+    if (verifiedBatches.length !== targetBatches.length) {
+      // Fallback: filter to verified batches only if some match
+      if (verifiedBatches.length > 0) {
+        targetBatches.length = 0;
+        targetBatches.push(...verifiedBatches.map(b => String(b._id)));
+      } else {
+        return res.status(400).json({ message: "Selected batch does not exist" });
+      }
+    }
+
+    const primaryBatch = targetBatches[0];
+    const newEmail = email ? email.toLowerCase().trim() : "";
+
+    const inst = await Institute.findById(student.user) || await Institute.findById(ownerId);
+    const customFieldsObj = customFields || student.customFields || {};
     const customFieldConfigs = inst?.studentCustomFields || [];
     for (const field of customFieldConfigs) {
       if (req.body[field.name] !== undefined) {
@@ -575,23 +583,30 @@ export const updateStudent = async (req, res) => {
     student.joinedOn = joinedOn;
     student.feePlanType = feePlanType;
     student.totalFees = total;
-    student.paymentHistory = paymentHistory.map(p => ({
+    student.paymentHistory = finalPaymentHistory.map(p => ({
       _id: p._id || crypto.randomUUID(),
-      amount: Number(p.amount),
-      paymentDate: p.paymentDate,
-      paymentType: p.paymentType,
+      amount: Number(p.amount || 0),
+      paymentDate: p.paymentDate || new Date().toISOString(),
+      paymentType: p.paymentType || "monthly",
       note: p.note || ""
     }));
+    
+    // Recalculate paid & pending amount
+    student.paidAmount = student.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    student.pendingAmount = Math.max(0, student.totalFees - student.paidAmount);
+
     student.dueDate = resolveDueDate({ feePlanType, joinedOn, dueDate });
     student.customFields = customFieldsObj;
 
     await student.save();
 
-    if (student.enrollmentNumber) {
-      await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
-    }
-    await clearCachePattern("teacher:dashboard:*");
-    await clearCachePattern("teacher:students:*");
+    try {
+      if (student.enrollmentNumber) {
+        await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+      }
+      await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
+    } catch (_) {}
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
     return res.json(populatedStudent);
