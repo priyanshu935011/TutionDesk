@@ -1,7 +1,7 @@
 import Notification from "../models/Notification.js";
 
 /**
- * Creates and dispatches notifications for students.
+ * Creates and dispatches notifications for students without duplication.
  * @param {Object} params
  * @param {String|Array<String>} params.studentIds - Target student ID or array of student IDs
  * @param {String} [params.instituteId] - Institute ID
@@ -25,41 +25,48 @@ export const sendStudentNotification = async ({
 
     if (validTargets.length === 0) return;
 
-    const notificationDocs = validTargets.map((stId) => ({
-      student: stId,
-      institute: instituteId || null,
+    const nowIso = new Date().toISOString();
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    const supabasePayloads = validTargets.map((stId) => ({
+      student_id: String(stId),
+      institute_id: instituteId ? String(instituteId) : null,
       title: title.trim(),
       message: message.trim(),
       type,
-      data,
-      isRead: false,
-      createdAt: new Date(),
+      data: data ? JSON.stringify(data) : "{}",
+      is_read: false,
+      created_at: nowIso,
     }));
 
-    // Use Supabase direct insert to ensure real-time table sync
+    // Primary: Insert into Supabase notifications table directly
+    let inserted = false;
     try {
-      const { supabase: sb } = await import("../utils/supabase.js");
-      const supabasePayloads = notificationDocs.map((doc) => ({
-        student_id: String(doc.student),
-        institute_id: doc.institute ? String(doc.institute) : null,
-        title: doc.title,
-        message: doc.message,
-        type: doc.type,
-        data: doc.data ? JSON.stringify(doc.data) : "{}",
-        is_read: false,
-        created_at: new Date().toISOString(),
-      }));
-
-      await sb.from("notifications").insert(supabasePayloads);
+      const { error } = await sb.from("notifications").insert(supabasePayloads);
+      if (!error) {
+        inserted = true;
+      }
     } catch (sbErr) {
       console.error("Supabase notifications insert error:", sbErr.message);
     }
 
-    // Also persist via Notification model for MongoDB fallback
-    try {
-      await Notification.insertMany(notificationDocs);
-    } catch (mErr) {
-      // Ignore if Supabase model handled it
+    // Fallback: If Supabase direct insert failed, save to MongoDB model
+    if (!inserted) {
+      try {
+        const notificationDocs = validTargets.map((stId) => ({
+          student: stId,
+          institute: instituteId || null,
+          title: title.trim(),
+          message: message.trim(),
+          type,
+          data,
+          isRead: false,
+          createdAt: new Date(),
+        }));
+        await Notification.insertMany(notificationDocs);
+      } catch (mErr) {
+        console.error("Mongo notifications fallback error:", mErr.message);
+      }
     }
   } catch (err) {
     console.error("sendStudentNotification error:", err.message);

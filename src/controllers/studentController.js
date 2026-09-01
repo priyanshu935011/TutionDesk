@@ -1985,30 +1985,44 @@ export const getStudentNotifications = async (req, res) => {
 
     let notifications = [];
     if (!error && rows) {
-      notifications = rows.map((r) => ({
-        id: r.id,
-        _id: r.id,
-        title: r.title,
-        message: r.message,
-        type: r.type || "general",
-        data: r.data ? (typeof r.data === "string" ? JSON.parse(r.data) : r.data) : {},
-        isRead: r.is_read || false,
-        createdAt: r.created_at,
-      }));
+      const seenKeys = new Set();
+      for (const r of rows) {
+        const key = `${(r.title || "").trim()}|${(r.message || "").trim()}|${r.type || ""}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          notifications.push({
+            id: r.id,
+            _id: r.id,
+            title: r.title,
+            message: r.message,
+            type: r.type || "general",
+            data: r.data ? (typeof r.data === "string" ? JSON.parse(r.data) : r.data) : {},
+            isRead: r.is_read || false,
+            createdAt: r.created_at,
+          });
+        }
+      }
     } else {
       const docs = await Notification.find({ student: studentId })
         .sort({ createdAt: -1 })
         .limit(50);
-      notifications = docs.map((d) => ({
-        id: d._id,
-        _id: d._id,
-        title: d.title,
-        message: d.message,
-        type: d.type,
-        data: d.data,
-        isRead: d.isRead,
-        createdAt: d.createdAt,
-      }));
+      const seenKeys = new Set();
+      for (const d of docs) {
+        const key = `${(d.title || "").trim()}|${(d.message || "").trim()}|${d.type || ""}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          notifications.push({
+            id: d._id,
+            _id: d._id,
+            title: d.title,
+            message: d.message,
+            type: d.type,
+            data: d.data,
+            isRead: d.isRead,
+            createdAt: d.createdAt,
+          });
+        }
+      }
     }
 
     const unreadCount = notifications.filter((n) => !n.isRead).length;
