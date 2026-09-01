@@ -740,6 +740,7 @@ export const uploadNote = async (req, res) => {
       student_ids: targetType === "student" ? resolvedStudentIds : [],
       category: noteCategory,
       type: noteCategory,
+      file_size_bytes: req.file?.size || req.file?.buffer?.length || 1572864,
     };
 
     const { data: noteData, error: noteError } = await sb
