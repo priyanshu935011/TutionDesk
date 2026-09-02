@@ -539,36 +539,67 @@ export const getNotes = async (req, res) => {
       return res.status(500).json({ message: "Could not fetch notes" });
     }
 
-    // Resolve batch names
-    const batchIds = [...new Set((rows || []).map((r) => r.batch_id).filter(Boolean))];
+    // Collect all unique batch IDs from both batch_id and batch_ids array
+    const allBatchIds = new Set();
+    (rows || []).forEach((r) => {
+      if (r.batch_id) allBatchIds.add(String(r.batch_id));
+      if (Array.isArray(r.batch_ids)) {
+        r.batch_ids.forEach((id) => id && allBatchIds.add(String(id)));
+      } else if (typeof r.batch_ids === "string" && r.batch_ids.startsWith("[")) {
+        try {
+          JSON.parse(r.batch_ids).forEach((id) => id && allBatchIds.add(String(id)));
+        } catch (_) {}
+      }
+    });
+
     let batchMap = {};
-    if (batchIds.length > 0) {
+    if (allBatchIds.size > 0) {
       const { data: batches } = await sb
         .from("batches")
         .select("id, name")
-        .in("id", batchIds);
+        .in("id", Array.from(allBatchIds));
       if (batches) {
         batches.forEach((b) => {
-          batchMap[b.id] = b.name;
+          batchMap[String(b.id)] = b.name;
         });
       }
     }
 
-    const notes = (rows || []).map((row) => ({
-      _id: row.id,
-      id: row.id,
-      title: row.title,
-      pdfUrl: row.file_url,
-      pdfPublicId: row.pdf_public_id,
-      targetType: row.target_type || "batch",
-      fileSizeBytes: row.file_size_bytes || row.file_size || row.fileSizeBytes || 0,
-      batch: row.batch_id
-        ? { _id: row.batch_id, name: batchMap[row.batch_id] || row.batch_id }
-        : null,
-      students: row.student_ids || [],
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const notes = (rows || []).map((row) => {
+      const rowBatchIds = [];
+      if (Array.isArray(row.batch_ids)) {
+        row.batch_ids.forEach((id) => id && rowBatchIds.push(String(id)));
+      } else if (typeof row.batch_ids === "string" && row.batch_ids.startsWith("[")) {
+        try {
+          JSON.parse(row.batch_ids).forEach((id) => id && rowBatchIds.push(String(id)));
+        } catch (_) {}
+      }
+      if (row.batch_id && !rowBatchIds.includes(String(row.batch_id))) {
+        rowBatchIds.push(String(row.batch_id));
+      }
+
+      const batchNames = rowBatchIds
+        .map((bId) => batchMap[bId] || "")
+        .filter((n) => n && n !== "null");
+      const formattedBatchName = batchNames.length > 0 ? batchNames.join(", ") : "All Batches";
+
+      return {
+        _id: row.id,
+        id: row.id,
+        title: row.title,
+        pdfUrl: row.file_url,
+        pdfPublicId: row.pdf_public_id,
+        targetType: row.target_type || "batch",
+        category: row.category || row.type || "Chapter Notes",
+        fileSizeBytes: Number(row.file_size_bytes || row.file_size || row.fileSizeBytes || 0),
+        batch: row.batch_id ? { _id: row.batch_id, name: batchMap[String(row.batch_id)] || row.batch_id } : null,
+        batchIds: rowBatchIds,
+        batchName: formattedBatchName,
+        students: row.student_ids || [],
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
 
     return res.json(notes);
   } catch (error) {
@@ -644,7 +675,7 @@ export const uploadNote = async (req, res) => {
     if (!instituteId) {
       instituteId = String(req.user._id || req.user.id || "");
     }
-    const { title, batchId, targetType, studentIds, category, noteType } = req.body;
+    const { title, batchId, batchIds, targetType, studentIds, category, noteType } = req.body;
     const noteCategory = category || noteType || "Chapter Notes";
 
     if (!title || !req.file) {
@@ -728,6 +759,23 @@ export const uploadNote = async (req, res) => {
       }
     }
 
+    let resolvedBatchIds = [];
+    if (batchIds) {
+      if (Array.isArray(batchIds)) {
+        resolvedBatchIds = batchIds;
+      } else if (typeof batchIds === "string") {
+        try {
+          resolvedBatchIds = JSON.parse(batchIds);
+        } catch (e) {
+          resolvedBatchIds = batchIds.split(",").map((id) => id.trim()).filter(Boolean);
+        }
+      }
+    } else if (batchId && batchId !== "All batches" && batchId !== "null") {
+      resolvedBatchIds = [String(batchId)];
+    }
+
+    const primaryBatchId = resolvedBatchIds.length > 0 ? resolvedBatchIds[0] : null;
+
     // Use Supabase client directly to insert note — avoids .populate() issue
     const { supabase: sb } = await import("../utils/supabase.js");
     const notePayload = {
@@ -737,7 +785,8 @@ export const uploadNote = async (req, res) => {
       file_url: secure_url,
       pdf_public_id: public_id,
       target_type: targetType || "batch",
-      batch_id: targetType === "student" ? null : (batchId || null),
+      batch_id: targetType === "student" ? null : primaryBatchId,
+      batch_ids: targetType === "student" ? [] : resolvedBatchIds,
       student_ids: targetType === "student" ? resolvedStudentIds : [],
       category: noteCategory,
       type: noteCategory,

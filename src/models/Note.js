@@ -37,6 +37,12 @@ const noteSchema = new mongoose.Schema(
       ref: "Batch",
       default: null,
     },
+    batches: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Batch",
+      },
+    ],
     students: [
       {
         type: mongoose.Schema.Types.ObjectId,
