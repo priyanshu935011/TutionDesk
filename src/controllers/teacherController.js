@@ -1245,7 +1245,7 @@ export const createTestResultsBulk = async (req, res) => {
 
 export const createHiredTeacher = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, phone, password } = req.body;
 
     if (req.user.role !== "institute_admin") {
       return res.status(403).json({ message: "Access denied. Only institute admins can add teachers." });
@@ -1263,21 +1263,32 @@ export const createHiredTeacher = async (req, res) => {
       await institute.save();
     }
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email, and password are required" });
+    const cleanEmail = email ? email.toLowerCase().trim() : "";
+    const cleanPhone = phone ? phone.trim().replace(/\D/g, "") : "";
+
+    if (!name || !password || (!cleanEmail && !cleanPhone)) {
+      return res.status(400).json({ message: "Name, password, and at least an email or phone number are required" });
     }
 
-    const normalizedEmail = email.toLowerCase();
-    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (cleanEmail) {
+      const existingEmailUser = await User.findOne({ email: cleanEmail });
+      if (existingEmailUser) {
+        return res.status(400).json({ message: "Email already exists" });
+      }
+    }
 
-    if (existingUser) {
-      return res.status(400).json({ message: "Email already exists" });
+    if (cleanPhone) {
+      const existingPhoneUser = await User.findOne({ phone: cleanPhone });
+      if (existingPhoneUser) {
+        return res.status(400).json({ message: "Phone number already exists" });
+      }
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newTeacher = await User.create({
-      name,
-      email: normalizedEmail,
+      name: name.trim(),
+      email: cleanEmail || `${cleanPhone}@classtech.local`,
+      phone: cleanPhone,
       password: hashedPassword,
       role: "teacher",
       institute: instituteId,
@@ -1290,6 +1301,7 @@ export const createHiredTeacher = async (req, res) => {
       _id: newTeacher._id,
       name: newTeacher.name,
       email: newTeacher.email,
+      phone: newTeacher.phone,
       role: newTeacher.role,
     });
   } catch (error) {
@@ -1308,7 +1320,7 @@ export const getHiredTeachers = async (req, res) => {
     const teachers = await User.find({
       institute: instituteId,
       role: "teacher",
-    }).select("name email role createdAt");
+    }).select("name email phone role createdAt");
 
     return res.json(teachers);
   } catch (error) {
@@ -1348,7 +1360,7 @@ export const updateHiredTeacher = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Only institute admins can edit teachers." });
     }
 
-    const { name, email, password } = req.body;
+    const { name, email, phone, password } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
 
     const teacher = await User.findOne({
@@ -1364,14 +1376,24 @@ export const updateHiredTeacher = async (req, res) => {
     if (name) {
       teacher.name = name.trim();
     }
-    if (email) {
-      const normalizedEmail = email.toLowerCase().trim();
-      if (normalizedEmail !== teacher.email) {
-        const existingUser = await User.findOne({ email: normalizedEmail });
-        if (existingUser) {
+    if (email !== undefined) {
+      const cleanEmail = email.toLowerCase().trim();
+      if (cleanEmail && cleanEmail !== teacher.email) {
+        const existingUser = await User.findOne({ email: cleanEmail });
+        if (existingUser && String(existingUser._id) !== String(teacher._id)) {
           return res.status(400).json({ message: "Email already exists" });
         }
-        teacher.email = normalizedEmail;
+        teacher.email = cleanEmail;
+      }
+    }
+    if (phone !== undefined) {
+      const cleanPhone = phone.trim().replace(/\D/g, "");
+      if (cleanPhone && cleanPhone !== teacher.phone) {
+        const existingPhoneUser = await User.findOne({ phone: cleanPhone });
+        if (existingPhoneUser && String(existingPhoneUser._id) !== String(teacher._id)) {
+          return res.status(400).json({ message: "Phone number already exists" });
+        }
+        teacher.phone = cleanPhone;
       }
     }
     if (password && password.trim() !== "") {
@@ -1387,6 +1409,7 @@ export const updateHiredTeacher = async (req, res) => {
       _id: teacher._id,
       name: teacher.name,
       email: teacher.email,
+      phone: teacher.phone,
       role: teacher.role,
     });
   } catch (error) {
