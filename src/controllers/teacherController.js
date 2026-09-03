@@ -532,12 +532,28 @@ export const getNotes = async (req, res) => {
       }
     }
 
-    const { data: rows, error } = await query.order("created_at", { ascending: false });
+    const { data: rawRows, error } = await query.order("created_at", { ascending: false });
 
     if (error) {
       console.error("getNotes Supabase error:", error.message);
       return res.status(500).json({ message: "Could not fetch notes" });
     }
+
+    // Deduplicate notes by file_url: if a note with valid batch/file_size exists for a file_url, omit the 0-byte empty duplicate!
+    const validFileUrls = new Set(
+      (rawRows || [])
+        .filter((r) => (Number(r.file_size_bytes || 0) > 0 || r.batch_id || (Array.isArray(r.batch_ids) && r.batch_ids.length > 0)))
+        .map((r) => r.file_url)
+        .filter(Boolean)
+    );
+
+    const rows = (rawRows || []).filter((r) => {
+      if (validFileUrls.has(r.file_url)) {
+        const is0ByteEmpty = (!r.file_size_bytes || Number(r.file_size_bytes) === 0) && (!r.batch_id) && (!r.batch_ids || r.batch_ids.length === 0);
+        if (is0ByteEmpty) return false;
+      }
+      return true;
+    });
 
     // Collect all unique batch IDs from both batch_id and batch_ids array
     const allBatchIds = new Set();
@@ -839,18 +855,22 @@ export const uploadNote = async (req, res) => {
 
       if (noteError) {
         console.error("Supabase notes insert error:", noteError.message);
-        // Try stripping optional columns and retry
-        const safe = {
-          institute_id: notePayload.institute_id,
-          title: notePayload.title,
-          file_url: notePayload.file_url,
-        };
-        const { data: retryData } = await sb
+        // If unknown column error (e.g., batch_ids missing in Supabase schema),
+        // delete batch_ids and retry ONCE with full batch_id and file_size_bytes intact!
+        const sanitizedPayload = { ...notePayload };
+        delete sanitizedPayload.batch_ids;
+
+        const { data: retryData, error: retryErr } = await sb
           .from("notes")
-          .insert(safe)
+          .insert(sanitizedPayload)
           .select()
           .maybeSingle();
-        noteData = retryData;
+
+        if (retryErr) {
+          console.error("Supabase notes sanitized insert error:", retryErr.message);
+        } else {
+          noteData = retryData;
+        }
       } else {
         noteData = nData;
       }
