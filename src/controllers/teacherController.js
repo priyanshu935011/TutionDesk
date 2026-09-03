@@ -776,8 +776,44 @@ export const uploadNote = async (req, res) => {
 
     const primaryBatchId = resolvedBatchIds.length > 0 ? resolvedBatchIds[0] : null;
 
+    const fileSizeVal = req.file?.size || req.file?.buffer?.length || Number(req.body.fileSizeBytes) || Number(req.body.fileSize) || 0;
+
     // Use Supabase client directly to insert note — avoids .populate() issue
     const { supabase: sb } = await import("../utils/supabase.js");
+
+    // Resolve batch names for response
+    let batchMap = {};
+    if (resolvedBatchIds.length > 0) {
+      try {
+        const { data: batches } = await sb
+          .from("batches")
+          .select("id, name")
+          .in("id", resolvedBatchIds);
+        if (batches) {
+          batches.forEach((b) => {
+            batchMap[String(b.id)] = b.name;
+          });
+        }
+      } catch (_) {}
+    }
+    const resolvedBatchNames = resolvedBatchIds
+      .map((id) => batchMap[id] || "")
+      .filter((n) => n && n !== "null");
+    const formattedBatchName = resolvedBatchNames.length > 0 ? resolvedBatchNames.join(", ") : "All Batches";
+
+    let formattedSize = "PDF";
+    if (fileSizeVal > 0) {
+      if (fileSizeVal >= 1024 * 1024 * 1024) {
+        formattedSize = `${(fileSizeVal / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+      } else if (fileSizeVal >= 1024 * 1024) {
+        formattedSize = `${(fileSizeVal / (1024 * 1024)).toFixed(1)} MB`;
+      } else if (fileSizeVal >= 1024) {
+        formattedSize = `${(fileSizeVal / 1024).toFixed(0)} KB`;
+      } else {
+        formattedSize = `${fileSizeVal} Bytes`;
+      }
+    }
+
     const notePayload = {
       institute_id: String(instituteId),
       created_by: String(req.user._id),
@@ -790,51 +826,62 @@ export const uploadNote = async (req, res) => {
       student_ids: targetType === "student" ? resolvedStudentIds : [],
       category: noteCategory,
       type: noteCategory,
-      file_size_bytes: req.file?.size || req.file?.buffer?.length || Number(req.body.fileSizeBytes) || Number(req.body.fileSize) || 0,
+      file_size_bytes: fileSizeVal,
     };
 
-    const { data: noteData, error: noteError } = await sb
-      .from("notes")
-      .insert(notePayload)
-      .select()
-      .maybeSingle();
-
-    if (noteError) {
-      console.error("Supabase notes insert error:", noteError);
-      // Try stripping unknown columns and retry
-      const safe = {
-        institute_id: notePayload.institute_id,
-        title: notePayload.title,
-        file_url: notePayload.file_url,
-      };
-      const { data: retryData, error: retryError } = await sb
+    let noteData = null;
+    try {
+      const { data: nData, error: noteError } = await sb
         .from("notes")
-        .insert(safe)
+        .insert(notePayload)
         .select()
         .maybeSingle();
 
-      if (retryError) {
-        return res.status(500).json({ message: retryError.message || "Failed to save note metadata" });
+      if (noteError) {
+        console.error("Supabase notes insert error:", noteError.message);
+        // Try stripping optional columns and retry
+        const safe = {
+          institute_id: notePayload.institute_id,
+          title: notePayload.title,
+          file_url: notePayload.file_url,
+        };
+        const { data: retryData } = await sb
+          .from("notes")
+          .insert(safe)
+          .select()
+          .maybeSingle();
+        noteData = retryData;
+      } else {
+        noteData = nData;
       }
+    } catch (e) {
+      console.error("Supabase insert exception:", e.message);
+    }
 
-      await invalidateUserDashboard(req);
-      await clearCachePattern("student:dashboard:*");
-      return res.status(201).json({
-        _id: retryData?.id,
+    // Sync to MongoDB Note model
+    try {
+      await Note.create({
+        institute: instituteId,
+        createdBy: req.user._id,
         title: title.trim(),
         pdfUrl: secure_url,
         pdfPublicId: public_id,
         targetType: targetType || "batch",
-        batch: batchId || null,
+        batch: primaryBatchId,
+        batches: resolvedBatchIds,
         students: resolvedStudentIds,
-        createdAt: new Date().toISOString(),
+        category: noteCategory,
+        type: noteCategory,
+        fileSizeBytes: fileSizeVal,
       });
+    } catch (mErr) {
+      console.error("MongoDB note sync error:", mErr.message);
     }
 
     try {
       let targetStudentIds = resolvedStudentIds;
       if (targetType !== "student") {
-        const sQuery = batchId ? { batch: batchId } : {};
+        const sQuery = primaryBatchId ? { batch: primaryBatchId } : {};
         const batchStudents = await Student.find(sQuery).select("_id");
         targetStudentIds = batchStudents.map((s) => s._id);
       }
@@ -852,12 +899,19 @@ export const uploadNote = async (req, res) => {
     await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json({
-      _id: noteData?.id || noteData?.note_id,
+      _id: noteData?.id || noteData?.note_id || `note_${Date.now()}`,
+      id: noteData?.id || noteData?.note_id || `note_${Date.now()}`,
       title: noteData?.title || title.trim(),
       pdfUrl: noteData?.file_url || secure_url,
       pdfPublicId: noteData?.pdf_public_id || public_id,
       targetType: noteData?.target_type || targetType || "batch",
-      batch: noteData?.batch_id || batchId || null,
+      batch: primaryBatchId ? { _id: primaryBatchId, name: batchMap[primaryBatchId] || primaryBatchId } : null,
+      batchIds: resolvedBatchIds,
+      batchName: formattedBatchName,
+      category: noteCategory,
+      type: noteCategory,
+      fileSizeBytes: fileSizeVal,
+      fileSize: formattedSize,
       students: noteData?.student_ids || resolvedStudentIds,
       createdAt: noteData?.created_at || new Date().toISOString(),
     });
