@@ -13,6 +13,7 @@ import {
   startQuizLive,
   updateQuiz,
   downloadNote,
+  viewNote,
   uploadNote,
   deleteNote,
   createHiredTeacher,
@@ -33,6 +34,9 @@ import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+router.get("/notes/:id/view", viewNote);
+router.get("/notes/:id/download", downloadNote);
 
 router.use(protect);
 

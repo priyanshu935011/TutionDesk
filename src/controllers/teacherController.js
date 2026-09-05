@@ -12,6 +12,7 @@ import cloudinary from "../utils/cloudinary.js";
 import {
   buildNoteDownloadFilename,
   streamRemoteFileAsAttachment,
+  streamRemoteFileInline,
 } from "../utils/noteDownload.js";
 import { supabase, supabaseBucket } from "../utils/supabase.js";
 import { sendStudentNotification } from "../services/notificationService.js";
@@ -670,6 +671,74 @@ export const downloadNote = async (req, res) => {
       return;
     }
     return res.status(500).json({ message: "Could not download note" });
+  }
+};
+
+export const viewNote = async (req, res) => {
+  try {
+    const noteId = req.params.id;
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    let note = null;
+    try {
+      const { data } = await sb.from("notes").select("*").eq("id", noteId).maybeSingle();
+      note = data;
+    } catch (_) {}
+
+    if (!note) {
+      note = await Note.findById(noteId).catch(() => null);
+    }
+
+    if (!note) {
+      return res.status(404).json({ message: "Note not found" });
+    }
+
+    const fileUrl = note.pdf_url || note.file_url || note.pdfUrl;
+    const publicId = note.pdf_public_id || note.pdfPublicId;
+
+    if (fileUrl && fileUrl.startsWith("http")) {
+      let downloadUrl = fileUrl;
+      if (fileUrl.includes("/raw/private/")) {
+        downloadUrl = cloudinary.utils.private_download_url(publicId || "note", "", {
+          resource_type: "raw",
+          type: "private",
+        });
+      }
+
+      await streamRemoteFileInline({
+        res,
+        url: downloadUrl,
+        filename: buildNoteDownloadFilename(note),
+      });
+    } else if (fileUrl && fileUrl.startsWith("data:")) {
+      const matches = fileUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const buffer = Buffer.from(matches[2], "base64");
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.send(buffer);
+      }
+      return res.status(400).json({ message: "Invalid data URL format" });
+    } else {
+      // Fetch from Supabase
+      const { data, error } = await supabase.storage
+        .from(supabaseBucket)
+        .download(publicId || fileUrl);
+
+      if (error || !data) {
+        return res.status(404).json({ message: "Note file not found in storage" });
+      }
+
+      const arrayBuffer = await data.arrayBuffer();
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return res.send(Buffer.from(arrayBuffer));
+    }
+  } catch (error) {
+    if (res.headersSent) return;
+    return res.status(500).json({ message: "Could not view note" });
   }
 };
 
