@@ -236,7 +236,6 @@ export const createStudent = async (req, res) => {
     if (
       !name ||
       !phone ||
-      !parentName ||
       targetBatches.length === 0 ||
       !joinedOn ||
       totalFees === undefined ||
@@ -434,12 +433,7 @@ export const createStudent = async (req, res) => {
       }
     });
 
-    // Return array if array requested, else single object for backward compatibility
-    if (Array.isArray(req.body.batches) && req.body.batches.length > 0) {
-      return res.status(201).json(createdStudents);
-    } else {
-      return res.status(201).json(createdStudents[0]);
-    }
+    return res.status(201).json(populatedStudent);
   } catch (error) {
     console.error("Create student error details:", error);
     if (error?.code === 11000 && error?.keyPattern?.enrollmentNumber) {
@@ -1575,7 +1569,6 @@ export const bulkCreateStudents = async (req, res) => {
         // Validate required fields
         if (!name) throw new Error("Name is required");
         if (!phone) throw new Error("Phone is required");
-        if (!parentName) throw new Error("Parent Name is required");
         if (!batchName) throw new Error("Batch Name is required");
 
         // Resolve batch ID

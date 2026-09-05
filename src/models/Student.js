@@ -59,8 +59,9 @@ const studentSchema = new mongoose.Schema(
     },
     parentName: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
+      default: "",
     },
     parentPhone: {
       type: String,
