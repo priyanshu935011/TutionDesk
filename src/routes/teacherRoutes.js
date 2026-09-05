@@ -26,6 +26,8 @@ import {
   deleteTestResult,
   updateGroupedTestResults,
   deleteGroupedTestResults,
+  sendNoteWhatsApp,
+  sendTestResultWhatsApp,
 } from "../controllers/teacherController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -56,12 +58,14 @@ router.get("/quizzes/:id/leaderboard", checkQuizFeature, getQuizLeaderboard);
 router.get("/notes", getNotes);
 router.get("/notes/:id/download", downloadNote);
 router.post("/notes", upload.single("pdf"), uploadNote);
+router.post("/notes/:id/send-whatsapp", sendNoteWhatsApp);
 router.delete("/notes/:id", deleteNote);
 
 router.get("/test-results", getTestResults);
 router.post("/test-results", createTestResult);
 router.post("/test-results/bulk", createTestResultsBulk);
 router.put("/test-results/:id", updateTestResult);
+router.post("/test-results/:id/send-whatsapp", sendTestResultWhatsApp);
 router.delete("/test-results/:id", deleteTestResult);
 router.post("/test-results/grouped/update", updateGroupedTestResults);
 router.post("/test-results/grouped/delete", deleteGroupedTestResults);

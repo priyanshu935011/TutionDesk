@@ -22,7 +22,7 @@ import {
   startLiveQuiz,
 } from "../services/quizRuntime.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
-import { sendMessage, getSessionStatus } from "../services/whatsappService.js";
+import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 
 const uploadBufferToCloudinary = (buffer, options = {}) =>
@@ -700,6 +700,21 @@ export const uploadNote = async (req, res) => {
         .json({ message: "Title and PDF file are required" });
     }
 
+    // Check available storage for institute
+    const newFileSizeBytes = req.file ? req.file.buffer.length : Number(req.body.fileSizeBytes || 0);
+    const instForStorage = await Institute.findById(instituteId);
+    if (instForStorage) {
+      const currentUsed = Number(instForStorage.usedVideoStorageBytes || 0);
+      const maxBytes = Number(instForStorage.maxVideoStorageGb || 50) * 1024 * 1024 * 1024;
+      if (currentUsed + newFileSizeBytes > maxBytes) {
+        const freeBytes = Math.max(0, maxBytes - currentUsed);
+        const freeMb = (freeBytes / (1024 * 1024)).toFixed(1);
+        return res.status(400).json({
+          message: `Note upload exceeds storage limit. Free storage remaining: ${freeMb} MB out of ${instForStorage.maxVideoStorageGb || 50} GB. Please contact Admin to upgrade storage.`
+        });
+      }
+    }
+
     const sanitizeFilename = (value) =>
       String(value || "note")
         .trim()
@@ -914,6 +929,40 @@ export const uploadNote = async (req, res) => {
         data: { title: title.trim() },
       });
     } catch (nErr) {}
+
+    if (req.body.sendWhatsApp === "true" || req.body.sendWhatsApp === true) {
+      setImmediate(async () => {
+        try {
+          let studentsForWp = [];
+          if (targetType === "student" && resolvedStudentIds.length > 0) {
+            studentsForWp = await Student.find({ _id: { $in: resolvedStudentIds } });
+          } else if (resolvedBatchIds.length > 0) {
+            studentsForWp = await Student.find({ $or: [{ batch: { $in: resolvedBatchIds } }, { batches: { $in: resolvedBatchIds } }] });
+          } else {
+            studentsForWp = await Student.find({ user: instituteId });
+          }
+          const inst = await Institute.findById(instituteId);
+          const instituteName = inst?.name || "Classtech";
+          const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
+          for (const s of studentsForWp) {
+            const recipientPhone = s.parentPhone?.trim() || s.phone?.trim();
+            if (!recipientPhone) continue;
+            try {
+              await sendTemplateMessage(String(instituteId), recipientPhone, "note_upload_notification", [
+                s.name,
+                title.trim(),
+                noteCategory,
+                formattedBatchName,
+                instituteName,
+                loginUrl,
+              ]);
+            } catch (_) {}
+          }
+        } catch (wpErr) {
+          console.error("WhatsApp notification on upload note error:", wpErr.message);
+        }
+      });
+    }
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
@@ -1649,5 +1698,106 @@ export const deleteGroupedTestResults = async (req, res) => {
     return res.json({ message: "Grouped test results deleted successfully" });
   } catch (error) {
     return res.status(500).json({ message: "Could not delete grouped test results" });
+  }
+};
+
+export const sendNoteWhatsApp = async (req, res) => {
+  try {
+    const noteId = req.params.id;
+    const { supabase: sb } = await import("../utils/supabase.js");
+    let note = null;
+    try {
+      const { data } = await sb.from("notes").select("*").eq("id", noteId).maybeSingle();
+      note = data;
+    } catch (_) {}
+
+    const mongoNote = note ? null : await Note.findById(noteId).catch(() => null);
+    if (!note && !mongoNote) {
+      return res.status(404).json({ message: "Note not found" });
+    }
+
+    const noteTitle = note?.title || mongoNote?.title || "Study Material";
+    const noteCategory = note?.category || note?.type || mongoNote?.category || "Chapter Notes";
+    const instId = note?.institute_id || mongoNote?.institute || req.user.institute?._id || req.user.institute;
+
+    const inst = await Institute.findById(instId);
+    const instituteName = inst?.name || "Classtech";
+    const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
+
+    let batchId = note?.batch_id || mongoNote?.batch;
+    let students = [];
+    if (batchId) {
+      students = await Student.find({ $or: [{ batch: batchId }, { batches: batchId }] });
+    } else {
+      students = await Student.find({ user: instId });
+    }
+
+    let sentCount = 0;
+    for (const s of students) {
+      const recipientPhone = s.parentPhone?.trim() || s.phone?.trim();
+      if (!recipientPhone) continue;
+      try {
+        await sendTemplateMessage(String(instId), recipientPhone, "note_upload_notification", [
+          s.name,
+          noteTitle,
+          noteCategory,
+          "Your Batch",
+          instituteName,
+          loginUrl
+        ]);
+        sentCount++;
+      } catch (_) {}
+    }
+
+    return res.json({ message: `WhatsApp notification sent to ${sentCount} students.` });
+  } catch (error) {
+    console.error("sendNoteWhatsApp error:", error);
+    return res.status(500).json({ message: "Could not send WhatsApp notification." });
+  }
+};
+
+export const sendTestResultWhatsApp = async (req, res) => {
+  try {
+    const testId = req.params.id;
+    const testResult = await TestResult.findById(testId).populate("student").populate("batch");
+    if (!testResult) {
+      return res.status(404).json({ message: "Test result not found" });
+    }
+
+    const student = testResult.student;
+    if (!student) {
+      return res.status(404).json({ message: "Student record not found" });
+    }
+
+    const instId = req.user.institute?._id || req.user.institute;
+    const inst = await Institute.findById(instId);
+    const instituteName = inst?.name || "Classtech";
+    const loginUrl = `${process.env.FRONTEND_URL || "https://classtech.in"}/student/login`;
+    const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
+
+    if (!recipientPhone) {
+      return res.status(400).json({ message: "No phone number available for student/parent." });
+    }
+
+    const totalMarks = testResult.totalMarks || 100;
+    const marksObtained = testResult.marksObtained ?? testResult.score ?? 0;
+    const percentage = ((marksObtained / totalMarks) * 100).toFixed(1);
+    const grade = percentage >= 80 ? "Excellent" : percentage >= 60 ? "Good" : "Average";
+
+    await sendTemplateMessage(String(instId), recipientPhone, "test_result_notification", [
+      student.parentName || student.name,
+      testResult.testName || testResult.title || "Class Test",
+      instituteName,
+      student.name,
+      String(marksObtained),
+      String(totalMarks),
+      grade,
+      loginUrl
+    ]);
+
+    return res.json({ message: `WhatsApp test result sent successfully to ${student.name}!` });
+  } catch (error) {
+    console.error("sendTestResultWhatsApp error:", error);
+    return res.status(500).json({ message: "Could not send WhatsApp test result." });
   }
 };

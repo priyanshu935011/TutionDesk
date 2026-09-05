@@ -189,73 +189,155 @@ export const studentLogin = async (req, res) => {
 
 export const forgotStudentPassword = async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
+    const rawIdentifier = (req.body.identifier || req.body.email || req.body.phone || "").toString().trim();
+    if (!rawIdentifier) {
+      return res.status(400).json({ message: "Email or Phone Number is required" });
     }
 
-    const student = await Student.findOne({ email: email.toLowerCase() });
+    const isEmail = rawIdentifier.includes("@");
+    const cleanPhone = rawIdentifier.replace(/\D/g, "");
+
+    let student = null;
+    if (isEmail) {
+      student = await Student.findOne({ email: rawIdentifier.toLowerCase() });
+    } else if (cleanPhone.length >= 7) {
+      student = await Student.findOne({
+        $or: [
+          { phone: cleanPhone },
+          { parentPhone: cleanPhone },
+          { enrollmentNumber: rawIdentifier },
+        ],
+      });
+    } else {
+      student = await Student.findOne({ enrollmentNumber: rawIdentifier });
+    }
+
     if (!student) {
-      return res.status(404).json({ message: "Student with this email not found" });
+      return res.status(404).json({ message: "Student record not found for the provided email or phone number." });
     }
 
-    // Generate JWT reset token valid for 30 minutes
-    const resetToken = jwt.sign(
-      { id: student._id, type: "student_reset", email: student.email },
+    // Generate random 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    const otpToken = jwt.sign(
+      { studentId: student._id, phone: student.phone, email: student.email, otpHash, type: "student_otp_reset" },
       process.env.JWT_SECRET,
-      { expiresIn: "30m" }
+      { expiresIn: "15m" }
     );
 
-    const clientUrl = process.env.CLIENT_URL || "https://classtech.in";
-    const resetLink = `${clientUrl}/student/reset-password?token=${resetToken}`;
+    const recipientPhone = student.phone?.trim() || student.parentPhone?.trim();
+    const instId = student.user;
 
-    // Send email helper
-    await sendResetEmail(student.email, student.name, resetLink);
+    if (!isEmail && recipientPhone) {
+      // Send OTP via WhatsApp
+      try {
+        await sendTemplateMessage(String(instId), recipientPhone, "student_forgot_password_otp", [otp]);
+        return res.json({
+          message: `A 6-digit verification OTP has been sent via WhatsApp to ${recipientPhone}.`,
+          otpToken,
+          method: "phone",
+          phone: recipientPhone,
+        });
+      } catch (waErr) {
+        console.error("WhatsApp OTP error:", waErr.message);
+      }
+    }
 
-    return res.json({ message: "Password reset link has been sent to your email." });
+    // Default or Fallback: Send OTP via Email
+    if (student.email && !student.email.endsWith("@classtech.local")) {
+      await sendOTPEmail(student.email, student.name, otp);
+      return res.json({
+        message: "A 6-digit verification OTP code has been sent to your email address.",
+        otpToken,
+        method: "email",
+        email: student.email,
+      });
+    }
+
+    // If no email, fallback to WhatsApp
+    if (recipientPhone) {
+      try {
+        await sendTemplateMessage(String(instId), recipientPhone, "student_forgot_password_otp", [otp]);
+        return res.json({
+          message: `A 6-digit verification OTP has been sent via WhatsApp to ${recipientPhone}.`,
+          otpToken,
+          method: "phone",
+          phone: recipientPhone,
+        });
+      } catch (_) {}
+    }
+
+    return res.status(400).json({ message: "No valid email or WhatsApp phone number found for this student." });
   } catch (error) {
-    console.error("Forgot password error:", error);
-    return res.status(500).json({ message: "Could not initiate forgot password flow." });
+    console.error("Forgot student password error:", error);
+    return res.status(500).json({ message: "Could not send verification OTP. Please try again." });
   }
 };
 
 export const resetStudentPassword = async (req, res) => {
   try {
-    const { token, password } = req.body;
-    if (!token || !password) {
-      return res.status(400).json({ message: "Token and new password are required." });
+    const { token, otpToken, otp, password } = req.body;
+
+    // Support legacy reset link
+    if (token && !otpToken) {
+      let decodedLink;
+      try {
+        decodedLink = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (err) {
+        return res.status(400).json({ message: "Reset link has expired or is invalid." });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ message: "Password must be at least 6 characters long." });
+      }
+      const student = await Student.findById(decodedLink.id);
+      if (!student) return res.status(404).json({ message: "Student not found." });
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await Student.updateMany(
+        { _id: student._id },
+        { password: hashedPassword }
+      );
+      return res.json({ message: "Password has been reset successfully. You can now log in." });
+    }
+
+    const inputOtp = otp || req.body.otpCode;
+    const sessionToken = otpToken || req.body.token;
+
+    if (!sessionToken || !inputOtp || !password) {
+      return res.status(400).json({ message: "OTP code, session token, and new password are required." });
     }
 
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = jwt.verify(sessionToken, process.env.JWT_SECRET);
     } catch (err) {
-      return res.status(400).json({ message: "Reset link has expired or is invalid." });
+      return res.status(400).json({ message: "Verification session has expired or is invalid." });
     }
 
-    if (decoded.type !== "student_reset") {
-      return res.status(400).json({ message: "Invalid reset token." });
+    const inputHash = crypto.createHash("sha256").update(String(inputOtp).trim()).digest("hex");
+    if (decoded.otpHash !== inputHash) {
+      return res.status(400).json({ message: "Incorrect or invalid OTP code." });
     }
 
     if (password.length < 6) {
       return res.status(400).json({ message: "Password must be at least 6 characters long." });
     }
 
-    const student = await Student.findById(decoded.id);
+    const student = await Student.findById(decoded.studentId);
     if (!student) {
       return res.status(404).json({ message: "Student not found." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
     await Student.updateMany(
-      { email: student.email.toLowerCase() },
+      { _id: student._id },
       { password: hashedPassword }
     );
 
     return res.json({ message: "Password has been reset successfully. You can now log in." });
   } catch (error) {
-    console.error("Reset password error:", error);
-    return res.status(500).json({ message: "Could not reset password." });
+    console.error("Reset student password error:", error);
+    return res.status(500).json({ message: "Could not reset password. Please try again." });
   }
 };
 
