@@ -641,10 +641,16 @@ export const downloadNote = async (req, res) => {
     if (note.pdfUrl && note.pdfUrl.startsWith("http")) {
       let downloadUrl = note.pdfUrl;
       if (note.pdfUrl.includes("/raw/private/")) {
-        downloadUrl = cloudinary.utils.private_download_url(note.pdfPublicId, "", {
-          resource_type: "raw",
-          type: "private",
-        });
+        if (!note.pdfUrl.includes("/s--")) {
+          let targetPublicId = note.pdfPublicId || "";
+          if (!targetPublicId.includes("classtech/notes/") && note.pdfUrl.includes("classtech/notes/")) {
+            targetPublicId = `classtech/notes/${note.pdfUrl.split("classtech/notes/")[1].split("?")[0]}`;
+          }
+          downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
+            resource_type: "raw",
+            type: "private",
+          });
+        }
       }
 
       await streamRemoteFileAsAttachment({
@@ -699,10 +705,16 @@ export const viewNote = async (req, res) => {
     if (fileUrl && fileUrl.startsWith("http")) {
       let downloadUrl = fileUrl;
       if (fileUrl.includes("/raw/private/")) {
-        downloadUrl = cloudinary.utils.private_download_url(publicId || "note", "", {
-          resource_type: "raw",
-          type: "private",
-        });
+        if (!fileUrl.includes("/s--")) {
+          let targetPublicId = publicId || "";
+          if (!targetPublicId.includes("classtech/notes/") && fileUrl.includes("classtech/notes/")) {
+            targetPublicId = `classtech/notes/${fileUrl.split("classtech/notes/")[1].split("?")[0]}`;
+          }
+          downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
+            resource_type: "raw",
+            type: "private",
+          });
+        }
       }
 
       await streamRemoteFileInline({
