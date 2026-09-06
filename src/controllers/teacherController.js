@@ -641,11 +641,11 @@ export const downloadNote = async (req, res) => {
     if (note.pdfUrl && note.pdfUrl.startsWith("http")) {
       let downloadUrl = note.pdfUrl;
       if (note.pdfUrl.includes("/raw/private/")) {
-        if (!note.pdfUrl.includes("/s--")) {
-          let targetPublicId = note.pdfPublicId || "";
-          if (!targetPublicId.includes("classtech/notes/") && note.pdfUrl.includes("classtech/notes/")) {
-            targetPublicId = `classtech/notes/${note.pdfUrl.split("classtech/notes/")[1].split("?")[0]}`;
-          }
+        let targetPublicId = note.pdfPublicId || "";
+        if (!targetPublicId.includes("classtech/notes/") && note.pdfUrl.includes("classtech/notes/")) {
+          targetPublicId = `classtech/notes/${note.pdfUrl.split("classtech/notes/")[1].split("?")[0]}`;
+        }
+        if (targetPublicId) {
           downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
             resource_type: "raw",
             type: "private",
@@ -705,11 +705,11 @@ export const viewNote = async (req, res) => {
     if (fileUrl && fileUrl.startsWith("http")) {
       let downloadUrl = fileUrl;
       if (fileUrl.includes("/raw/private/")) {
-        if (!fileUrl.includes("/s--")) {
-          let targetPublicId = publicId || "";
-          if (!targetPublicId.includes("classtech/notes/") && fileUrl.includes("classtech/notes/")) {
-            targetPublicId = `classtech/notes/${fileUrl.split("classtech/notes/")[1].split("?")[0]}`;
-          }
+        let targetPublicId = publicId || "";
+        if (!targetPublicId.includes("classtech/notes/") && fileUrl.includes("classtech/notes/")) {
+          targetPublicId = `classtech/notes/${fileUrl.split("classtech/notes/")[1].split("?")[0]}`;
+        }
+        if (targetPublicId) {
           downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
             resource_type: "raw",
             type: "private",
