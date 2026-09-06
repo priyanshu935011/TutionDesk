@@ -683,6 +683,8 @@ export const downloadNote = async (req, res) => {
 export const viewNote = async (req, res) => {
   try {
     const noteId = req.params.id;
+    const isRaw = req.query.raw === "true";
+
     const { supabase: sb } = await import("../utils/supabase.js");
 
     let note = null;
@@ -696,58 +698,181 @@ export const viewNote = async (req, res) => {
     }
 
     if (!note) {
-      return res.status(404).json({ message: "Note not found" });
+      return res.status(404).send("Note not found");
     }
 
     const fileUrl = note.pdf_url || note.file_url || note.pdfUrl;
     const publicId = note.pdf_public_id || note.pdfPublicId;
 
-    if (fileUrl && fileUrl.startsWith("http")) {
-      let downloadUrl = fileUrl;
-      if (fileUrl.includes("/raw/private/")) {
-        let targetPublicId = publicId || "";
-        if (!targetPublicId.includes("classtech/notes/") && fileUrl.includes("classtech/notes/")) {
-          targetPublicId = `classtech/notes/${fileUrl.split("classtech/notes/")[1].split("?")[0]}`;
+    if (isRaw) {
+      if (fileUrl && fileUrl.startsWith("http")) {
+        let downloadUrl = fileUrl;
+        if (fileUrl.includes("/raw/private/")) {
+          let targetPublicId = publicId || "";
+          if (!targetPublicId.includes("classtech/notes/") && fileUrl.includes("classtech/notes/")) {
+            targetPublicId = `classtech/notes/${fileUrl.split("classtech/notes/")[1].split("?")[0]}`;
+          }
+          if (targetPublicId) {
+            downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
+              resource_type: "raw",
+              type: "private",
+            });
+          }
         }
-        if (targetPublicId) {
-          downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
-            resource_type: "raw",
-            type: "private",
-          });
-        }
-      }
 
-      await streamRemoteFileInline({
-        res,
-        url: downloadUrl,
-        filename: buildNoteDownloadFilename(note),
-      });
-    } else if (fileUrl && fileUrl.startsWith("data:")) {
-      const matches = fileUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      if (matches && matches.length === 3) {
-        const buffer = Buffer.from(matches[2], "base64");
+        await streamRemoteFileInline({
+          res,
+          url: downloadUrl,
+          filename: buildNoteDownloadFilename(note),
+        });
+      } else if (fileUrl && fileUrl.startsWith("data:")) {
+        const matches = fileUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const buffer = Buffer.from(matches[2], "base64");
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          return res.send(buffer);
+        }
+        return res.status(400).json({ message: "Invalid data URL format" });
+      } else {
+        const { data, error } = await supabase.storage
+          .from(supabaseBucket)
+          .download(publicId || fileUrl);
+
+        if (error || !data) {
+          return res.status(404).json({ message: "Note file not found in storage" });
+        }
+
+        const arrayBuffer = await data.arrayBuffer();
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
         res.setHeader("Access-Control-Allow-Origin", "*");
-        return res.send(buffer);
+        return res.send(Buffer.from(arrayBuffer));
       }
-      return res.status(400).json({ message: "Invalid data URL format" });
-    } else {
-      // Fetch from Supabase
-      const { data, error } = await supabase.storage
-        .from(supabaseBucket)
-        .download(publicId || fileUrl);
-
-      if (error || !data) {
-        return res.status(404).json({ message: "Note file not found in storage" });
-      }
-
-      const arrayBuffer = await data.arrayBuffer();
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      return res.send(Buffer.from(arrayBuffer));
+      return;
     }
+
+    // Serve custom PDF.js HTML viewer: completely eliminates browser PDF headers & provides 100% native smooth scrolling
+    const rawPdfUrl = `/teacher/notes/${noteId}/view?raw=true`;
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes">
+  <title>View Note</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      min-height: 100vh;
+      background-color: #F8FAFC;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow-y: auto !important;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+    }
+    #loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      color: #4C3FBE;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3.5px solid #E2E8F0;
+      border-top-color: #4C3FBE;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #pdf-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      padding: 12px 8px 40px 8px;
+      gap: 16px;
+    }
+    .pdf-page {
+      background: white;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+      border-radius: 6px;
+      max-width: 98%;
+      height: auto !important;
+      display: block;
+    }
+    .error-msg {
+      color: #E11D48;
+      text-align: center;
+      padding: 40px 20px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>Loading Document...</span>
+  </div>
+  <div id="pdf-container"></div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const pdfUrl = '${rawPdfUrl}';
+
+    async function renderPDF() {
+      try {
+        const loadingTask = pdfjsLib.getDocument(pdfUrl);
+        const pdf = await loadingTask.promise;
+        document.getElementById('loading').style.display = 'none';
+        const container = document.getElementById('pdf-container');
+
+        const windowWidth = window.innerWidth || document.documentElement.clientWidth || 360;
+        const targetWidth = Math.min(windowWidth - 16, 900);
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const unscaledViewport = page.getViewport({ scale: 1.0 });
+          const scale = targetWidth / unscaledViewport.width;
+          const dpr = window.devicePixelRatio || 1.5;
+          const viewport = page.getViewport({ scale: scale * dpr });
+
+          const canvas = document.createElement('canvas');
+          canvas.className = 'pdf-page';
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          canvas.style.width = (viewport.width / dpr) + 'px';
+          canvas.style.height = (viewport.height / dpr) + 'px';
+
+          const context = canvas.getContext('2d');
+          container.appendChild(canvas);
+
+          await page.render({
+            canvasContext: context,
+            viewport: viewport
+          }).promise;
+        }
+      } catch (err) {
+        console.error('PDF render error:', err);
+        document.getElementById('loading').innerHTML = '<div class="error-msg">Could not display PDF document.<br>' + (err.message || '') + '</div>';
+      }
+    }
+
+    renderPDF();
+  </script>
+</body>
+</html>`;
+
+    res.setHeader("Content-Type", "text/html");
+    return res.send(htmlContent);
   } catch (error) {
     if (res.headersSent) return;
     return res.status(500).json({ message: "Could not view note" });
