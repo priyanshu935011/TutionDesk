@@ -117,7 +117,7 @@ export const getStudents = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const cacheKey = `teacher:students:${ownerId}:${req.user.role}`;
+    const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
     if (req.query.refresh !== "true") {
       const cached = await getCache(cacheKey);
       if (cached) {
@@ -127,10 +127,13 @@ export const getStudents = async (req, res) => {
 
     const query = { user: ownerId };
 
+    if (req.query.archivedOnly === "true") {
+      query.isArchived = true;
+    } else if (req.query.includeArchived !== "true") {
+      query.isArchived = { $ne: true };
+    }
+
     // Fetch all batches for this institute and filter by status in-memory
-    // NOTE: 'status' is stored in local batches_metadata.json (not in DB), so DB-level
-    // filtering on 'status' silently strips the filter and returns ALL batches. We must
-    // fetch all and then filter after the status field is hydrated from metadata.
     const allBatches = await Batch.find({ user: ownerId }).select("_id status teacher");
     const archivedBatchIds = allBatches.filter((b) => b.status === "archived").map((b) => b._id);
 
@@ -144,7 +147,7 @@ export const getStudents = async (req, res) => {
         { enrolledBatchIds: { $in: batchIds } },
       ];
     } else {
-      if (archivedBatchIds.length > 0) {
+      if (archivedBatchIds.length > 0 && req.query.includeArchived !== "true") {
         query.$or = [
           { batch: { $nin: archivedBatchIds } },
           { batches: { $nin: archivedBatchIds } },
@@ -214,10 +217,10 @@ export const createStudent = async (req, res) => {
     const {
       name,
       phone,
-      parentName,
-      parentPhone,
-      email,
-      address,
+      parentName = "",
+      parentPhone = "",
+      email = "",
+      address = "",
       batch,
       batches = [],
       joinedOn,
@@ -226,25 +229,20 @@ export const createStudent = async (req, res) => {
       dueDate,
       paymentHistory: initialPaymentHistory = [],
       attendanceRecords = [],
-      feeStatus = "paid",
+      feeStatus = "unpaid",
     } = req.body;
 
     const paymentHistory = feeStatus === "unpaid" ? [] : initialPaymentHistory;
-
     const targetBatches = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
 
-    if (
-      !name ||
-      !phone ||
-      targetBatches.length === 0 ||
-      !joinedOn ||
-      totalFees === undefined ||
-      !feePlanType
-    ) {
-      return res.status(400).json({ message: "All fields are required" });
+    if (!name || !name.trim() || !phone || !phone.trim() || targetBatches.length === 0) {
+      return res.status(400).json({ message: "Name, phone number, and batch are required." });
     }
 
-    const total = Number(totalFees);
+    const total = (totalFees !== undefined && totalFees !== null && totalFees !== "") ? Number(totalFees) : 0;
+    const resolvedFeePlanType = (feePlanType && allowedFeeTypes.includes(feePlanType)) ? feePlanType : "monthly";
+    const resolvedJoinedOn = joinedOn ? new Date(joinedOn) : new Date();
+
     const amountError = validatePayments(total, paymentHistory);
     const attendanceError = validateAttendance(attendanceRecords);
 
@@ -256,15 +254,11 @@ export const createStudent = async (req, res) => {
       return res.status(400).json({ message: attendanceError });
     }
 
-    if (!allowedFeeTypes.includes(feePlanType)) {
-      return res.status(400).json({ message: "Invalid fee plan type" });
-    }
-
     const ownerId = req.user.role === "teacher"
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    if (feePlanType === "partial" && !dueDate) {
+    if (resolvedFeePlanType === "partial" && !dueDate && total > 0) {
       return res.status(400).json({ message: "Due date is required for partial fee plan" });
     }
 
@@ -638,6 +632,45 @@ export const deleteStudent = async (req, res) => {
   } catch (error) {
     console.error("deleteStudent error:", error);
     return res.status(500).json({ message: "Could not delete student" });
+  }
+};
+
+export const archiveStudent = async (req, res) => {
+  try {
+    if (req.user.role === "teacher") {
+      return res.status(403).json({ message: "Access denied. Teachers cannot archive students." });
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    const student = await Student.findOne({
+      _id: req.params.id,
+      user: ownerId,
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const targetArchivedState = req.body.isArchived !== undefined ? Boolean(req.body.isArchived) : !student.isArchived;
+    student.isArchived = targetArchivedState;
+    await student.save();
+
+    try {
+      if (student.enrollmentNumber) {
+        await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
+      }
+      await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("teacher:students:*");
+    } catch (_) {}
+
+    const populatedStudent = await populateStudent(Student.findById(student._id));
+    return res.json(populatedStudent);
+  } catch (error) {
+    console.error("archiveStudent error:", error);
+    return res.status(500).json({ message: "Could not archive student" });
   }
 };
 

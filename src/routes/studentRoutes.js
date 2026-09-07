@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import {
   addPayment,
+  archiveStudent,
   bulkCreateStudents,
   createStudent,
   deleteStudent,
@@ -24,6 +25,7 @@ router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
 router.route("/").get(getStudents).post(createStudent);
 router.get("/:id", getStudentById);
+router.put("/:id/archive", archiveStudent);
 router.post("/:id/send-credentials-whatsapp", sendStudentCredentialsWhatsApp);
 router.post("/:id/send-fee-reminder", sendFeeReminderWhatsApp);
 router.post("/:id/payments", addPayment);

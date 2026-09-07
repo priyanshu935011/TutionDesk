@@ -115,9 +115,52 @@ export const updateBatch = async (req, res) => {
       return res.status(404).json({ message: "Batch not found" });
     }
 
+    if (status === "archived") {
+      // Find all students enrolled in this batch
+      const studentsInBatch = await Student.find({
+        user: ownerId,
+        $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
+      });
+
+      // Find all other active batches for this institute
+      const allActiveBatches = await Batch.find({
+        user: ownerId,
+        status: { $ne: "archived" },
+        _id: { $ne: req.params.id },
+      }).select("_id");
+      const activeBatchIds = new Set(allActiveBatches.map((b) => String(b._id)));
+
+      for (const student of studentsInBatch) {
+        const studentBatchIds = (student.batches && student.batches.length > 0)
+          ? student.batches.map((b) => String(b._id || b))
+          : [String(student.batch)];
+
+        const hasOtherActiveBatch = studentBatchIds.some(
+          (bId) => bId !== String(req.params.id) && activeBatchIds.has(bId)
+        );
+
+        if (!hasOtherActiveBatch) {
+          student.isArchived = true;
+          await student.save();
+        }
+      }
+    } else if (status === "active") {
+      const studentsInBatch = await Student.find({
+        user: ownerId,
+        $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
+      });
+      for (const student of studentsInBatch) {
+        if (student.isArchived) {
+          student.isArchived = false;
+          await student.save();
+        }
+      }
+    }
+
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
     await clearCachePattern("teacher:batches:*");
+    await clearCachePattern("teacher:students:*");
     return res.json(batch);
   } catch (error) {
     console.error("updateBatch error:", error);

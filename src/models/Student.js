@@ -97,7 +97,7 @@ const studentSchema = new mongoose.Schema(
     ],
     joinedOn: {
       type: Date,
-      required: true,
+      default: Date.now,
     },
     dueDate: {
       type: Date,
@@ -105,13 +105,13 @@ const studentSchema = new mongoose.Schema(
     },
     totalFees: {
       type: Number,
-      required: true,
+      default: 0,
       min: 0,
     },
     feePlanType: {
       type: String,
       enum: ["monthly", "full_course", "partial"],
-      required: true,
+      default: "monthly",
     },
     paymentHistory: {
       type: [paymentSchema],
@@ -124,6 +124,10 @@ const studentSchema = new mongoose.Schema(
     password: {
       type: String,
       default: "",
+    },
+    isArchived: {
+      type: Boolean,
+      default: false,
     },
     lastActiveAt: {
       type: Date,

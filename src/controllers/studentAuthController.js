@@ -70,6 +70,32 @@ export const studentLogin = async (req, res) => {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 
+    // Check if matching student accounts are archived
+    const activeMatchedStudents = matchedStudents.filter((s) => s.isArchived !== true);
+    if (activeMatchedStudents.length === 0 && matchedStudents.length > 0) {
+      return res.status(403).json({ message: "Your student account has been archived. Please contact your tuition administrator." });
+    }
+
+    // Filter students with at least one active batch
+    const Batch = (await import("../models/Batch.js")).default;
+    const unarchivedMatchedStudents = [];
+    for (const st of activeMatchedStudents) {
+      const stBatchId = st.batch?._id || st.batch;
+      if (stBatchId) {
+        const stBatch = await Batch.findById(stBatchId);
+        if (stBatch && stBatch.status === "archived") {
+          continue;
+        }
+      }
+      unarchivedMatchedStudents.push(st);
+    }
+
+    if (unarchivedMatchedStudents.length === 0 && activeMatchedStudents.length > 0) {
+      return res.status(403).json({ message: "Your assigned batch has been archived. Please contact your tuition administrator." });
+    }
+
+    matchedStudents = unarchivedMatchedStudents;
+
     // Verify subscription status of at least one institution and check portal toggle
     let hasActiveSubscription = false;
     let portalDisabled = false;
