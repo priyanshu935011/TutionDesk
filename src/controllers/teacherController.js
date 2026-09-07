@@ -120,15 +120,18 @@ export const getTeacherDashboard = async (req, res) => {
     }
     const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
 
-    let studentQuery = { user: ownerId };
-    let batchQuery = { user: ownerId };
+    let studentQuery = { user: ownerId, isArchived: { $ne: true } };
+    let batchQuery = { user: ownerId, status: { $ne: "archived" } };
     let quizQuery = { institute: instituteId };
     let noteQuery = { institute: instituteId };
     let testQuery = { institute: instituteId };
 
+    const allInstBatches = await Batch.find({ user: ownerId }).select("_id status teacher");
+    const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
+
     if (req.user.role === "teacher") {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
+      const myActiveBatches = allInstBatches.filter((b) => b.status !== "archived" && String(b.teacher) === String(req.user._id));
+      const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
       batchQuery.teacher = req.user._id;
 
@@ -140,6 +143,7 @@ export const getTeacherDashboard = async (req, res) => {
         ];
         const myStudents = await Student.find({
           user: ownerId,
+          isArchived: { $ne: true },
           $or: [
             { batch: { $in: batchIds } },
             { batches: { $in: batchIds } },
@@ -164,7 +168,7 @@ export const getTeacherDashboard = async (req, res) => {
       }
     }
 
-    const [students, batches, quizzes, notes, testResults] = await Promise.all([
+    const [rawStudents, batches, quizzes, notes, testResults] = await Promise.all([
       Student.find(studentQuery)
         .populate("batch", "name scheduleDays startTime endTime")
         .populate("batches", "name scheduleDays startTime endTime"),
@@ -178,6 +182,17 @@ export const getTeacherDashboard = async (req, res) => {
         .sort({ createdAt: -1 })
         .populate("student", "name enrollmentNumber email"),
     ]);
+
+    // Exclude students who are marked archived or belong exclusively to archived batches
+    const students = rawStudents.filter((student) => {
+      if (student.isArchived) return false;
+      const studentBatchIds = [];
+      if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
+      if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
+      if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (studentBatchIds.length === 0) return true;
+      return studentBatchIds.some((bId) => activeBatchIds.has(bId));
+    });
 
     let totalCollectedFees = 0;
     let totalPendingFees = 0;

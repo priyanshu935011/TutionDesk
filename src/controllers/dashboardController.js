@@ -20,20 +20,26 @@ export const getDashboard = async (req, res) => {
       ? (adminUserId || instIdStr || req.user._id)
       : (instIdStr || req.user._id);
 
-    // NOTE: 'status' is NOT a real DB column — it's stored in local batches_metadata.json.
-    // DB-level filters on 'status' get silently stripped. Fetch all and filter in-memory.
     const allBatches = await Batch.find({ user: ownerId }).select("_id status");
-    const archivedBatchIds = allBatches.filter((b) => b.status === "archived").map((b) => b._id);
-    const activeBatchCount = allBatches.filter((b) => b.status !== "archived").length;
+    const activeBatches = allBatches.filter((b) => b.status !== "archived");
+    const activeBatchIds = new Set(activeBatches.map((b) => String(b._id)));
+    const activeBatchCount = activeBatches.length;
 
-    const studentQuery = { user: ownerId };
-    if (archivedBatchIds.length > 0) {
-      studentQuery.batch = { $nin: archivedBatchIds };
-    }
+    const studentQuery = { user: ownerId, isArchived: { $ne: true } };
 
-    const [students] = await Promise.all([
+    const [rawStudents] = await Promise.all([
       Student.find(studentQuery).populate("batch", "name"),
     ]);
+
+    const students = rawStudents.filter((student) => {
+      if (student.isArchived) return false;
+      const studentBatchIds = [];
+      if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
+      if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
+      if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (studentBatchIds.length === 0) return true;
+      return studentBatchIds.some((bId) => activeBatchIds.has(bId));
+    });
 
     const now = new Date();
     const currentMonth = now.getMonth();

@@ -135,32 +135,50 @@ export const getStudents = async (req, res) => {
 
     // Fetch all batches for this institute and filter by status in-memory
     const allBatches = await Batch.find({ user: ownerId }).select("_id status teacher");
-    const archivedBatchIds = allBatches.filter((b) => b.status === "archived").map((b) => b._id);
+    const activeBatchIds = new Set(allBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
+    const archivedBatchIds = new Set(allBatches.filter((b) => b.status === "archived").map((b) => String(b._id)));
 
     if (req.user.role === "teacher") {
-      const batchIds = allBatches
-        .filter((b) => b.status !== "archived" && String(b.teacher) === String(req.user._id))
-        .map((b) => b._id);
+      const teacherBatchIds = Array.from(activeBatchIds).filter((bId) => {
+        const b = allBatches.find((x) => String(x._id) === bId);
+        return b && String(b.teacher) === String(req.user._id);
+      });
       query.$or = [
-        { batch: { $in: batchIds } },
-        { batches: { $in: batchIds } },
-        { enrolledBatchIds: { $in: batchIds } },
+        { batch: { $in: teacherBatchIds } },
+        { batches: { $in: teacherBatchIds } },
+        { enrolledBatchIds: { $in: teacherBatchIds } },
       ];
-    } else {
-      if (archivedBatchIds.length > 0 && req.query.includeArchived !== "true") {
-        query.$or = [
-          { batch: { $nin: archivedBatchIds } },
-          { batches: { $nin: archivedBatchIds } },
-          { enrolledBatchIds: { $nin: archivedBatchIds } },
-        ];
-      }
     }
 
-    const students = await populateStudent(
+    const rawStudents = await populateStudent(
       Student.find(query).sort({
         createdAt: -1,
       })
     );
+
+    let students = rawStudents;
+    if (req.query.archivedOnly === "true") {
+      students = rawStudents.filter((student) => {
+        if (student.isArchived) return true;
+        // Check if student belongs exclusively to archived batches
+        const studentBatchIds = [];
+        if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
+        if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
+        if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+        if (studentBatchIds.length === 0) return false;
+        return studentBatchIds.every((bId) => archivedBatchIds.has(bId));
+      });
+    } else if (req.query.includeArchived !== "true") {
+      students = rawStudents.filter((student) => {
+        if (student.isArchived) return false;
+        const studentBatchIds = [];
+        if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
+        if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
+        if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+        if (studentBatchIds.length === 0) return true;
+        return studentBatchIds.some((bId) => activeBatchIds.has(bId));
+      });
+    }
 
     await setCache(cacheKey, students, 86400);
     return res.json(students);
