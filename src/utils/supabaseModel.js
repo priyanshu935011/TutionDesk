@@ -450,12 +450,28 @@ class SupabaseDocument {
         // Fallback: if no batches in metadata, default to [batch_id]
         this.batches = this.batch ? [this.batch] : [];
       }
-      if (meta.totalFees !== undefined) this.totalFees = meta.totalFees;
-      if (meta.paidAmount !== undefined) this.paidAmount = meta.paidAmount;
-      if (meta.pendingAmount !== undefined) this.pendingAmount = meta.pendingAmount;
-      if (meta.feePlanType !== undefined) this.feePlanType = meta.feePlanType;
-      if (meta.dueDate !== undefined) this.dueDate = meta.dueDate;
-      if (meta.paymentHistory !== undefined) this.paymentHistory = meta.paymentHistory;
+      if (this.totalFees === undefined || this.totalFees === null) {
+        if (meta.totalFees !== undefined) this.totalFees = meta.totalFees;
+      }
+      if (this.paidAmount === undefined || this.paidAmount === null) {
+        if (meta.paidAmount !== undefined) this.paidAmount = meta.paidAmount;
+      }
+      if (this.pendingAmount === undefined || this.pendingAmount === null) {
+        if (meta.pendingAmount !== undefined) this.pendingAmount = meta.pendingAmount;
+      }
+      if (!this.feePlanType) {
+        if (meta.feePlanType !== undefined) this.feePlanType = meta.feePlanType;
+      }
+      if (this.due_date || this.dueDate) {
+        this.dueDate = this.due_date || this.dueDate;
+        // Sync metadata with database value
+        if (metadata[this._id]) metadata[this._id].dueDate = this.dueDate;
+      } else if (meta.dueDate) {
+        this.dueDate = meta.dueDate;
+      }
+      if (!this.paymentHistory || this.paymentHistory.length === 0) {
+        if (meta.paymentHistory !== undefined) this.paymentHistory = meta.paymentHistory;
+      }
       if (meta.profilePicture !== undefined) this.profilePicture = meta.profilePicture;
     }
 
