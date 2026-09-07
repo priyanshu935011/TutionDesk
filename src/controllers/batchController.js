@@ -199,7 +199,11 @@ export const deleteBatch = async (req, res) => {
     // Find all student records in this batch
     const studentsInBatch = await Student.find({
       user: ownerId,
-      batch: batchId,
+      $or: [
+        { batch: batchId },
+        { batches: batchId },
+        { enrolledBatchIds: batchId },
+      ],
     });
 
     for (const student of studentsInBatch) {

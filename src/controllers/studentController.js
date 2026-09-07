@@ -175,7 +175,7 @@ export const getStudents = async (req, res) => {
         if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
         if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
         if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
-        if (studentBatchIds.length === 0) return true;
+        if (studentBatchIds.length === 0) return false;
         return studentBatchIds.some((bId) => activeBatchIds.has(bId));
       });
     }
