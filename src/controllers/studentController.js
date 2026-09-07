@@ -644,6 +644,7 @@ export const deleteStudent = async (req, res) => {
       }
       await clearCachePattern("teacher:dashboard:*");
       await clearCachePattern("teacher:students:*");
+      await clearCachePattern("teacher:batches:*");
     } catch (cErr) {}
 
     return res.json({ message: "Student deleted successfully" });

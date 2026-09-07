@@ -260,6 +260,7 @@ export const deleteBatch = async (req, res) => {
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
     await clearCachePattern("teacher:batches:*");
+    await clearCachePattern("teacher:students:*");
 
     return res.json({ message: "Batch and associated student records deleted successfully" });
   } catch (error) {
