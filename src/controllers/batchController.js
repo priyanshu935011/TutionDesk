@@ -206,14 +206,18 @@ export const deleteBatch = async (req, res) => {
       const email = student.email ? student.email.toLowerCase().trim() : "";
       const phone = student.phone ? student.phone.trim() : "";
 
-      // Find all records for this student at this institute
-      const allStudentRecords = await Student.find({
-        user: ownerId,
-        $or: [
-          ...(email ? [{ email }] : []),
-          ...(phone ? [{ phone }] : []),
-        ].filter(Boolean),
-      });
+      const orConditions = [
+        ...(email ? [{ email }] : []),
+        ...(phone ? [{ phone }] : []),
+      ].filter(Boolean);
+
+      let allStudentRecords = [];
+      if (orConditions.length > 0) {
+        allStudentRecords = await Student.find({
+          user: ownerId,
+          $or: orConditions,
+        });
+      }
 
       const otherRecords = allStudentRecords.filter((r) => String(r._id) !== String(student._id));
 
@@ -231,13 +235,13 @@ export const deleteBatch = async (req, res) => {
         }
         
         await Student.deleteOne({ _id: student._id });
-        await TestResult.deleteMany({ student: student._id });
-        await QuizAttempt.deleteMany({ student: student._id });
+        try { await TestResult.deleteMany({ student: student._id }); } catch (_) {}
+        try { await QuizAttempt.deleteMany({ student: student._id }); } catch (_) {}
       } else {
         // If enrolled ONLY in this batch, delete completely
         await Student.deleteOne({ _id: student._id });
-        await TestResult.deleteMany({ student: student._id });
-        await QuizAttempt.deleteMany({ student: student._id });
+        try { await TestResult.deleteMany({ student: student._id }); } catch (_) {}
+        try { await QuizAttempt.deleteMany({ student: student._id }); } catch (_) {}
       }
     }
 
