@@ -109,7 +109,7 @@ export const updateBatch = async (req, res) => {
       { _id: req.params.id, user: ownerId },
       updateData,
       { new: true, runValidators: true }
-    ).populate("teacher", "name email");
+    );
 
     if (!batch) {
       return res.status(404).json({ message: "Batch not found" });
@@ -161,7 +161,9 @@ export const updateBatch = async (req, res) => {
     await clearCachePattern("student:dashboard:*");
     await clearCachePattern("teacher:batches:*");
     await clearCachePattern("teacher:students:*");
-    return res.json(batch);
+
+    const populatedBatch = await Batch.findById(batch._id).populate("teacher", "name email");
+    return res.json(populatedBatch || batch);
   } catch (error) {
     console.error("updateBatch error:", error);
     return res.status(500).json({ message: error.message || "Could not update batch" });
