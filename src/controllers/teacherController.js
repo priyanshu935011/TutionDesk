@@ -121,7 +121,7 @@ export const getTeacherDashboard = async (req, res) => {
     const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
 
     let studentQuery = { user: ownerId, isArchived: { $ne: true } };
-    let batchQuery = { user: ownerId, status: { $ne: "archived" } };
+    let batchQuery = { user: ownerId };
     let quizQuery = { institute: instituteId };
     let noteQuery = { institute: instituteId };
     let testQuery = { institute: instituteId };
@@ -130,7 +130,7 @@ export const getTeacherDashboard = async (req, res) => {
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
 
     if (req.user.role === "teacher") {
-      const myActiveBatches = allInstBatches.filter((b) => b.status !== "archived" && String(b.teacher) === String(req.user._id));
+      const myActiveBatches = allInstBatches.filter((b) => String(b.teacher) === String(req.user._id));
       const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
       batchQuery.teacher = req.user._id;
@@ -217,7 +217,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     const summary = {
       totalStudents: students.length,
-      totalBatches: batches.length,
+      totalBatches: batches.filter((b) => b.status !== "archived").length,
       totalQuizzes: quizzes.length,
       totalNotes: notes.length,
       totalTestResults: testResults.length,
