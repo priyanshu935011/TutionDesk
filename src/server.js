@@ -139,7 +139,7 @@ app.use("/payment", paymentRoutes);
 app.use("/videos", videoRoutes);
 app.use("/api/videos", videoRoutes);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 
 initializeSupabaseStorage().then(() => {
   server.listen(PORT, () => {
