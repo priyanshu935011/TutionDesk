@@ -88,7 +88,7 @@ app.get("/", (_, res) => {
   res.json({ message: "Coaching CRM API is running" });
 });
 
-app.get("/health", (_, res) => {
+app.get(["/health", "/api/health"], (_, res) => {
   res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date() });
 });
 
