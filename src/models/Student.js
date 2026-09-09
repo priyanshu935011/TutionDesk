@@ -36,6 +36,10 @@ const attendanceSchema = new mongoose.Schema(
       enum: ["present", "absent"],
       required: true,
     },
+    batchId: {
+      type: String,
+      required: false,
+    },
   },
   { _id: true }
 );
