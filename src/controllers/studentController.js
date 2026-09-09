@@ -793,7 +793,7 @@ export const addPayment = async (req, res) => {
 
 export const markAttendance = async (req, res) => {
   try {
-    const { date, status } = req.body;
+    const { date, status, batchId } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
     const ownerId = req.user.role === "teacher" 
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
@@ -803,7 +803,12 @@ export const markAttendance = async (req, res) => {
     if (req.user.role === "teacher") {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const batchIds = myBatches.map((b) => b._id);
-      query.batch = { $in: batchIds };
+      const strBatchIds = batchIds.map((b) => String(b));
+      query.$or = [
+        { batch: { $in: batchIds } },
+        { batches: { $in: batchIds } },
+        { enrolledBatchIds: { $in: strBatchIds } }
+      ];
     }
 
     const student = await Student.findOne(query);
@@ -816,15 +821,61 @@ export const markAttendance = async (req, res) => {
       return res.status(400).json({ message: "Date and valid attendance status are required" });
     }
 
-    const targetDay = new Date(date).toDateString();
-    const existingRecord = student.attendanceRecords.find(
-      (record) => new Date(record.date).toDateString() === targetDay
-    );
+    const targetDateObj = new Date(date);
+    const targetDateStr = targetDateObj.toISOString().split("T")[0];
+    const targetDay = targetDateObj.toDateString();
+
+    const targetBatchIdStr = batchId ? String(batchId) : (student.batch ? String(student.batch) : null);
+
+    const existingRecord = (student.attendanceRecords || []).find((record) => {
+      if (!record.date) return false;
+      const rStr = typeof record.date === "string" ? record.date.substring(0, 10) : new Date(record.date).toISOString().substring(0, 10);
+      const matchesDate = rStr === targetDateStr || new Date(record.date).toDateString() === targetDay;
+      const matchesBatch = targetBatchIdStr && record.batchId ? String(record.batchId) === targetBatchIdStr : true;
+      return matchesDate && matchesBatch;
+    });
 
     if (existingRecord) {
       existingRecord.status = status;
+      if (targetBatchIdStr) existingRecord.batchId = targetBatchIdStr;
     } else {
-      student.attendanceRecords.unshift({ date, status });
+      if (!student.attendanceRecords) student.attendanceRecords = [];
+      const newRec = { date: targetDateStr, status };
+      if (targetBatchIdStr) newRec.batchId = targetBatchIdStr;
+      student.attendanceRecords.unshift(newRec);
+    }
+
+    // Sync to Supabase
+    try {
+      let sbQuery = supabase
+        .from("attendance")
+        .select("id")
+        .eq("student_id", student._id)
+        .eq("date", targetDateStr);
+      
+      if (targetBatchIdStr) {
+        sbQuery = sbQuery.eq("batch_id", targetBatchIdStr);
+      }
+
+      const { data: existingDbRec } = await sbQuery.maybeSingle();
+
+      if (existingDbRec && existingDbRec.id) {
+        await supabase
+          .from("attendance")
+          .update({ status, ...(targetBatchIdStr ? { batch_id: targetBatchIdStr } : {}) })
+          .eq("id", existingDbRec.id);
+      } else {
+        await supabase
+          .from("attendance")
+          .insert({
+            student_id: student._id,
+            date: targetDateStr,
+            status,
+            ...(targetBatchIdStr ? { batch_id: targetBatchIdStr } : {})
+          });
+      }
+    } catch (dbErr) {
+      console.error("Direct attendance table sync error:", dbErr.message);
     }
 
     await student.save();
@@ -928,7 +979,14 @@ export const markBatchAttendance = async (req, res) => {
       return res.status(404).json({ message: "Batch not found." });
     }
 
-    const batchStudents = await Student.find({ user: ownerId, batch: batchId });
+    const batchStudents = await Student.find({
+      user: ownerId,
+      $or: [
+        { batch: batchId },
+        { batches: batchId },
+        { enrolledBatchIds: String(batchId) }
+      ]
+    });
     if (batchStudents.length === 0) {
       return res.status(400).json({ message: "No students found in this batch." });
     }
@@ -955,7 +1013,9 @@ export const markBatchAttendance = async (req, res) => {
       const existingRecord = (student.attendanceRecords || []).find((r) => {
         if (!r.date) return false;
         const rStr = typeof r.date === "string" ? r.date.substring(0, 10) : new Date(r.date).toISOString().substring(0, 10);
-        return rStr === targetDateStr;
+        const matchesDate = rStr === targetDateStr;
+        const matchesBatch = r.batchId ? String(r.batchId) === String(batchId) : true;
+        return matchesDate && matchesBatch;
       });
 
       const wasAlreadyAbsent = existingRecord && existingRecord.status === "absent";
@@ -979,6 +1039,7 @@ export const markBatchAttendance = async (req, res) => {
           .select("id")
           .eq("student_id", student._id)
           .eq("date", targetDateStr)
+          .eq("batch_id", String(batchId))
           .maybeSingle();
 
         if (existingDbRec && existingDbRec.id) {
@@ -1021,7 +1082,14 @@ export const markBatchAttendance = async (req, res) => {
       }
     } catch (cErr) {}
 
-    const updatedStudents = await populateStudent(Student.find({ user: ownerId, batch: batchId }));
+    const updatedStudents = await populateStudent(Student.find({
+      user: ownerId,
+      $or: [
+        { batch: batchId },
+        { batches: batchId },
+        { enrolledBatchIds: String(batchId) }
+      ]
+    }));
 
     const message = isUpdate ? "Attendance updated successfully" : "Attendance marked successfully";
 
