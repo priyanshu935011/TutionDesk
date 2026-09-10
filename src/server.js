@@ -26,6 +26,7 @@ import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
+import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
 
 connectDB();
 
@@ -90,6 +91,16 @@ app.get("/", (_, res) => {
 
 app.get(["/health", "/api/health"], (_, res) => {
   res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date() });
+});
+
+app.get(["/flush-cache", "/api/flush-cache"], async (_, res) => {
+  try {
+    flushMemoryCache();
+    await clearCachePattern("*");
+    return res.json({ status: "ok", message: "Memory (RAM) & Redis caches flushed successfully" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/ads.txt", async (req, res) => {
