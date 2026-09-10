@@ -1182,9 +1182,9 @@ class SupabaseQuery {
       doc.attendanceRecords = attendanceByStudent[doc.id] || [];
       doc.attendance_records = doc.attendanceRecords;
       
-      const paid = doc.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+      const paid = doc.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
       doc.paidAmount = paid;
-      doc.pendingAmount = Number(doc.totalFees || doc.total_fees || 0) - paid;
+      doc.pendingAmount = Math.max(0, Number(doc.totalFees || doc.total_fees || 0) - paid);
     }
   }
 }
