@@ -33,6 +33,20 @@ import { getLiveStateForStudent } from "../services/quizRuntime.js";
 
 const allowedFeeTypes = ["monthly", "full_course", "partial"];
 
+const getISTDateStr = (dateInput) => {
+  if (!dateInput) {
+    const nowIST = new Date(Date.now() + 5.5 * 3600 * 1000);
+    return nowIST.toISOString().split("T")[0];
+  }
+  if (typeof dateInput === "string") {
+    const match = dateInput.match(/^\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+  }
+  const d = new Date(dateInput);
+  const istMs = d.getTime() + (5.5 * 3600 * 1000);
+  return new Date(istMs).toISOString().split("T")[0];
+};
+
 const getPaidAmount = (paymentHistory = []) =>
   paymentHistory.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
@@ -275,10 +289,6 @@ export const createStudent = async (req, res) => {
     const ownerId = req.user.role === "teacher"
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
-
-    if (resolvedFeePlanType === "partial" && !dueDate && total > 0) {
-      return res.status(400).json({ message: "Due date is required for partial fee plan" });
-    }
 
     // Verify all target batches exist
     const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
@@ -824,9 +834,12 @@ export const markAttendance = async (req, res) => {
       return res.status(400).json({ message: "Date and valid attendance status are required" });
     }
 
-    const targetDateObj = new Date(date);
-    const targetDateStr = targetDateObj.toISOString().split("T")[0];
-    const targetDay = targetDateObj.toDateString();
+    const targetDateStr = getISTDateStr(date);
+    const todayISTStr = getISTDateStr(new Date());
+    if (targetDateStr > todayISTStr) {
+      return res.status(400).json({ message: "Future attendance marking is not allowed." });
+    }
+    const targetDay = targetDateStr;
 
     const targetBatchIdStr = batchId ? String(batchId) : (student.batch ? String(student.batch) : null);
 
@@ -994,14 +1007,11 @@ export const markBatchAttendance = async (req, res) => {
       return res.status(400).json({ message: "No students found in this batch." });
     }
 
-    const targetDate = new Date(date);
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    if (targetDate.getTime() > today.getTime()) {
+    const targetDateStr = getISTDateStr(date);
+    const todayISTStr = getISTDateStr(new Date());
+    if (targetDateStr > todayISTStr) {
       return res.status(400).json({ message: "Future attendance marking is not allowed." });
     }
-
-    const targetDateStr = targetDate.toISOString().split("T")[0];
 
     let isUpdate = false;
     const absentStudents = [];
@@ -1387,68 +1397,6 @@ export const getStudentPortalData = async (req, res) => {
           questionsCount: q.questions?.length || 0,
         }));
 
-        const instUserKey = String(student.user);
-        const collectiveFees = instituteFeesMap[instUserKey] || {
-          totalFees: student.totalFees,
-          paymentHistory: student.paymentHistory || [],
-          paidAmount: student.paidAmount,
-          pendingAmount: student.pendingAmount,
-          dueDate: student.dueDate,
-        };
-
-        const noticeSetting = await SystemSetting.findOne({ key: "notice_global_expiry_settings" });
-        const expiryDays = Number(noticeSetting?.value?.globalExpiryDays ?? 7);
-
-        const allNotices = await Notice.find({}).sort({ createdAt: -1 });
-
-        const instIdStr = String(instituteId);
-        const batchIdStr = String(currentBatchIdVal || "");
-        const cutoffTime = expiryDays > 0 ? Date.now() - (expiryDays * 24 * 60 * 60 * 1000) : 0;
-
-        // Filter notes for current batch
-        const batchNotes = notes.filter((n) => {
-          const nBatch = n.batch ? String(n.batch._id || n.batch.id || n.batch) : null;
-          if (!nBatch) return true; // General note for all batches
-          return nBatch === batchIdStr;
-        });
-
-        // Filter test results for current batch
-        const batchTestResults = testResults.filter((t) => {
-          const tBatch = t.batch ? String(t.batch._id || t.batch.id || t.batch) : "";
-          if (!tBatch) return true; // Untagged test result
-          return tBatch === batchIdStr;
-        });
-
-        // Filter attendance records for current batch
-        const batchAttendanceRecords = (student.attendanceRecords || []).filter((r) => {
-          const rBatch = r.batchId || r.batch ? String(r.batchId || r.batch) : "";
-          if (!rBatch) return true; // Untagged attendance record
-          return rBatch === batchIdStr;
-        });
-
-        const studentNotices = allNotices.filter((n) => {
-          const nInst = String(n.institute || n.user || n.institute_id || n.instituteId || "");
-          if (nInst !== instIdStr) return false;
-
-          if (cutoffTime > 0 && n.createdAt) {
-            const createdTime = new Date(n.createdAt).getTime();
-            if (!isNaN(createdTime) && createdTime < cutoffTime) return false;
-          }
-
-          if (n.targetType === "all" || !n.targetType) return true;
-          if (n.targetType === "batch" && Array.isArray(n.batchIds)) {
-            if (n.batchIds.length === 0) return true;
-            return n.batchIds.some((bId) => String(bId) === batchIdStr);
-          }
-          return true;
-        });
-
-        studentNotices.sort((a, b) => {
-          const dtA = new Date(a.createdAt || a.created_at || a.date || 0).getTime();
-          const dtB = new Date(b.createdAt || b.created_at || b.date || 0).getTime();
-          return dtB - dtA;
-        });
-
         classes.push({
           studentId: student._id,
           student: {
@@ -1463,12 +1411,12 @@ export const getStudentPortalData = async (req, res) => {
             customFields: student.customFields || {},
             enrollmentNumber: student.enrollmentNumber,
             batch: batch || student.batch,
-            paidAmount: collectiveFees.paidAmount,
-            pendingAmount: collectiveFees.pendingAmount,
-            totalFees: collectiveFees.totalFees,
+            paidAmount: student.paidAmount || 0,
+            pendingAmount: student.pendingAmount || 0,
+            totalFees: student.totalFees || 0,
             feePlanType: student.feePlanType,
-            paymentHistory: collectiveFees.paymentHistory,
-            dueDate: collectiveFees.dueDate,
+            paymentHistory: student.paymentHistory || [],
+            dueDate: student.dueDate,
           },
           teacherName,
           instituteName: institute.name,
@@ -1481,7 +1429,7 @@ export const getStudentPortalData = async (req, res) => {
                 endTime: batch.endTime,
               }
             : null,
-          feesHistory: collectiveFees.paymentHistory,
+          feesHistory: student.paymentHistory || [],
           attendance: batchAttendanceRecords,
           notes: batchNotes,
           testResults: batchTestResults,

@@ -9,7 +9,33 @@ import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { supabase } from "../utils/supabaseModel.js";
 import cloudinary from "../utils/cloudinary.js";
-import { sendStudentNotification } from "../services/notificationService.js";
+import Note from "../models/Note.js";
+
+// Helper: Recalculate & Sync Institute Storage in DB directly
+export const syncInstituteStorage = async (instituteId) => {
+  try {
+    const [videos, notes] = await Promise.all([
+      VideoLecture.find({ institute: instituteId }).select("fileSizeBytes"),
+      Note.find({ institute: instituteId }).select("fileSizeBytes file_size_bytes"),
+    ]);
+
+    let totalBytes = 0;
+    videos.forEach((v) => {
+      totalBytes += Number(v.fileSizeBytes || 0);
+    });
+    notes.forEach((n) => {
+      totalBytes += Number(n.fileSizeBytes || n.file_size_bytes || 0);
+    });
+
+    await Institute.findByIdAndUpdate(instituteId, {
+      usedVideoStorageBytes: totalBytes,
+    });
+    return totalBytes;
+  } catch (err) {
+    console.error("syncInstituteStorage error:", err);
+    return 0;
+  }
+};
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -138,6 +164,35 @@ export const updateInstituteVideoSettings = async (req, res) => {
 
 export const getBunnyUploadSignature = async (req, res) => {
   try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    if (instituteId) {
+      const institute = await Institute.findById(instituteId);
+      if (institute) {
+        const currentUsed = Number(institute.usedVideoStorageBytes || 0);
+        const maxBytes = Number(institute.maxVideoStorageGb || 50) * 1024 * 1024 * 1024;
+        const fileSizeBytes = Number(req.body.fileSizeBytes || 0);
+
+        if (currentUsed >= maxBytes) {
+          const freeMb = Math.max(0, Math.round((maxBytes - currentUsed) / (1024 * 1024)));
+          return res.status(400).json({
+            message: `Storage full! You have used 100% of your allocated ${institute.maxVideoStorageGb || 50} GB storage limit. Please contact Super Admin to upgrade storage.`
+          });
+        }
+
+        if (fileSizeBytes > 0 && (currentUsed + fileSizeBytes > maxBytes)) {
+          const freeBytes = Math.max(0, maxBytes - currentUsed);
+          const freeMb = (freeBytes / (1024 * 1024)).toFixed(1);
+          const fileMb = (fileSizeBytes / (1024 * 1024)).toFixed(1);
+          return res.status(400).json({
+            message: `Video size (${fileMb} MB) exceeds available storage (${freeMb} MB remaining out of ${institute.maxVideoStorageGb || 50} GB). Please free up storage or contact Admin.`
+          });
+        }
+      }
+    }
+
     const bunny = await getBunnySettingsHelper();
     const { title } = req.body;
 
@@ -409,15 +464,12 @@ export const getTeacherVideos = async (req, res) => {
     const now = new Date();
     const activeVideos = [];
     const expiredVideos = [];
-    let computedTotalBytes = 0;
-
     videos.forEach((v) => {
       const isExpired = v.expiryDate && new Date(v.expiryDate).getTime() < now.getTime();
       if (isExpired && v.status !== "expired") {
         v.status = "expired";
       }
       const vObj = typeof v.toObject === "function" ? v.toObject() : v;
-      computedTotalBytes += Number(vObj.fileSizeBytes || 0);
 
       if (isExpired) {
         expiredVideos.push(vObj);
@@ -427,7 +479,10 @@ export const getTeacherVideos = async (req, res) => {
     });
 
     const maxGb = Number(institute.maxVideoStorageGb || 50);
-    const usedBytes = Math.max(Number(institute.usedVideoStorageBytes || 0), computedTotalBytes);
+    let usedBytes = Number(institute.usedVideoStorageBytes ?? -1);
+    if (usedBytes < 0) {
+      usedBytes = await syncInstituteStorage(instituteId);
+    }
     const usedGb = Number((usedBytes / (1024 * 1024 * 1024)).toFixed(2));
     const freeGb = Number(Math.max(0, maxGb - usedGb).toFixed(2));
     const usagePercentage = maxGb > 0 ? Math.min(100, Math.round((usedGb / maxGb) * 100)) : 0;

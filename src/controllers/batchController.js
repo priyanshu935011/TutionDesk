@@ -4,6 +4,7 @@ import Quiz from "../models/Quiz.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
 import QuizAttempt from "../models/QuizAttempt.js";
+import Institute from "../models/Institute.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 
 
@@ -249,8 +250,26 @@ export const deleteBatch = async (req, res) => {
       }
     }
 
-    // Clean up notes for this batch
-    await Note.deleteMany({ batch: batchId });
+    // Clean up notes for this batch and update institute storage
+    try {
+      const notesToDelete = await Note.find({ batch: batchId });
+      let totalFreedNotesBytes = 0;
+      notesToDelete.forEach((n) => {
+        totalFreedNotesBytes += Number(n.fileSizeBytes || n.file_size_bytes || 0);
+      });
+      await Note.deleteMany({ batch: batchId });
+
+      if (totalFreedNotesBytes > 0 && batch.institute) {
+        const inst = await Institute.findById(batch.institute);
+        if (inst) {
+          inst.usedVideoStorageBytes = Math.max(0, (Number(inst.usedVideoStorageBytes) || 0) - totalFreedNotesBytes);
+          await inst.save();
+        }
+      }
+    } catch (nDelErr) {
+      console.error("Error updating institute storage on batch note deletion:", nDelErr.message);
+      await Note.deleteMany({ batch: batchId });
+    }
 
     // Remove this batch from all quizzes
     await Quiz.updateMany(

@@ -1134,6 +1134,17 @@ export const uploadNote = async (req, res) => {
       console.error("MongoDB note sync error:", mErr.message);
     }
 
+    // Update institute used storage directly in DB for uploaded note
+    if (fileSizeVal > 0 && instituteId) {
+      try {
+        await Institute.findByIdAndUpdate(instituteId, {
+          $inc: { usedVideoStorageBytes: fileSizeVal },
+        });
+      } catch (stErr) {
+        console.error("Error updating institute storage for note upload:", stErr.message);
+      }
+    }
+
     try {
       let targetStudentIds = resolvedStudentIds;
       if (targetType !== "student") {
@@ -1243,7 +1254,28 @@ export const deleteNote = async (req, res) => {
       }
     }
 
+    const freedBytes = Number(note.fileSizeBytes || note.file_size_bytes || 0);
+
     await Note.findByIdAndDelete(note._id);
+
+    // Also delete from Supabase if stored there
+    try {
+      const { supabase: sb } = await import("../utils/supabase.js");
+      await sb.from("notes").delete().eq("id", req.params.id);
+    } catch (_) {}
+
+    // Update institute used storage directly in DB for deleted note
+    if (freedBytes > 0 && instituteId) {
+      try {
+        const inst = await Institute.findById(instituteId);
+        if (inst) {
+          inst.usedVideoStorageBytes = Math.max(0, (Number(inst.usedVideoStorageBytes) || 0) - freedBytes);
+          await inst.save();
+        }
+      } catch (stErr) {
+        console.error("Error updating institute storage for note delete:", stErr.message);
+      }
+    }
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
@@ -1903,21 +1935,39 @@ export const updateGroupedTestResults = async (req, res) => {
 
 export const deleteGroupedTestResults = async (req, res) => {
   try {
-    const { batchId, title, examDate } = req.body;
+    const { batchId, title, examDate, testId, ids } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
 
-    await TestResult.deleteMany({
-      institute: instituteId,
-      batch: batchId,
-      title: title,
-      examDate: examDate
-    });
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    // Delete from Supabase test_marks table
+    if (ids && Array.isArray(ids) && ids.length > 0) {
+      const realIds = ids.map(id => String(id).includes("_") ? String(id).split("_")[0] : String(id));
+      await sb.from("test_marks").delete().in("id", realIds);
+    }
+    if (testId) {
+      const realId = String(testId).includes("_") ? String(testId).split("_")[0] : String(testId);
+      await sb.from("test_marks").delete().eq("id", realId);
+    }
+    if (title) {
+      const trimmedTitle = title.trim();
+      await sb.from("test_marks").delete().eq("institute_id", String(instituteId)).ilike("test_name", `%${trimmedTitle}%`);
+    }
+
+    // Delete from MongoDB TestResult collection
+    const mongoQuery = { institute: instituteId };
+    if (title) mongoQuery.title = title;
+    if (batchId) mongoQuery.batch = batchId;
+    if (examDate) mongoQuery.examDate = examDate;
+
+    await TestResult.deleteMany(mongoQuery);
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Grouped test results deleted successfully" });
   } catch (error) {
+    console.error("deleteGroupedTestResults error:", error);
     return res.status(500).json({ message: "Could not delete grouped test results" });
   }
 };
