@@ -518,10 +518,13 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "At least one batch must be assigned" });
     }
 
-    const total = Number(totalFees !== undefined ? totalFees : student.totalFees);
+    const inputTotal = Number(totalFees !== undefined ? totalFees : student.totalFees);
     const finalPaymentHistory = paymentHistory !== undefined 
       ? paymentHistory 
       : (student.paymentHistory || []);
+
+    const paid = getPaidAmount(finalPaymentHistory);
+    const total = Math.max(inputTotal, paid);
 
     const amountError = validatePayments(total, finalPaymentHistory);
     if (amountError) {
