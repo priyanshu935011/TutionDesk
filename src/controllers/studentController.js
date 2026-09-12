@@ -537,6 +537,13 @@ export const updateStudent = async (req, res) => {
       customFields,
     } = req.body;
 
+    // Safe date parser to prevent Invalid Date casting errors
+    const safeParseDate = (val) => {
+      if (!val) return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
     const rawBatches = Array.isArray(batches) && batches.length > 0 
       ? batches 
       : (batch ? [batch] : (student.batches?.length ? student.batches : [student.batch]));
@@ -571,19 +578,25 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "Invalid fee plan type" });
     }
 
-    // Verify target batches exist
-    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
-    if (verifiedBatches.length !== targetBatches.length) {
-      // Fallback: filter to verified batches only if some match
-      if (verifiedBatches.length > 0) {
-        targetBatches.length = 0;
-        targetBatches.push(...verifiedBatches.map(b => String(b._id)));
-      } else {
-        return res.status(400).json({ message: "Selected batch does not exist" });
-      }
+    // Verify target batches exist by _id or name for this owner
+    let verifiedBatches = [];
+    try {
+      verifiedBatches = await Batch.find({
+        $or: [
+          { _id: { $in: targetBatches } },
+          { name: { $in: targetBatches } }
+        ]
+      });
+    } catch (_) {}
+
+    let finalBatchIds = [];
+    if (verifiedBatches.length > 0) {
+      finalBatchIds = verifiedBatches.map(b => String(b._id || b.id));
+    } else {
+      finalBatchIds = targetBatches;
     }
 
-    const primaryBatch = targetBatches[0];
+    const primaryBatch = finalBatchIds[0];
     const newEmail = email ? email.toLowerCase().trim() : "";
 
     const inst = await Institute.findById(student.user) || await Institute.findById(ownerId);
@@ -595,6 +608,8 @@ export const updateStudent = async (req, res) => {
       }
     }
 
+    const resolvedJoinedOn = safeParseDate(joinedOn) || student.joinedOn || student.createdAt || new Date();
+
     student.name = name;
     student.phone = phone;
     student.parentName = parentName;
@@ -602,14 +617,14 @@ export const updateStudent = async (req, res) => {
     student.email = newEmail;
     student.address = address || "";
     student.batch = primaryBatch;
-    student.batches = targetBatches;
-    student.joinedOn = joinedOn;
+    student.batches = finalBatchIds;
+    student.joinedOn = resolvedJoinedOn;
     student.feePlanType = feePlanType;
     student.totalFees = total;
     student.paymentHistory = finalPaymentHistory.map(p => ({
       _id: p._id || crypto.randomUUID(),
       amount: Number(p.amount || 0),
-      paymentDate: p.paymentDate || new Date().toISOString(),
+      paymentDate: safeParseDate(p.paymentDate) || new Date(),
       paymentType: p.paymentType || "monthly",
       note: p.note || ""
     }));
@@ -618,7 +633,8 @@ export const updateStudent = async (req, res) => {
     student.paidAmount = student.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     student.pendingAmount = Math.max(0, student.totalFees - student.paidAmount);
 
-    student.dueDate = resolveDueDate({ feePlanType, joinedOn, dueDate });
+    const calculatedDueDate = resolveDueDate({ feePlanType, joinedOn: resolvedJoinedOn, dueDate: safeParseDate(dueDate) });
+    student.dueDate = safeParseDate(calculatedDueDate) || calculatedDueDate;
     student.customFields = customFieldsObj;
 
     await student.save();

@@ -1887,14 +1887,25 @@ export const deleteTestResult = async (req, res) => {
     const realId = id.includes("_") ? id.split("_")[0] : id;
 
     const { supabase: sb } = await import("../utils/supabase.js");
-    const { error: deleteError } = await sb
-      .from("test_marks")
-      .delete()
-      .eq("id", realId);
+    if (sb) {
+      try {
+        await sb.from("test_marks").delete().eq("id", realId);
+      } catch (sbErr) {
+        console.error("Supabase test_marks delete error:", sbErr);
+      }
+    }
 
-    if (deleteError) {
-      console.error("Supabase test_marks delete error:", deleteError);
-      return res.status(500).json({ message: deleteError.message || "Could not delete test" });
+    try {
+      await TestResult.deleteMany({
+        $or: [
+          { _id: id },
+          { _id: realId },
+          { testId: id },
+          { testId: realId }
+        ]
+      });
+    } catch (mErr) {
+      console.error("Mongoose TestResult delete error:", mErr);
     }
 
     await invalidateUserDashboard(req);
