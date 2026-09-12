@@ -284,7 +284,15 @@ export const createStudent = async (req, res) => {
     } = req.body;
 
     const paymentHistory = feeStatus === "unpaid" ? [] : initialPaymentHistory;
-    const targetBatches = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
+    const rawTarget = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
+    const extractBatchId = (b) => {
+      if (!b) return null;
+      if (typeof b === "object") {
+        return (b._id || b.id || b.value || "").toString().trim() || null;
+      }
+      return String(b).trim() || null;
+    };
+    const targetBatches = rawTarget.map(extractBatchId).filter(Boolean);
 
     if (!name || !name.trim() || !phone || !phone.trim() || targetBatches.length === 0) {
       return res.status(400).json({ message: "Name, phone number, and batch are required." });
@@ -309,11 +317,31 @@ export const createStudent = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    // Verify all target batches exist
-    const verifiedBatches = await Batch.find({ _id: { $in: targetBatches } });
-    if (verifiedBatches.length !== targetBatches.length) {
-      return res.status(400).json({ message: "One or more selected batches do not exist" });
+    // Verify all target batches exist by _id, id, or name
+    let verifiedBatches = [];
+    try {
+      verifiedBatches = await Batch.find({
+        $or: [
+          { _id: { $in: targetBatches } },
+          { id: { $in: targetBatches } },
+          { name: { $in: targetBatches } }
+        ]
+      });
+    } catch (_) {}
+
+    const batchMap = new Map();
+    for (const b of verifiedBatches) {
+      const bId = String(b._id || b.id);
+      batchMap.set(bId, bId);
+      if (b.id) batchMap.set(String(b.id), bId);
+      if (b.name) batchMap.set(b.name, bId);
     }
+
+    const finalBatchIds = Array.from(
+      new Set(
+        targetBatches.map(tb => batchMap.get(tb) || tb)
+      )
+    );
 
     const cleanEmail = email ? email.toLowerCase().trim() : "";
     const cleanPhone = phone ? phone.trim() : "";
@@ -376,7 +404,7 @@ export const createStudent = async (req, res) => {
       }
     }
 
-    const primaryBatch = targetBatches[0];
+    const primaryBatch = finalBatchIds[0];
     const formattedPayments = paymentHistory.map(p => ({
       _id: p._id || crypto.randomUUID(),
       amount: Number(p.amount),
@@ -395,7 +423,7 @@ export const createStudent = async (req, res) => {
       address,
       enrollmentNumber: enrollmentNumberToUse,
       batch: primaryBatch,
-      batches: targetBatches,
+      batches: finalBatchIds,
       joinedOn,
       totalFees: total,
       feePlanType,
@@ -474,7 +502,13 @@ export const createStudent = async (req, res) => {
       }
     });
 
-    return res.status(201).json(populatedStudent);
+    const obj = populatedStudent ? (populatedStudent.toJSON ? populatedStudent.toJSON() : populatedStudent) : student;
+    const enrolledBatchIds = (obj.batches && obj.batches.length > 0)
+      ? obj.batches.map((b) => (b?._id || b?.id || b).toString())
+      : (obj.batch ? [(obj.batch?._id || obj.batch?.id || obj.batch).toString()] : []);
+    obj.enrolledBatchIds = enrolledBatchIds;
+
+    return res.status(201).json(obj);
   } catch (error) {
     console.error("Create student error details:", error);
     if (error?.code === 11000 && error?.keyPattern?.enrollmentNumber) {
@@ -578,23 +612,31 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "Invalid fee plan type" });
     }
 
-    // Verify target batches exist by _id or name for this owner
+    // Verify target batches exist by _id, id, or name for this owner
     let verifiedBatches = [];
     try {
       verifiedBatches = await Batch.find({
         $or: [
           { _id: { $in: targetBatches } },
+          { id: { $in: targetBatches } },
           { name: { $in: targetBatches } }
         ]
       });
     } catch (_) {}
 
-    let finalBatchIds = [];
-    if (verifiedBatches.length > 0) {
-      finalBatchIds = verifiedBatches.map(b => String(b._id || b.id));
-    } else {
-      finalBatchIds = targetBatches;
+    const batchMap = new Map();
+    for (const b of verifiedBatches) {
+      const bId = String(b._id || b.id);
+      batchMap.set(bId, bId);
+      if (b.id) batchMap.set(String(b.id), bId);
+      if (b.name) batchMap.set(b.name, bId);
     }
+
+    const finalBatchIds = Array.from(
+      new Set(
+        targetBatches.map(tb => batchMap.get(tb) || tb)
+      )
+    );
 
     const primaryBatch = finalBatchIds[0];
     const newEmail = email ? email.toLowerCase().trim() : "";
@@ -648,7 +690,13 @@ export const updateStudent = async (req, res) => {
     } catch (_) {}
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
-    return res.json(populatedStudent);
+    const obj = populatedStudent ? (populatedStudent.toJSON ? populatedStudent.toJSON() : populatedStudent) : student;
+    const enrolledBatchIds = (obj.batches && obj.batches.length > 0)
+      ? obj.batches.map((b) => (b?._id || b?.id || b).toString())
+      : (obj.batch ? [(obj.batch?._id || obj.batch?.id || obj.batch).toString()] : []);
+    obj.enrolledBatchIds = enrolledBatchIds;
+
+    return res.json(obj);
   } catch (error) {
     console.error("updateStudent error:", error);
     if (error?.code === 11000 && error?.keyPattern?.enrollmentNumber) {
