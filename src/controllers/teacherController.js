@@ -275,7 +275,7 @@ export const getTeacherDashboard = async (req, res) => {
     const responsePayload = {
       summary,
       students: [],
-      batches: [],
+      batches: processedBatches,
       quizzes: [],
       notes: [],
       testResults: [],
