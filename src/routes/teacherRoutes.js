@@ -29,6 +29,7 @@ import {
   deleteGroupedTestResults,
   sendNoteWhatsApp,
   sendTestResultWhatsApp,
+  getOutstandingStudents,
 } from "../controllers/teacherController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -49,6 +50,7 @@ const checkQuizFeature = (req, res, next) => {
 
 router.get("/dashboard", getTeacherDashboard);
 router.get("/sync", getTeacherDashboard);
+router.get("/outstanding-students", getOutstandingStudents);
 
 // Direct DB read — no cache/Redis — for always-fresh feature gating
 router.get("/features", getInstituteFeatures);

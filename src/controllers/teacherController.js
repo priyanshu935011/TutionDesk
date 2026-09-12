@@ -2085,3 +2085,67 @@ export const sendTestResultWhatsApp = async (req, res) => {
     return res.status(500).json({ message: "Could not send WhatsApp test result." });
   }
 };
+
+export const getOutstandingStudents = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    const instituteId = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+    const ownerId = req.user.role === "teacher"
+      ? (rawInst?.adminUser || req.user.institute?.adminUser || req.user._id)
+      : req.user._id;
+
+    let query = {
+      user: ownerId,
+      isArchived: { $ne: true },
+      pendingAmount: { $gt: 0 },
+    };
+
+    if (req.user.role === "teacher") {
+      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
+      const batchIds = myBatches.map((b) => String(b._id));
+      if (batchIds.length > 0) {
+        query.$or = [
+          { batch: { $in: batchIds } },
+          { batches: { $in: batchIds } },
+          { enrolledBatchIds: { $in: batchIds } },
+        ];
+      } else {
+        return res.json([]);
+      }
+    }
+
+    const students = await Student.find(query)
+      .populate("batch", "name")
+      .populate("batches", "name")
+      .sort({ pendingAmount: -1 });
+
+    const debtors = students.map((s) => {
+      let batchName = "Unassigned";
+      if (s.batch) {
+        batchName = typeof s.batch === "object" ? (s.batch.name || "Unassigned") : String(s.batch);
+      } else if (Array.isArray(s.batches) && s.batches.length > 0) {
+        const first = s.batches[0];
+        batchName = typeof first === "object" ? (first.name || "Unassigned") : String(first);
+      }
+
+      return {
+        id: String(s._id || s.id),
+        _id: String(s._id || s.id),
+        name: s.name || "",
+        batchName,
+        pendingAmount: Number(s.pendingAmount || 0),
+        pending: Number(s.pendingAmount || 0),
+        totalFees: Number(s.totalFees || 0),
+        paidAmount: Number(s.paidAmount || 0),
+        phone: s.phone || "",
+        parentPhone: s.parentPhone || "",
+        enrollmentNumber: s.enrollmentNumber || "",
+      };
+    });
+
+    return res.json(debtors);
+  } catch (error) {
+    console.error("getOutstandingStudents error:", error);
+    return res.status(500).json({ message: "Could not fetch outstanding students" });
+  }
+};
