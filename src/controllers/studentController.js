@@ -131,7 +131,9 @@ export const getStudents = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
+    const pageParam = req.query.page;
+    const limitParam = req.query.limit;
+    const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}:${pageParam || ""}:${limitParam || ""}`;
     if (req.query.refresh !== "true") {
       const cached = await getCache(cacheKey);
       if (cached) {
@@ -194,8 +196,25 @@ export const getStudents = async (req, res) => {
       });
     }
 
-    await setCache(cacheKey, students, 86400);
-    return res.json(students);
+    let responsePayload = students;
+    if (pageParam || limitParam) {
+      const page = Math.max(1, parseInt(pageParam) || 1);
+      const limit = Math.max(1, parseInt(limitParam) || 20);
+      const startIndex = (page - 1) * limit;
+      const paginatedStudents = students.slice(startIndex, startIndex + limit);
+      const hasMore = startIndex + limit < students.length;
+
+      responsePayload = {
+        students: paginatedStudents,
+        total: students.length,
+        page,
+        limit,
+        hasMore,
+      };
+    }
+
+    await setCache(cacheKey, responsePayload, 86400);
+    return res.json(responsePayload);
   } catch (error) {
     console.error("getStudents catch block error:", error);
     return res.status(500).json({ message: "Could not fetch students" });
