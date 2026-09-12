@@ -275,10 +275,10 @@ export const getTeacherDashboard = async (req, res) => {
     const responsePayload = {
       summary,
       students: [],
-      batches: processedBatches,
-      quizzes,
-      notes,
-      testResults,
+      batches: [],
+      quizzes: [],
+      notes: [],
+      testResults: [],
       institute,
       user: {
         id: req.user._id,
