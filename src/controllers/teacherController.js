@@ -23,6 +23,7 @@ import {
   startLiveQuiz,
 } from "../services/quizRuntime.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
+import { syncInstituteStorage } from "./videoController.js";
 import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 
@@ -923,15 +924,16 @@ export const uploadNote = async (req, res) => {
 
     // Check available storage for institute
     const newFileSizeBytes = req.file ? req.file.buffer.length : Number(req.body.fileSizeBytes || 0);
-    const instForStorage = await Institute.findById(instituteId);
-    if (instForStorage) {
-      const currentUsed = Number(instForStorage.usedVideoStorageBytes || 0);
-      const maxBytes = Number(instForStorage.maxVideoStorageGb || 50) * 1024 * 1024 * 1024;
+    if (instituteId) {
+      const currentUsed = await syncInstituteStorage(instituteId);
+      const instForStorage = await Institute.findById(instituteId);
+      const maxStorageGb = Number(instForStorage?.maxVideoStorageGb || 50);
+      const maxBytes = maxStorageGb * 1024 * 1024 * 1024;
       if (currentUsed + newFileSizeBytes > maxBytes) {
         const freeBytes = Math.max(0, maxBytes - currentUsed);
         const freeMb = (freeBytes / (1024 * 1024)).toFixed(1);
         return res.status(400).json({
-          message: `Note upload exceeds storage limit. Free storage remaining: ${freeMb} MB out of ${instForStorage.maxVideoStorageGb || 50} GB. Please contact Admin to upgrade storage.`
+          message: `Note upload exceeds storage limit. Free storage remaining: ${freeMb} MB out of ${maxStorageGb} GB. Please delete existing files or contact Admin to upgrade storage.`
         });
       }
     }
