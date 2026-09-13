@@ -137,6 +137,7 @@ Log in to your Classtech dashboard to view and follow up on this lead.`;
       }
     });
 
+    await clearCachePattern("teacher:leads:*");
     return res.status(201).json({
       success: true,
       message: "Inquiry submitted successfully! The tuition team will contact you shortly.",
@@ -148,6 +149,8 @@ Log in to your Classtech dashboard to view and follow up on this lead.`;
   }
 };
 
+import { getCache, setCache, clearCachePattern } from "../utils/cache.js";
+
 export const getLeads = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
@@ -155,7 +158,16 @@ export const getLeads = async (req, res) => {
       return res.status(400).json({ message: "Institute not associated with user" });
     }
 
+    const cacheKey = `teacher:leads:${instituteId}`;
+    if (req.query.refresh !== "true") {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
+
     const leads = await Lead.find({ institute: instituteId }).sort({ createdAt: -1 });
+    await setCache(cacheKey, leads, 86400);
     return res.json(leads);
   } catch (error) {
     console.error("getLeads error:", error);
@@ -184,6 +196,7 @@ export const updateLead = async (req, res) => {
     if (course !== undefined) lead.course = course;
 
     await lead.save();
+    await clearCachePattern("teacher:leads:*");
     return res.json(lead);
   } catch (error) {
     console.error("updateLead error:", error);
@@ -200,6 +213,7 @@ export const deleteLead = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
+    await clearCachePattern("teacher:leads:*");
     return res.json({ message: "Lead deleted successfully" });
   } catch (error) {
     console.error("deleteLead error:", error);

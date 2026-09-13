@@ -58,8 +58,16 @@ export const deleteCache = async (key) => {
 // Scan and delete keys matching a pattern (e.g. "teacher:*")
 export const clearCachePattern = async (pattern) => {
   try {
-    // Clear all memory cache keys instantly
-    memoryCache.clear();
+    if (!pattern || pattern === "*") {
+      memoryCache.clear();
+    } else {
+      const regexPattern = new RegExp("^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$");
+      for (const key of memoryCache.keys()) {
+        if (regexPattern.test(key)) {
+          memoryCache.delete(key);
+        }
+      }
+    }
 
     if (redisClient.isReady) {
       const keysToDelete = [];
@@ -67,7 +75,7 @@ export const clearCachePattern = async (pattern) => {
         keysToDelete.push(key);
       }
       if (keysToDelete.length > 0) {
-        await Promise.all(keysToDelete.map((k) => redisClient.del(k)));
+        await redisClient.del(keysToDelete);
       }
     }
   } catch (err) {}
