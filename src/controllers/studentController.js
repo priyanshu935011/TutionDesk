@@ -164,11 +164,9 @@ export const getStudents = async (req, res) => {
       ];
     }
 
-    const rawStudents = await populateStudent(
-      Student.find(query).sort({
-        createdAt: -1,
-      })
-    );
+    const rawStudents = await Student.find(query).sort({
+      createdAt: -1,
+    });
 
     let students = rawStudents;
     if (req.query.archivedOnly === "true") {
@@ -194,12 +192,20 @@ export const getStudents = async (req, res) => {
       });
     }
 
-    // Return lightweight list with enrollmentNumber, name, batches, pending fees
+    // Return lightweight list with enrollmentNumber, name, batches, pending fees without server joins or JS reduce loops
     const lightStudents = students.map((student) => {
       const sObj = student.toJSON ? student.toJSON() : student;
-      const paid = (sObj.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const total = Number(sObj.totalFees || 0);
-      const pendingAmount = Math.max(0, total - paid);
+      const paid = Number(
+        sObj.paidAmount !== undefined && sObj.paidAmount !== null
+          ? sObj.paidAmount
+          : (sObj.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0)
+      );
+      const pendingAmount = Number(
+        sObj.pendingAmount !== undefined && sObj.pendingAmount !== null
+          ? sObj.pendingAmount
+          : Math.max(0, total - paid)
+      );
 
       const enrolledBatchIds = (sObj.batches && sObj.batches.length > 0)
         ? sObj.batches.map((b) => (b?._id || b?.id || b).toString())
