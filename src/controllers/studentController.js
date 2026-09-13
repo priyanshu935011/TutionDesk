@@ -131,9 +131,7 @@ export const getStudents = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const pageParam = req.query.page;
-    const limitParam = req.query.limit;
-    const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}:${pageParam || ""}:${limitParam || ""}`;
+    const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
     if (req.query.refresh !== "true") {
       const cached = await getCache(cacheKey);
       if (cached) {
@@ -196,22 +194,39 @@ export const getStudents = async (req, res) => {
       });
     }
 
-    let responsePayload = students;
-    if (pageParam || limitParam) {
-      const page = Math.max(1, parseInt(pageParam) || 1);
-      const limit = Math.max(1, parseInt(limitParam) || 20);
-      const startIndex = (page - 1) * limit;
-      const paginatedStudents = students.slice(startIndex, startIndex + limit);
-      const hasMore = startIndex + limit < students.length;
+    // Return lightweight list with enrollmentNumber, name, batches, pending fees
+    const lightStudents = students.map((student) => {
+      const sObj = student.toJSON ? student.toJSON() : student;
+      const paid = (sObj.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const total = Number(sObj.totalFees || 0);
+      const pendingAmount = Math.max(0, total - paid);
 
-      responsePayload = {
-        students: paginatedStudents,
-        total: students.length,
-        page,
-        limit,
-        hasMore,
+      const enrolledBatchIds = (sObj.batches && sObj.batches.length > 0)
+        ? sObj.batches.map((b) => (b?._id || b?.id || b).toString())
+        : (sObj.batch ? [(sObj.batch?._id || sObj.batch?.id || sObj.batch).toString()] : []);
+
+      return {
+        _id: sObj._id || sObj.id,
+        id: sObj._id || sObj.id,
+        name: sObj.name || "",
+        enrollmentNumber: sObj.enrollmentNumber || "",
+        batch: sObj.batch,
+        batches: sObj.batches || [],
+        enrolledBatchIds,
+        pendingAmount,
+        totalFees: total,
+        paidAmount: paid,
+        feePlanType: sObj.feePlanType || "monthly",
+        phone: sObj.phone || "",
+        parentPhone: sObj.parentPhone || "",
+        isArchived: Boolean(sObj.isArchived),
       };
-    }
+    });
+
+    const responsePayload = {
+      students: lightStudents,
+      total: lightStudents.length,
+    };
 
     await setCache(cacheKey, responsePayload, 86400);
     return res.json(responsePayload);
