@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import Institute from "../models/Institute.js";
@@ -340,16 +341,21 @@ export const createStudent = async (req, res) => {
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
     // Verify all target batches exist by _id, id, or name
+    const validObjectIds = targetBatches.filter(tb => mongoose.Types.ObjectId.isValid(tb));
+    const nameOrCustomIds = targetBatches.filter(tb => !mongoose.Types.ObjectId.isValid(tb));
+    const orConditions = [];
+    if (validObjectIds.length > 0) orConditions.push({ _id: { $in: validObjectIds } });
+    if (targetBatches.length > 0) orConditions.push({ id: { $in: targetBatches } });
+    if (nameOrCustomIds.length > 0) orConditions.push({ name: { $in: nameOrCustomIds } });
+
     let verifiedBatches = [];
-    try {
-      verifiedBatches = await Batch.find({
-        $or: [
-          { _id: { $in: targetBatches } },
-          { id: { $in: targetBatches } },
-          { name: { $in: targetBatches } }
-        ]
-      });
-    } catch (_) {}
+    if (orConditions.length > 0) {
+      try {
+        verifiedBatches = await Batch.find({ user: ownerId, $or: orConditions });
+      } catch (err) {
+        console.error("Error verifying batches:", err);
+      }
+    }
 
     const batchMap = new Map();
     for (const b of verifiedBatches) {
@@ -361,7 +367,7 @@ export const createStudent = async (req, res) => {
 
     const finalBatchIds = Array.from(
       new Set(
-        targetBatches.map(tb => batchMap.get(tb) || tb)
+        targetBatches.map(tb => batchMap.get(tb) || tb).filter(tb => mongoose.Types.ObjectId.isValid(tb))
       )
     );
 
@@ -635,16 +641,21 @@ export const updateStudent = async (req, res) => {
     }
 
     // Verify target batches exist by _id, id, or name for this owner
+    const validObjectIds = targetBatches.filter(tb => mongoose.Types.ObjectId.isValid(tb));
+    const nameOrCustomIds = targetBatches.filter(tb => !mongoose.Types.ObjectId.isValid(tb));
+    const orConditions = [];
+    if (validObjectIds.length > 0) orConditions.push({ _id: { $in: validObjectIds } });
+    if (targetBatches.length > 0) orConditions.push({ id: { $in: targetBatches } });
+    if (nameOrCustomIds.length > 0) orConditions.push({ name: { $in: nameOrCustomIds } });
+
     let verifiedBatches = [];
-    try {
-      verifiedBatches = await Batch.find({
-        $or: [
-          { _id: { $in: targetBatches } },
-          { id: { $in: targetBatches } },
-          { name: { $in: targetBatches } }
-        ]
-      });
-    } catch (_) {}
+    if (orConditions.length > 0) {
+      try {
+        verifiedBatches = await Batch.find({ user: ownerId, $or: orConditions });
+      } catch (err) {
+        console.error("Error verifying batches in updateStudent:", err);
+      }
+    }
 
     const batchMap = new Map();
     for (const b of verifiedBatches) {
@@ -656,7 +667,7 @@ export const updateStudent = async (req, res) => {
 
     const finalBatchIds = Array.from(
       new Set(
-        targetBatches.map(tb => batchMap.get(tb) || tb)
+        targetBatches.map(tb => batchMap.get(tb) || tb).filter(tb => mongoose.Types.ObjectId.isValid(tb))
       )
     );
 
