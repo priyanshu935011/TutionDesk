@@ -1027,19 +1027,24 @@ export const markAttendance = async (req, res) => {
 
     if (status === "absent") {
       try {
-        let settings = await getCache(`institute:whatsapp_settings:${instituteId}`);
+        const actualInstId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
+        let settings = await getCache(`institute:whatsapp_settings:${actualInstId}`);
         if (!settings || Object.keys(settings).length === 0 || settings.absentAlertsEnabled === undefined) {
-          const inst = await Institute.findById(instituteId);
+          const inst = await Institute.findById(actualInstId);
           settings = inst?.whatsappSettings || {};
         }
-        if (settings && settings.absentAlertsEnabled) {
-          const formattedDate = new Date(date).toLocaleDateString("en-IN", {
+
+        const isAlertsEnabled = settings && (settings.absentAlertsEnabled === true || settings.absentAlertsEnabled === "true");
+
+        if (isAlertsEnabled) {
+          const dateObj = date ? new Date(date) : new Date();
+          const formattedDate = dateObj.toLocaleDateString("en-IN", {
             day: "numeric",
             month: "short",
             year: "numeric",
           });
           const globalTemplates = await getGlobalTemplates();
-          const inst = await Institute.findById(instituteId);
+          const inst = await Institute.findById(actualInstId);
           const messageText = formatAbsentMessage({
             template: globalTemplates.absent,
             studentName: student.name,
@@ -1048,7 +1053,7 @@ export const markAttendance = async (req, res) => {
           });
           const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
           if (recipientPhone) {
-            const result = await sendMessage(String(instituteId), recipientPhone, messageText, "absent_alert", {
+            const result = await sendMessage(actualInstId, recipientPhone, messageText, "absent_alert", {
               templateName: "absent_alert",
               parameters: [
                 student.name,
@@ -1213,20 +1218,24 @@ export const markBatchAttendance = async (req, res) => {
 
     let whatsappStatus = [];
     try {
-      let settings = await getCache(`institute:whatsapp_settings:${instituteId}`);
+      const actualInstId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
+      let settings = await getCache(`institute:whatsapp_settings:${actualInstId}`);
       if (!settings || Object.keys(settings).length === 0 || settings.absentAlertsEnabled === undefined) {
-        const inst = await Institute.findById(instituteId);
+        const inst = await Institute.findById(actualInstId);
         settings = inst?.whatsappSettings || {};
       }
 
-      if (settings && settings.absentAlertsEnabled && absentStudents.length > 0) {
-        const formattedDate = targetDate.toLocaleDateString("en-IN", {
+      const isAlertsEnabled = settings && (settings.absentAlertsEnabled === true || settings.absentAlertsEnabled === "true");
+
+      if (isAlertsEnabled && absentStudents.length > 0) {
+        const dateObj = date ? new Date(date) : new Date();
+        const formattedDate = dateObj.toLocaleDateString("en-IN", {
           day: "numeric",
           month: "short",
           year: "numeric",
         });
         const globalTemplates = await getGlobalTemplates();
-        const inst = await Institute.findById(instituteId);
+        const inst = await Institute.findById(actualInstId);
 
         for (const student of absentStudents) {
           const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
@@ -1248,7 +1257,7 @@ export const markBatchAttendance = async (req, res) => {
 
           try {
             console.log(`Sending WhatsApp absent alert to ${student.name} at ${recipientPhone}...`);
-            const result = await sendMessage(String(instituteId), recipientPhone, messageText, "absent_alert", {
+            const result = await sendMessage(actualInstId, recipientPhone, messageText, "absent_alert", {
               templateName: "absent_alert",
               parameters: [
                 student.name,
