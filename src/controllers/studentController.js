@@ -225,6 +225,7 @@ export const getStudents = async (req, res) => {
         feePlanType: sObj.feePlanType || "monthly",
         phone: sObj.phone || "",
         parentPhone: sObj.parentPhone || "",
+        attendanceRecords: sObj.attendanceRecords || [],
         isArchived: Boolean(sObj.isArchived),
       };
     });
