@@ -112,9 +112,16 @@ export const updateBatch = async (req, res) => {
     }
 
     const ownerId = req.user.institute?._id || req.user.institute || req.user._id;
+    const userIds = [
+      ownerId,
+      req.user._id,
+      req.user.institute?._id,
+      req.user.institute,
+      req.user.institute?.adminUser,
+    ].filter(Boolean);
 
     const batch = await Batch.findOneAndUpdate(
-      { _id: req.params.id, user: ownerId },
+      { _id: req.params.id, user: { $in: userIds } },
       updateData,
       { new: true, runValidators: true }
     );
@@ -126,13 +133,13 @@ export const updateBatch = async (req, res) => {
     if (status === "archived") {
       // Find all students enrolled in this batch
       const studentsInBatch = await Student.find({
-        user: ownerId,
+        user: { $in: userIds },
         $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
       });
 
       // Find all other active batches for this institute
       const allActiveBatches = await Batch.find({
-        user: ownerId,
+        user: { $in: userIds },
         status: { $ne: "archived" },
         _id: { $ne: req.params.id },
       }).select("_id");
@@ -154,7 +161,7 @@ export const updateBatch = async (req, res) => {
       }
     } else if (status === "active") {
       const studentsInBatch = await Student.find({
-        user: ownerId,
+        user: { $in: userIds },
         $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
       });
       for (const student of studentsInBatch) {
@@ -186,11 +193,18 @@ export const deleteBatch = async (req, res) => {
 
     const batchId = req.params.id;
     const ownerId = req.user.institute?._id || req.user.institute || req.user._id;
+    const userIds = [
+      ownerId,
+      req.user._id,
+      req.user.institute?._id,
+      req.user.institute,
+      req.user.institute?.adminUser,
+    ].filter(Boolean);
 
     // Find the batch first to confirm it belongs to the user
     const batch = await Batch.findOne({
       _id: batchId,
-      user: ownerId,
+      user: { $in: userIds },
     });
 
     if (!batch) {
