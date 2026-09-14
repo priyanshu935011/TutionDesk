@@ -2255,4 +2255,106 @@ export const updateStudentFcmToken = async (req, res) => {
   }
 };
 
+export const getBatchAttendanceByDate = async (req, res) => {
+  try {
+    const { batchId, date } = req.query;
+    if (!batchId || !date) {
+      return res.status(400).json({ message: "Batch ID and date query parameters are required." });
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    let batchObj = null;
+    try {
+      batchObj = await Batch.findById(batchId);
+    } catch (_) {}
+
+    if (!batchObj) {
+      batchObj = await Batch.findOne({ user: ownerId, name: { $regex: new RegExp(`^${String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, "i") } });
+    }
+
+    const bIdStr = batchObj ? String(batchObj._id) : String(batchId);
+    const bNameStr = batchObj ? batchObj.name.trim().toLowerCase() : String(batchId).trim().toLowerCase();
+
+    const allStudents = await Student.find({
+      user: ownerId,
+      isArchived: { $ne: true }
+    });
+
+    const targetDateStr = getISTDateStr(date);
+
+    const batchStudents = allStudents.filter((s) => {
+      const studentBatchNamesAndIds = new Set();
+
+      if (s.batchName && s.batchName.toString().trim()) {
+        studentBatchNamesAndIds.add(s.batchName.toString().trim().toLowerCase());
+      }
+      if (s.batch) {
+        if (typeof s.batch === "object" && s.batch !== null) {
+          if (s.batch.name) studentBatchNamesAndIds.add(s.batch.name.toString().trim().toLowerCase());
+          if (s.batch._id || s.batch.id) studentBatchNamesAndIds.add(String(s.batch._id || s.batch.id).trim().toLowerCase());
+        } else {
+          studentBatchNamesAndIds.add(String(s.batch).trim().toLowerCase());
+        }
+      }
+      if (Array.isArray(s.batches)) {
+        for (const b of s.batches) {
+          if (typeof b === "object" && b !== null) {
+            if (b.name) studentBatchNamesAndIds.add(b.name.toString().trim().toLowerCase());
+            if (b._id || b.id) studentBatchNamesAndIds.add(String(b._id || b.id).trim().toLowerCase());
+          } else if (b) {
+            studentBatchNamesAndIds.add(String(b).trim().toLowerCase());
+          }
+        }
+      }
+      if (Array.isArray(s.enrolledBatchIds)) {
+        for (const enrolledId of s.enrolledBatchIds) {
+          if (enrolledId) studentBatchNamesAndIds.add(String(enrolledId).trim().toLowerCase());
+        }
+      }
+
+      return studentBatchNamesAndIds.has(bIdStr.toLowerCase()) || studentBatchNamesAndIds.has(bNameStr);
+    });
+
+    const responseStudents = batchStudents.map((s) => {
+      const sObj = s.toObject ? s.toObject() : s;
+      const records = sObj.attendanceRecords || [];
+      const record = records.find((r) => {
+        if (!r.date) return false;
+        const rDateKey = getISTDateStr(r.date);
+        return rDateKey === targetDateStr;
+      });
+
+      return {
+        id: sObj._id || sObj.id,
+        _id: sObj._id || sObj.id,
+        name: sObj.name || "",
+        enrollmentNumber: sObj.enrollmentNumber || "",
+        phone: sObj.phone || "",
+        parentPhone: sObj.parentPhone || "",
+        batchName: sObj.batchName || (batchObj ? batchObj.name : ""),
+        batch: sObj.batch,
+        batches: sObj.batches || [],
+        enrolledBatchIds: sObj.enrolledBatchIds || [],
+        status: record ? (record.status ? record.status.toLowerCase() : "unmarked") : "unmarked",
+        attendanceRecords: records,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      batchId: bIdStr,
+      batchName: batchObj ? batchObj.name : batchId,
+      date: targetDateStr,
+      totalCount: responseStudents.length,
+      students: responseStudents,
+    });
+  } catch (error) {
+    console.error("getBatchAttendanceByDate error:", error);
+    return res.status(500).json({ message: "Could not fetch batch attendance data." });
+  }
+};
+
 

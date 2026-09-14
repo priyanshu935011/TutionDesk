@@ -6,6 +6,7 @@ import {
   bulkCreateStudents,
   createStudent,
   deleteStudent,
+  getBatchAttendanceByDate,
   getStudentById,
   getStudents,
   markAttendance,
@@ -21,6 +22,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect);
+router.get("/batch-attendance", getBatchAttendanceByDate);
 router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
 router.route("/").get(getStudents).post(createStudent);
