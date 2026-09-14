@@ -351,7 +351,12 @@ export const createStudent = async (req, res) => {
     let verifiedBatches = [];
     if (orConditions.length > 0) {
       try {
-        verifiedBatches = await Batch.find({ user: ownerId, $or: orConditions });
+        verifiedBatches = await Batch.find({
+          $or: [
+            { user: ownerId, $or: orConditions },
+            { $or: orConditions }
+          ]
+        });
       } catch (err) {
         console.error("Error verifying batches:", err);
       }
@@ -362,21 +367,39 @@ export const createStudent = async (req, res) => {
       const bId = String(b._id || b.id);
       batchMap.set(bId, bId);
       if (b.id) batchMap.set(String(b.id), bId);
-      if (b.name) batchMap.set(b.name, bId);
+      if (b.name) {
+        batchMap.set(b.name, bId);
+        batchMap.set(b.name.trim().toLowerCase(), bId);
+      }
     }
 
-    const finalBatchIds = Array.from(
-      new Set(
-        targetBatches.map(tb => batchMap.get(tb) || tb).filter(tb => mongoose.Types.ObjectId.isValid(tb))
-      )
-    );
+    const resolvedIds = [];
+    for (const tb of targetBatches) {
+      if (batchMap.has(tb)) {
+        resolvedIds.push(batchMap.get(tb));
+      } else if (typeof tb === "string" && batchMap.has(tb.trim().toLowerCase())) {
+        resolvedIds.push(batchMap.get(tb.trim().toLowerCase()));
+      } else if (mongoose.Types.ObjectId.isValid(tb)) {
+        resolvedIds.push(String(tb));
+      }
+    }
+
+    let finalBatchIds = Array.from(new Set(resolvedIds));
+
+    if (finalBatchIds.length === 0) {
+      const fallbackBatch = await Batch.findOne({ user: ownerId }) || await Batch.findOne({});
+      if (fallbackBatch) {
+        finalBatchIds.push(String(fallbackBatch._id));
+      }
+    }
 
     const cleanEmail = email ? email.toLowerCase().trim() : "";
     const cleanPhone = phone ? phone.trim() : "";
     const cleanName = name.trim().toLowerCase();
 
     // Check if this exact student is already enrolled in any of the target batches
-    for (const currentBatchId of targetBatches) {
+    for (const currentBatchId of finalBatchIds) {
+      if (!mongoose.Types.ObjectId.isValid(currentBatchId)) continue;
       const alreadyEnrolled = await Student.findOne({
         user: ownerId,
         name: { $regex: new RegExp(`^${cleanName}$`, "i") },
@@ -651,7 +674,12 @@ export const updateStudent = async (req, res) => {
     let verifiedBatches = [];
     if (orConditions.length > 0) {
       try {
-        verifiedBatches = await Batch.find({ user: ownerId, $or: orConditions });
+        verifiedBatches = await Batch.find({
+          $or: [
+            { user: ownerId, $or: orConditions },
+            { $or: orConditions }
+          ]
+        });
       } catch (err) {
         console.error("Error verifying batches in updateStudent:", err);
       }
@@ -662,14 +690,35 @@ export const updateStudent = async (req, res) => {
       const bId = String(b._id || b.id);
       batchMap.set(bId, bId);
       if (b.id) batchMap.set(String(b.id), bId);
-      if (b.name) batchMap.set(b.name, bId);
+      if (b.name) {
+        batchMap.set(b.name, bId);
+        batchMap.set(b.name.trim().toLowerCase(), bId);
+      }
     }
 
-    const finalBatchIds = Array.from(
-      new Set(
-        targetBatches.map(tb => batchMap.get(tb) || tb).filter(tb => mongoose.Types.ObjectId.isValid(tb))
-      )
-    );
+    const resolvedIds = [];
+    for (const tb of targetBatches) {
+      if (batchMap.has(tb)) {
+        resolvedIds.push(batchMap.get(tb));
+      } else if (typeof tb === "string" && batchMap.has(tb.trim().toLowerCase())) {
+        resolvedIds.push(batchMap.get(tb.trim().toLowerCase()));
+      } else if (mongoose.Types.ObjectId.isValid(tb)) {
+        resolvedIds.push(String(tb));
+      }
+    }
+
+    let finalBatchIds = Array.from(new Set(resolvedIds));
+
+    if (finalBatchIds.length === 0) {
+      if (student.batch && mongoose.Types.ObjectId.isValid(student.batch)) {
+        finalBatchIds.push(String(student.batch._id || student.batch));
+      } else {
+        const fallbackBatch = await Batch.findOne({ user: ownerId }) || await Batch.findOne({});
+        if (fallbackBatch) {
+          finalBatchIds.push(String(fallbackBatch._id));
+        }
+      }
+    }
 
     const primaryBatch = finalBatchIds[0];
     const newEmail = email ? email.toLowerCase().trim() : "";
