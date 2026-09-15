@@ -1594,24 +1594,40 @@ export const createHiredTeacher = async (req, res) => {
       return res.status(400).json({ message: "Name, password, and at least an email or phone number are required" });
     }
 
+    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+
     if (cleanEmail) {
-      const existingEmailUser = await User.findOne({ email: cleanEmail });
+      const existingEmailUser = await User.findOne({
+        institute: instituteId,
+        role: "teacher",
+        email: cleanEmail,
+      });
       if (existingEmailUser) {
-        return res.status(400).json({ message: "Email already exists" });
+        return res.status(400).json({ message: "A teacher with this email already exists." });
       }
     }
 
     if (cleanPhone) {
-      const existingPhoneUser = await User.findOne({ phone: cleanPhone });
+      const existingPhoneUser = await User.findOne({
+        institute: instituteId,
+        role: "teacher",
+        $or: [
+          { phone: cleanPhone },
+          { phone: last10 },
+          { phone: `+91${last10}` },
+          { phone: `91${last10}` }
+        ]
+      });
       if (existingPhoneUser) {
-        return res.status(400).json({ message: "Phone number already exists" });
+        return res.status(400).json({ message: "A teacher with this phone number already exists in your institute." });
       }
     }
 
+    const fallbackEmail = cleanEmail || `teacher_${last10 || Date.now()}@classtech.local`;
     const hashedPassword = await bcrypt.hash(password, 10);
     const newTeacher = await User.create({
       name: name.trim(),
-      email: cleanEmail || `${cleanPhone}@classtech.local`,
+      email: fallbackEmail,
       phone: cleanPhone,
       password: hashedPassword,
       role: "teacher",
