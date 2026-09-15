@@ -120,9 +120,17 @@ export const getTeacherDashboard = async (req, res) => {
       }
     }
     const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
+    const userIds = [
+      ownerId,
+      req.user._id,
+      rawInst?._id,
+      rawInst,
+      institute?._id,
+      institute?.adminUser,
+    ].filter(Boolean);
 
-    let studentQuery = { user: ownerId, isArchived: { $ne: true } };
-    let batchQuery = { user: ownerId };
+    let studentQuery = { user: { $in: userIds }, isArchived: { $ne: true } };
+    let batchQuery = { user: { $in: userIds } };
     if (req.query.status) {
       batchQuery.status = req.query.status;
     } else if (req.query.includeArchived !== "true") {
@@ -132,7 +140,7 @@ export const getTeacherDashboard = async (req, res) => {
     let noteQuery = { institute: instituteId };
     let testQuery = { institute: instituteId };
 
-    const allInstBatches = await Batch.find({ user: ownerId }).select("_id status teacher");
+    const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
 
     if (req.user.role === "teacher") {

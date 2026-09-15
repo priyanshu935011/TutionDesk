@@ -14,13 +14,21 @@ export const getBatches = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
+    const userIds = [
+      ownerId,
+      req.user._id,
+      req.user.institute?._id,
+      req.user.institute,
+      req.user.institute?.adminUser,
+    ].filter(Boolean);
+
     const cacheKey = `teacher:batches:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.status}`;
     const cached = await getCache(cacheKey);
     if (cached) {
       return res.json(cached);
     }
 
-    const query = { user: ownerId };
+    const query = { user: { $in: userIds } };
     if (req.user.role === "teacher") {
       query.teacher = req.user._id;
     }
@@ -33,7 +41,7 @@ export const getBatches = async (req, res) => {
 
     const [batches, students] = await Promise.all([
       Batch.find(query).sort({ createdAt: -1 }).populate("teacher", "name email"),
-      Student.find({ user: ownerId, isArchived: { $ne: true } }),
+      Student.find({ user: { $in: userIds }, isArchived: { $ne: true } }),
     ]);
 
     const processedBatches = batches.map((batch) => {
