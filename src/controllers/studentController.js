@@ -133,7 +133,7 @@ export const getStudents = async (req, res) => {
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
     const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
-    if (req.query.refresh !== "true") {
+    if (req.query.refresh !== "true" && req.query.archivedOnly !== "true") {
       const cached = await getCache(cacheKey);
       if (cached) {
         return res.json(cached);
@@ -143,7 +143,7 @@ export const getStudents = async (req, res) => {
     const query = { user: ownerId };
 
     if (req.query.archivedOnly === "true") {
-      query.isArchived = true;
+      // Allow in-memory filtering below to capture both explicitly archived students and batch-archived students
     } else if (req.query.includeArchived !== "true") {
       query.isArchived = { $ne: true };
     }
@@ -172,7 +172,7 @@ export const getStudents = async (req, res) => {
     let students = rawStudents;
     if (req.query.archivedOnly === "true") {
       students = rawStudents.filter((student) => {
-        if (student.isArchived) return true;
+        if (student.isArchived === true || String(student.isArchived) === "true") return true;
         // Check if student belongs exclusively to archived batches
         const studentBatchIds = [];
         if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
