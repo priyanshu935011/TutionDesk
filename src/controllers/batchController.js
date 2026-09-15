@@ -63,11 +63,13 @@ export const createBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot create batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher, fee, totalFees } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, teacherId } = req.body;
 
     if (!name || !startTime || !endTime) {
       return res.status(400).json({ message: "Batch name and schedule time are required" });
     }
+
+    const resolvedTeacher = (teacher || teacherId) && (teacher || teacherId) !== "" ? (teacher || teacherId) : null;
 
     // Use institute ID (not user ID) to satisfy the institute_id FK constraint in Supabase
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
@@ -77,15 +79,14 @@ export const createBatch = async (req, res) => {
       scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
       startTime,
       endTime,
-      teacher: teacher || null,
-      fee: Number(fee ?? totalFees ?? 0),
+      teacher: resolvedTeacher,
     });
 
     const populated = await Batch.findById(batch._id).populate("teacher", "name email");
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
     await clearCachePattern("teacher:batches:*");
-    return res.status(201).json(populated);
+    return res.status(201).json(populated || batch);
   } catch (error) {
     console.error("createBatch error:", error);
     return res.status(500).json({ message: error.message || "Could not create batch" });
@@ -98,19 +99,16 @@ export const updateBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot modify batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher, status, fee, totalFees } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, teacherId, status } = req.body;
+    const resolvedTeacher = (teacher !== undefined ? teacher : teacherId);
     
     const updateData = {
       name,
       scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
       startTime,
       endTime,
-      teacher: (teacher && teacher !== "") ? teacher : null,
+      teacher: (resolvedTeacher && resolvedTeacher !== "") ? resolvedTeacher : null,
     };
-
-    if (fee !== undefined || totalFees !== undefined) {
-      updateData.fee = Number(fee ?? totalFees ?? 0);
-    }
     
     if (status !== undefined) {
       updateData.status = status;

@@ -31,10 +31,6 @@ const batchSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
-    fee: {
-      type: Number,
-      default: 0,
-    },
     status: {
       type: String,
       enum: ["active", "archived"],
