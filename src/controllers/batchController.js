@@ -63,7 +63,7 @@ export const createBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot create batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, fee, totalFees } = req.body;
 
     if (!name || !startTime || !endTime) {
       return res.status(400).json({ message: "Batch name and schedule time are required" });
@@ -78,6 +78,7 @@ export const createBatch = async (req, res) => {
       startTime,
       endTime,
       teacher: teacher || null,
+      fee: Number(fee ?? totalFees ?? 0),
     });
 
     const populated = await Batch.findById(batch._id).populate("teacher", "name email");
@@ -97,7 +98,7 @@ export const updateBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot modify batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher, status } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, status, fee, totalFees } = req.body;
     
     const updateData = {
       name,
@@ -106,6 +107,10 @@ export const updateBatch = async (req, res) => {
       endTime,
       teacher: (teacher && teacher !== "") ? teacher : null,
     };
+
+    if (fee !== undefined || totalFees !== undefined) {
+      updateData.fee = Number(fee ?? totalFees ?? 0);
+    }
     
     if (status !== undefined) {
       updateData.status = status;
