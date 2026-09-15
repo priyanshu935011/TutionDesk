@@ -121,6 +121,7 @@ export const getTeacherDashboard = async (req, res) => {
     }
     const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
 
+    let studentQuery = { user: ownerId, isArchived: { $ne: true } };
     let batchQuery = { user: ownerId };
     if (req.query.status) {
       batchQuery.status = req.query.status;
