@@ -184,15 +184,21 @@ export const getTeacherDashboard = async (req, res) => {
 
     const [rawStudents, batches, quizzes, notes, testResults] = await Promise.all([
       Student.find(studentQuery)
+        .select("_id name enrollmentNumber phone parentPhone batch batches enrolledBatchIds pendingAmount totalFees paidAmount paymentHistory isArchived attendanceRecords")
         .populate("batch", "name scheduleDays startTime endTime")
         .populate("batches", "name scheduleDays startTime endTime"),
-      Batch.find(batchQuery).sort({ createdAt: -1 }).populate("teacher", "name email"),
-      Quiz.find(quizQuery).sort({ createdAt: -1 }),
+      Batch.find(batchQuery)
+        .select("_id name className scheduleDays startTime endTime teacher status")
+        .sort({ createdAt: -1 })
+        .populate("teacher", "name email"),
+      Quiz.find(quizQuery).select("_id title batches institute createdAt").sort({ createdAt: -1 }),
       Note.find(noteQuery)
+        .select("_id title pdfUrl file_url fileSizeBytes file_size_bytes category targetType batch students createdAt created_at")
         .sort({ createdAt: -1 })
         .populate("batch", "name")
         .populate("students", "name enrollmentNumber"),
       TestResult.find(testQuery)
+        .select("_id title test_name subject score totalMarks max_marks examDate test_date student createdAt created_at")
         .sort({ createdAt: -1 })
         .populate("student", "name enrollmentNumber email"),
     ]);
