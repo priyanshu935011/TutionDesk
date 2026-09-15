@@ -1061,49 +1061,70 @@ class SupabaseQuery {
       let path = typeof pop.fields === "string" ? pop.fields : pop.fields.path;
       let select = typeof pop.fields === "object" ? pop.fields.select : pop.selectFields;
 
-      for (const doc of docs) {
-        // Map references
-        const idKey = path === "teacher" ? "teacher_id" : 
-                      (path === "batch" || path === "batches") ? "batch_id" : 
-                      path === "institute" ? "institute_id" : 
-                      (path === "student" || path === "students") ? "student_id" : path;
-        
-        const refId = doc[path] || doc[idKey];
-        if (!refId) continue;
+      const idKey = path === "teacher" ? "teacher_id" : 
+                    (path === "batch" || path === "batches") ? "batch_id" : 
+                    path === "institute" ? "institute_id" : 
+                    (path === "student" || path === "students") ? "student_id" : path;
+      
+      let refTable = "";
+      if (path === "teacher" || path === "user") refTable = "users";
+      else if (path === "batch" || path === "batches") refTable = "batches";
+      else if (path === "institute") refTable = "institutes";
+      else if (path === "student" || path === "students") refTable = "students";
+      else continue;
 
-        let refTable = "";
-        if (path === "teacher" || path === "user") refTable = "users";
-        else if (path === "batch" || path === "batches") refTable = "batches";
-        else if (path === "institute") refTable = "institutes";
-        else if (path === "student" || path === "students") refTable = "students";
-        else continue;
-
-        let selectStr = "*";
-        if (select && typeof select === "string") {
-          const fieldsArray = select.trim().split(/\s+/).map(f => camelToSnake(f));
-          if (!fieldsArray.includes("id")) {
-            fieldsArray.push("id");
-          }
-          selectStr = fieldsArray.join(", ");
+      let selectStr = "*";
+      if (select && typeof select === "string") {
+        const fieldsArray = select.trim().split(/\s+/).map(f => camelToSnake(f));
+        if (!fieldsArray.includes("id")) {
+          fieldsArray.push("id");
         }
+        selectStr = fieldsArray.join(", ");
+      }
 
-        if (Array.isArray(refId)) {
-          const { data, error } = await this.model.supabase
-            .from(refTable)
-            .select(selectStr)
-            .in("id", refId);
-          if (!error && data) {
-            doc[path] = data.map(row => new SupabaseDocument(refTable, row, { tableName: refTable, supabase: this.model.supabase }));
+      const allRefIds = new Set();
+      for (const doc of docs) {
+        const rawRef = doc[path] || doc[idKey];
+        if (!rawRef) continue;
+        if (Array.isArray(rawRef)) {
+          for (const item of rawRef) {
+            const idStr = item?._id || item?.id || (typeof item === "string" ? item : null);
+            if (idStr) allRefIds.add(String(idStr));
           }
         } else {
-          const { data, error } = await this.model.supabase
-            .from(refTable)
-            .select(selectStr)
-            .eq("id", refId)
-            .maybeSingle();
+          const idStr = rawRef?._id || rawRef?.id || (typeof rawRef === "string" ? rawRef : null);
+          if (idStr) allRefIds.add(String(idStr));
+        }
+      }
 
-          if (!error && data) {
-            doc[path] = new SupabaseDocument(refTable, data, { tableName: refTable, supabase: this.model.supabase });
+      if (allRefIds.size > 0) {
+        const { data, error } = await this.model.supabase
+          .from(refTable)
+          .select(selectStr)
+          .in("id", Array.from(allRefIds));
+
+        if (!error && data) {
+          const mapById = new Map();
+          for (const row of data) {
+            mapById.set(String(row.id), new SupabaseDocument(refTable, row, { tableName: refTable, supabase: this.model.supabase }));
+          }
+
+          for (const doc of docs) {
+            const rawRef = doc[path] || doc[idKey];
+            if (!rawRef) continue;
+            if (Array.isArray(rawRef)) {
+              doc[path] = rawRef
+                .map(item => {
+                  const idStr = item?._id || item?.id || (typeof item === "string" ? item : null);
+                  return idStr ? mapById.get(String(idStr)) : null;
+                })
+                .filter(Boolean);
+            } else {
+              const idStr = rawRef?._id || rawRef?.id || (typeof rawRef === "string" ? rawRef : null);
+              if (idStr && mapById.has(String(idStr))) {
+                doc[path] = mapById.get(String(idStr));
+              }
+            }
           }
         }
       }
