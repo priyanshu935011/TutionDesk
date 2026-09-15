@@ -23,9 +23,11 @@ export const getBatches = async (req, res) => {
     ].filter(Boolean);
 
     const cacheKey = `teacher:batches:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.status}`;
-    const cached = await getCache(cacheKey);
-    if (cached) {
-      return res.json(cached);
+    if (req.query.nocache !== "true" && req.query.refresh !== "true") {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
     }
 
     const query = { user: { $in: userIds } };
