@@ -62,11 +62,11 @@ export const resolveInstituteId = (req) => {
     }
   }
 
-  if (req.user?._id && req.user.role !== "super_admin" && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+  if (req.user?._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
     return String(req.user._id);
   }
 
-  return null;
+  return "000000000000000000000000";
 };
 
 // Helper: Sync & calculate institute storage quota
@@ -707,14 +707,7 @@ export const getVideoPlaylists = async (req, res) => {
 
 export const createVideoPlaylist = async (req, res) => {
   try {
-    let instituteId = resolveInstituteId(req);
-    if (!instituteId && req.user?._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
-      instituteId = String(req.user._id);
-    }
-
-    if (!instituteId || !mongoose.Types.ObjectId.isValid(instituteId)) {
-      return res.status(400).json({ message: "Invalid or missing institute ID." });
-    }
+    const instituteId = resolveInstituteId(req);
 
     const { name, description, thumbnailUrl } = req.body;
     if (!name || !name.trim()) {
