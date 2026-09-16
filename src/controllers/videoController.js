@@ -457,12 +457,8 @@ export const getTeacherVideos = async (req, res) => {
     const instituteId = resolveInstituteId(req);
 
     let institute = null;
-    if (instituteId) {
+    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
       institute = await Institute.findById(instituteId);
-    }
-
-    if (!institute && req.user?.role !== "super_admin") {
-      return res.status(404).json({ message: "Institute not found" });
     }
 
     const { search, playlistId, status, isArchived } = req.query;
