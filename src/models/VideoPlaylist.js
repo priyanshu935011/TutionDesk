@@ -3,13 +3,11 @@ import mongoose from "../utils/supabaseModel.js";
 const videoPlaylistSchema = new mongoose.Schema(
   {
     institute: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Institute",
+      type: mongoose.Schema.Types.Mixed,
       required: true,
     },
     teacher: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      type: mongoose.Schema.Types.Mixed,
       required: true,
     },
     name: {

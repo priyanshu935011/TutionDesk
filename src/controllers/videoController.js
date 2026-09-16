@@ -47,23 +47,32 @@ export const getBunnySettingsHelper = async () => {
   };
 };
 
+// Helper: Check if string is a valid non-empty DB ID (Mongo ObjectId, UUID, or String)
+export const isValidId = (id) => {
+  if (!id) return false;
+  const s = String(id).trim();
+  if (!s || s === "null" || s === "undefined" || s === "[object Object]") return false;
+  return s.length >= 8;
+};
+
 // Helper: Resolve instituteId safely from request
 export const resolveInstituteId = (req) => {
   let inst = req.query?.instituteId || req.body?.instituteId;
-  if (inst && mongoose.Types.ObjectId.isValid(inst)) return String(inst);
+  if (isValidId(inst)) return String(inst).trim();
 
   const rawInst = req.user?.institute;
   if (rawInst) {
     if (typeof rawInst === "object") {
       const id = String(rawInst._id || rawInst.id || "");
-      if (id && mongoose.Types.ObjectId.isValid(id)) return id;
-    } else if (typeof rawInst === "string" && mongoose.Types.ObjectId.isValid(rawInst)) {
-      return rawInst;
+      if (isValidId(id)) return id.trim();
+    } else if (typeof rawInst === "string" && isValidId(rawInst)) {
+      return rawInst.trim();
     }
   }
 
-  if (req.user?._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
-    return String(req.user._id);
+  const userId = req.user?._id || req.user?.id;
+  if (isValidId(userId)) {
+    return String(userId).trim();
   }
 
   return "000000000000000000000000";
@@ -71,7 +80,7 @@ export const resolveInstituteId = (req) => {
 
 // Helper: Sync & calculate institute storage quota
 export const getInstituteStorageAccount = async (instituteId) => {
-  if (!instituteId || !mongoose.Types.ObjectId.isValid(instituteId)) {
+  if (!isValidId(instituteId)) {
     return {
       storage: null,
       limitBytes: 50 * 1024 * 1024 * 1024,
@@ -85,7 +94,10 @@ export const getInstituteStorageAccount = async (instituteId) => {
   }
 
   let storage = await InstituteVideoStorage.findOne({ institute: instituteId });
-  const institute = await Institute.findById(instituteId);
+  let institute = null;
+  if (mongoose.Types.ObjectId.isValid(instituteId)) {
+    institute = await Institute.findById(instituteId);
+  }
 
   const maxGb = Number(institute?.maxVideoStorageGb || 50);
   const limitBytes = maxGb * 1024 * 1024 * 1024;
@@ -720,18 +732,21 @@ export const deleteVideoLecture = async (req, res) => {
 export const getVideoPlaylists = async (req, res) => {
   try {
     const instituteId = resolveInstituteId(req);
+    const rawUserId = req.user?._id || req.user?.id;
+    const teacherId = isValidId(rawUserId) ? String(rawUserId).trim() : null;
+
     const query = { isArchived: { $ne: true } };
 
     if (req.user?.role === "super_admin" && !req.query?.instituteId) {
       // Super admin without specific institute targeting sees all playlists
     } else {
       const conditions = [];
-      if (instituteId && instituteId !== "000000000000000000000000") {
+      if (isValidId(instituteId) && instituteId !== "000000000000000000000000") {
         conditions.push({ institute: instituteId });
       }
-      if (req.user?._id) {
-        conditions.push({ teacher: req.user._id });
-        conditions.push({ institute: req.user._id });
+      if (teacherId) {
+        conditions.push({ teacher: teacherId });
+        conditions.push({ institute: teacherId });
       }
       if (conditions.length > 0) {
         query.$or = conditions;
@@ -762,15 +777,13 @@ export const getVideoPlaylists = async (req, res) => {
 export const createVideoPlaylist = async (req, res) => {
   try {
     const instituteId = resolveInstituteId(req);
+    const rawUserId = req.user?._id || req.user?.id;
+    const teacherId = isValidId(rawUserId) ? String(rawUserId).trim() : instituteId;
 
     const { name, description, thumbnailUrl } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Playlist name is required" });
     }
-
-    const teacherId = (req.user && req.user._id && mongoose.Types.ObjectId.isValid(String(req.user._id)))
-      ? req.user._id
-      : instituteId;
 
     const playlist = await VideoPlaylist.create({
       institute: instituteId,
