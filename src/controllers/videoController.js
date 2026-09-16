@@ -682,7 +682,22 @@ export const getVideoPlaylists = async (req, res) => {
   try {
     const instituteId = resolveInstituteId(req);
     const query = { isArchived: { $ne: true } };
-    if (instituteId) query.institute = instituteId;
+
+    if (req.user?.role === "super_admin" && !req.query?.instituteId) {
+      // Super admin without specific institute targeting sees all playlists
+    } else {
+      const conditions = [];
+      if (instituteId && instituteId !== "000000000000000000000000") {
+        conditions.push({ institute: instituteId });
+      }
+      if (req.user?._id) {
+        conditions.push({ teacher: req.user._id });
+        conditions.push({ institute: req.user._id });
+      }
+      if (conditions.length > 0) {
+        query.$or = conditions;
+      }
+    }
 
     const playlists = await VideoPlaylist.find(query)
       .sort({ createdAt: -1 });

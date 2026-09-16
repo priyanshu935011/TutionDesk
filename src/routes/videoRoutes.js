@@ -54,9 +54,13 @@ router.post("/thumbnail", uploadThumbnail);
 
 // Playlists
 router.get("/playlists", getVideoPlaylists);
+router.get("/playlist", getVideoPlaylists);
 router.post("/playlists", createVideoPlaylist);
+router.post("/playlist", createVideoPlaylist);
 router.put("/playlists/:id", updateVideoPlaylist);
+router.put("/playlist/:id", updateVideoPlaylist);
 router.get("/playlists/:id/videos", getPlaylistVideos);
+router.get("/playlist/:id/videos", getPlaylistVideos);
 
 // Video Releases
 router.post("/releases", createVideoRelease);
