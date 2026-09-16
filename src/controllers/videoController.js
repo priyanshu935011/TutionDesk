@@ -47,8 +47,43 @@ export const getBunnySettingsHelper = async () => {
   };
 };
 
+// Helper: Resolve instituteId safely from request
+export const resolveInstituteId = (req) => {
+  let inst = req.query?.instituteId || req.body?.instituteId;
+  if (inst && mongoose.Types.ObjectId.isValid(inst)) return String(inst);
+
+  const rawInst = req.user?.institute;
+  if (rawInst) {
+    if (typeof rawInst === "object") {
+      const id = String(rawInst._id || rawInst.id || "");
+      if (id && mongoose.Types.ObjectId.isValid(id)) return id;
+    } else if (typeof rawInst === "string" && mongoose.Types.ObjectId.isValid(rawInst)) {
+      return rawInst;
+    }
+  }
+
+  if (req.user?._id && req.user.role !== "super_admin" && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+    return String(req.user._id);
+  }
+
+  return null;
+};
+
 // Helper: Sync & calculate institute storage quota
 export const getInstituteStorageAccount = async (instituteId) => {
+  if (!instituteId || !mongoose.Types.ObjectId.isValid(instituteId)) {
+    return {
+      storage: null,
+      limitBytes: 50 * 1024 * 1024 * 1024,
+      usedBytes: 0,
+      reservedBytes: 0,
+      availableBytes: 50 * 1024 * 1024 * 1024,
+      maxGb: 50,
+      usedGb: 0,
+      availableGb: 50,
+    };
+  }
+
   let storage = await InstituteVideoStorage.findOne({ institute: instituteId });
   const institute = await Institute.findById(instituteId);
 
@@ -419,18 +454,23 @@ export const handleBunnyWebhook = async (req, res) => {
 
 export const getTeacherVideos = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
 
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
+    let institute = null;
+    if (instituteId) {
+      institute = await Institute.findById(instituteId);
+    }
+
+    if (!institute && req.user?.role !== "super_admin") {
       return res.status(404).json({ message: "Institute not found" });
     }
 
     const { search, playlistId, status, isArchived } = req.query;
 
-    const query = { institute: instituteId };
+    const query = {};
+    if (instituteId) {
+      query.institute = instituteId;
+    }
 
     if (isArchived === "true") {
       query.isArchived = true;
@@ -474,8 +514,8 @@ export const getTeacherVideos = async (req, res) => {
     });
 
     return res.json({
-      featureEnabled: institute.recordedLecturesFeatureEnabled !== false,
-      releaseVideosFeatureEnabled: institute.releaseVideosFeatureEnabled !== false,
+      featureEnabled: institute ? institute.recordedLecturesFeatureEnabled !== false : true,
+      releaseVideosFeatureEnabled: institute ? institute.releaseVideosFeatureEnabled !== false : true,
       storage: {
         maxStorageGb: storageInfo.maxGb,
         usedStorageBytes: storageInfo.usedBytes,
