@@ -524,6 +524,31 @@ class SupabaseDocument {
       return this;
     }
 
+    if (this.batch !== undefined) {
+      const bVal = (this.batch?._id || this.batch?.id || (typeof this.batch === "string" ? this.batch : null));
+      if (bVal) {
+        this.batch_id = String(bVal);
+      }
+    }
+    if (this.teacher !== undefined) {
+      const tVal = (this.teacher?._id || this.teacher?.id || (typeof this.teacher === "string" ? this.teacher : null));
+      if (tVal) {
+        this.teacher_id = String(tVal);
+      }
+    }
+    if (this.user !== undefined) {
+      const uVal = (this.user?._id || this.user?.id || (typeof this.user === "string" ? this.user : null));
+      if (uVal) {
+        this.institute_id = String(uVal);
+      }
+    }
+    if (this.institute !== undefined) {
+      const iVal = (this.institute?._id || this.institute?.id || (typeof this.institute === "string" ? this.institute : null));
+      if (iVal) {
+        this.institute_id = String(iVal);
+      }
+    }
+
     const payload = {};
     for (const key of Object.keys(this)) {
       if (key.startsWith("_")) continue;

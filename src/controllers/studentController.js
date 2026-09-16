@@ -741,7 +741,9 @@ export const updateStudent = async (req, res) => {
     student.email = newEmail;
     student.address = address || "";
     student.batch = primaryBatch;
+    student.batch_id = primaryBatch;
     student.batches = finalBatchIds;
+    student.batch_ids = finalBatchIds;
     student.joinedOn = resolvedJoinedOn;
     student.feePlanType = feePlanType;
     student.totalFees = total;
