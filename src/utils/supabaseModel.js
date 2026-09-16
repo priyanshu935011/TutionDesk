@@ -12,14 +12,7 @@ const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs",
   "whatsapplog", "whatsapp_logs", "whatsapp_log", "system_settings", "systemsettings",
-  "system_setting", "systemsetting", "video_lectures", "videolectures", "video_lecture",
-  "videolecture", "video_watch_logs", "videowatchlogs", "video_watch_log", "videowatchlog",
-  "video_playlists", "videoplaylists", "video_playlist", "videoplaylist",
-  "video_playlist_items", "videoplaylistitems", "video_playlist_item", "videoplaylistitem",
-  "video_releases", "videoreleases", "video_release", "videorelease",
-  "video_release_students", "videoreleasestudents", "video_release_student", "videoreleasestudent",
-  "video_uploads", "videouploads", "video_upload", "videoupload",
-  "institute_video_storages", "institutevideostorages", "institute_video_storage", "institutevideostorage"
+  "system_setting", "systemsetting"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -1475,6 +1468,17 @@ class SupabaseModel {
         .maybeSingle();
 
       if (error && error.message) {
+        if (
+          error.code === "42P01" ||
+          error.code === "PGRST205" ||
+          error.message.includes("Could not find the table") ||
+          (error.message.includes("relation") && error.message.includes("does not exist"))
+        ) {
+          console.warn(`Table "${this.tableName}" not found in Supabase schema cache. Dynamically switching to local fallback store.`);
+          MISSING_TABLES.add(this.tableName);
+          return this.create(doc);
+        }
+
         let badCol = null;
         if (error.message.includes("does not exist")) {
           const match = error.message.match(/column "([^"]+)"/);
