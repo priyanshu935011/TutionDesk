@@ -22,6 +22,11 @@ const videoLectureSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    playlist: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     bunnyVideoId: {
       type: String,
       required: true,

@@ -277,6 +277,7 @@ export const createVideoLecture = async (req, res) => {
     const {
       title,
       description,
+      playlist,
       bunnyVideoId,
       videoUrl,
       hlsUrl,
@@ -338,6 +339,7 @@ export const createVideoLecture = async (req, res) => {
       createdBy: req.user._id,
       title: title.trim(),
       description: description ? description.trim() : "",
+      playlist: playlist ? playlist.trim() : "",
       bunnyVideoId: bunnyVideoId.trim(),
       videoUrl: finalVideoUrl,
       hlsUrl: finalHlsUrl,
@@ -520,6 +522,7 @@ export const updateVideoLecture = async (req, res) => {
     const {
       title,
       description,
+      playlist,
       targetType,
       batchIds,
       studentIds,
@@ -531,6 +534,7 @@ export const updateVideoLecture = async (req, res) => {
 
     if (title !== undefined) video.title = title.trim();
     if (description !== undefined) video.description = description.trim();
+    if (playlist !== undefined) video.playlist = playlist ? playlist.trim() : "";
     if (targetType !== undefined) video.targetType = targetType;
     if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : "";
     if (Array.isArray(batchIds)) video.batches = batchIds.filter(Boolean);
