@@ -27,9 +27,19 @@ const videoLectureSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    playlistId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "VideoPlaylist",
+      default: null,
+    },
     bunnyVideoId: {
       type: String,
       required: true,
+      trim: true,
+    },
+    bunnyLibraryId: {
+      type: String,
+      default: "",
       trim: true,
     },
     videoUrl: {
@@ -47,6 +57,11 @@ const videoLectureSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    thumbnailSource: {
+      type: String,
+      enum: ["bunny", "custom"],
+      default: "bunny",
+    },
     durationSeconds: {
       type: Number,
       default: 0,
@@ -55,36 +70,48 @@ const videoLectureSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    targetType: {
+    uploadFileName: {
       type: String,
-      enum: ["all", "batch", "student"],
-      default: "batch",
+      default: "",
     },
-    batches: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Batch",
-      },
-    ],
-    students: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Student",
-      },
-    ],
-    expiryType: {
+    uploadFileSizeBytes: {
+      type: Number,
+      default: 0,
+    },
+    processingProgress: {
+      type: Number,
+      default: 0,
+    },
+    storageSizeBytes: {
+      type: Number,
+      default: 0,
+    },
+    targetAudienceType: {
       type: String,
-      enum: ["none", "date", "preset"],
+      enum: ["none", "all", "batch", "student"],
       default: "none",
     },
-    expiryDate: {
+    targetAudienceMetadata: {
+      type: Object,
+      default: {},
+    },
+    isArchived: {
+      type: Boolean,
+      default: false,
+    },
+    archivedAt: {
       type: Date,
+      default: null,
+    },
+    archivedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       default: null,
     },
     status: {
       type: String,
-      enum: ["active", "expired", "processing"],
-      default: "active",
+      enum: ["UPLOADING", "PROCESSING", "READY", "FAILED", "ARCHIVED", "CANCELLED", "active", "expired"],
+      default: "UPLOADING",
     },
     viewCount: {
       type: Number,

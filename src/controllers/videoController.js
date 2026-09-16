@@ -1,41 +1,20 @@
 import axios from "axios";
 import mongoose from "mongoose";
 import VideoLecture from "../models/VideoLecture.js";
+import VideoPlaylist from "../models/VideoPlaylist.js";
+import VideoPlaylistItem from "../models/VideoPlaylistItem.js";
+import VideoRelease from "../models/VideoRelease.js";
+import VideoReleaseStudent from "../models/VideoReleaseStudent.js";
+import VideoUpload from "../models/VideoUpload.js";
+import InstituteVideoStorage from "../models/InstituteVideoStorage.js";
 import VideoWatchLog from "../models/VideoWatchLog.js";
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
-import Batch from "../models/Batch.js";
+import User from "../models/User.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
-import { supabase } from "../utils/supabaseModel.js";
 import cloudinary from "../utils/cloudinary.js";
-import Note from "../models/Note.js";
-
-// Helper: Recalculate & Sync Institute Storage in DB directly
-export const syncInstituteStorage = async (instituteId) => {
-  try {
-    const [videos, notes] = await Promise.all([
-      VideoLecture.find({ institute: instituteId }).select("fileSizeBytes"),
-      Note.find({ institute: instituteId }).select("fileSizeBytes file_size_bytes"),
-    ]);
-
-    let totalBytes = 0;
-    videos.forEach((v) => {
-      totalBytes += Number(v.fileSizeBytes || 0);
-    });
-    notes.forEach((n) => {
-      totalBytes += Number(n.fileSizeBytes || n.file_size_bytes || 0);
-    });
-
-    await Institute.findByIdAndUpdate(instituteId, {
-      usedVideoStorageBytes: totalBytes,
-    });
-    return totalBytes;
-  } catch (err) {
-    console.error("syncInstituteStorage error:", err);
-    return 0;
-  }
-};
+import { supabase } from "../utils/supabaseModel.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -68,8 +47,998 @@ export const getBunnySettingsHelper = async () => {
   };
 };
 
+// Helper: Sync & calculate institute storage quota
+export const getInstituteStorageAccount = async (instituteId) => {
+  let storage = await InstituteVideoStorage.findOne({ institute: instituteId });
+  const institute = await Institute.findById(instituteId);
+
+  const maxGb = Number(institute?.maxVideoStorageGb || 50);
+  const limitBytes = maxGb * 1024 * 1024 * 1024;
+
+  if (!storage) {
+    const usedBytes = Number(institute?.usedVideoStorageBytes || 0);
+    const reservedBytes = Number(institute?.reservedVideoStorageBytes || 0);
+    storage = await InstituteVideoStorage.create({
+      institute: instituteId,
+      storageLimitBytes: limitBytes,
+      usedStorageBytes: usedBytes,
+      reservedStorageBytes: reservedBytes,
+    });
+  } else if (storage.storageLimitBytes !== limitBytes) {
+    storage.storageLimitBytes = limitBytes;
+    await storage.save();
+  }
+
+  const availableBytes = Math.max(
+    0,
+    storage.storageLimitBytes - storage.usedStorageBytes - storage.reservedStorageBytes
+  );
+
+  return {
+    storage,
+    limitBytes: storage.storageLimitBytes,
+    usedBytes: storage.usedStorageBytes,
+    reservedBytes: storage.reservedStorageBytes,
+    availableBytes,
+    maxGb,
+    usedGb: Number((storage.usedStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    availableGb: Number((availableBytes / (1024 * 1024 * 1024)).toFixed(2)),
+  };
+};
+
 // -----------------------------------------------------------------------------
-// SUPER ADMIN: Bunny Settings & Storage Limits
+// 1. UPLOAD INITIALIZATION & STORAGE QUOTA RESERVATION
+// -----------------------------------------------------------------------------
+
+export const initVideoUpload = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found" });
+    }
+
+    if (req.user.role !== "super_admin" && institute.recordedLecturesFeatureEnabled === false) {
+      return res.status(403).json({ message: "Recorded Lectures feature is disabled for this institute" });
+    }
+
+    const {
+      fileName,
+      fileSize,
+      title,
+      description,
+      playlistId,
+      playlistName,
+      targetAudienceType = "none",
+      targetAudienceMetadata = {},
+    } = req.body;
+
+    const fileSizeBytes = Number(fileSize || 0);
+    if (!title || !title.trim()) {
+      return res.status(400).json({ message: "Video title is required" });
+    }
+    if (fileSizeBytes <= 0) {
+      return res.status(400).json({ message: "Invalid file size" });
+    }
+
+    // Authoritative Storage Quota Check
+    const storageAcc = await getInstituteStorageAccount(instituteId);
+    if (storageAcc.availableBytes < fileSizeBytes) {
+      const fileMb = (fileSizeBytes / (1024 * 1024)).toFixed(1);
+      const availMb = (storageAcc.availableBytes / (1024 * 1024)).toFixed(1);
+      return res.status(400).json({
+        message: `Not enough storage! Your institute has ${availMb} MB available, but this video is ${fileMb} MB. Please delete old videos to free up space or contact Super Admin to upgrade storage.`,
+        storage: {
+          availableMb: availMb,
+          requiredMb: fileMb,
+          limitGb: storageAcc.maxGb,
+          usedGb: storageAcc.usedGb,
+        },
+      });
+    }
+
+    // Bunny Stream Config
+    const bunny = await getBunnySettingsHelper();
+    if (!bunny.apiKey || !bunny.libraryId) {
+      return res.status(400).json({
+        message: "Bunny.net Stream credentials are not configured in Super Admin settings.",
+      });
+    }
+
+    // Call Bunny Stream Create Video API
+    const bunnyRes = await axios.post(
+      `https://video.bunnycdn.com/library/${bunny.libraryId}/videos`,
+      { title: title.trim() },
+      {
+        headers: {
+          AccessKey: bunny.apiKey,
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        params: { AccessKey: bunny.apiKey },
+      }
+    );
+
+    const bunnyVideoId = bunnyRes.data.guid;
+
+    // Resolve Playlist if specified
+    let targetPlaylistId = null;
+    let playlistTitle = playlistName ? playlistName.trim() : "";
+    if (playlistId) {
+      targetPlaylistId = playlistId;
+    } else if (playlistTitle) {
+      let existingPlaylist = await VideoPlaylist.findOne({
+        institute: instituteId,
+        name: { $regex: new RegExp(`^${playlistTitle}$`, "i") },
+      });
+      if (!existingPlaylist) {
+        existingPlaylist = await VideoPlaylist.create({
+          institute: instituteId,
+          teacher: req.user._id,
+          name: playlistTitle,
+        });
+      }
+      targetPlaylistId = existingPlaylist._id;
+    }
+
+    // Create ClassTech Video Lecture (Status: UPLOADING)
+    const hlsUrl = `https://${bunny.cdnHostname}/${bunnyVideoId}/playlist.m3u8`;
+    const embedUrl = `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${bunnyVideoId}`;
+    const thumbnailUrl = `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
+
+    const video = await VideoLecture.create({
+      institute: instituteId,
+      createdBy: req.user._id,
+      bunnyVideoId,
+      bunnyLibraryId: bunny.libraryId,
+      title: title.trim(),
+      description: description ? description.trim() : "",
+      playlist: playlistTitle,
+      playlistId: targetPlaylistId,
+      uploadFileName: fileName || "video.mp4",
+      uploadFileSizeBytes: fileSizeBytes,
+      fileSizeBytes: fileSizeBytes,
+      videoUrl: embedUrl,
+      hlsUrl,
+      thumbnailUrl,
+      targetAudienceType,
+      targetAudienceMetadata,
+      status: "UPLOADING",
+      processingProgress: 0,
+    });
+
+    // If playlist specified, add playlist item entry
+    if (targetPlaylistId) {
+      const itemCount = await VideoPlaylistItem.countDocuments({ playlist: targetPlaylistId });
+      await VideoPlaylistItem.create({
+        playlist: targetPlaylistId,
+        video: video._id,
+        sortOrder: itemCount + 1,
+      });
+    }
+
+    // Reserve Storage Bytes
+    storageAcc.storage.reservedStorageBytes += fileSizeBytes;
+    await storageAcc.storage.save();
+    institute.reservedVideoStorageBytes = (institute.reservedVideoStorageBytes || 0) + fileSizeBytes;
+    await institute.save();
+
+    // Create Upload Audit Log
+    const uploadSession = await VideoUpload.create({
+      institute: instituteId,
+      teacher: req.user._id,
+      video: video._id,
+      originalFileName: fileName || "video.mp4",
+      fileSizeBytes: fileSizeBytes,
+      reservationBytes: fileSizeBytes,
+      uploadStatus: "INITIATED",
+    });
+
+    const directUploadUrl = `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${bunnyVideoId}`;
+
+    return res.status(201).json({
+      videoId: video._id,
+      bunnyVideoId,
+      libraryId: bunny.libraryId,
+      uploadSessionId: uploadSession._id,
+      directUploadUrl,
+      hlsUrl,
+      embedUrl,
+      thumbnailUrl,
+      apiKey: bunny.apiKey,
+    });
+  } catch (error) {
+    console.error("initVideoUpload error:", error);
+    return res.status(500).json({ message: error.message || "Could not initialize video upload" });
+  }
+};
+
+export const completeVideoUpload = async (req, res) => {
+  try {
+    const { videoId, uploadSessionId } = req.body;
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const video = await VideoLecture.findOne({ _id: videoId, institute: instituteId });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    // Update status to PROCESSING
+    video.status = "PROCESSING";
+    video.processingProgress = 10;
+    await video.save();
+
+    // Update Upload Session & Storage Reservation
+    if (uploadSessionId) {
+      const uploadSession = await VideoUpload.findById(uploadSessionId);
+      if (uploadSession) {
+        uploadSession.uploadStatus = "COMPLETED";
+        uploadSession.completedAt = new Date();
+        await uploadSession.save();
+
+        const storageAcc = await getInstituteStorageAccount(instituteId);
+        const institute = await Institute.findById(instituteId);
+
+        // Move reserved bytes to used bytes
+        const bytes = uploadSession.reservationBytes || video.fileSizeBytes || 0;
+        storageAcc.storage.reservedStorageBytes = Math.max(0, storageAcc.storage.reservedStorageBytes - bytes);
+        storageAcc.storage.usedStorageBytes += bytes;
+        await storageAcc.storage.save();
+
+        if (institute) {
+          institute.reservedVideoStorageBytes = Math.max(0, (institute.reservedVideoStorageBytes || 0) - bytes);
+          institute.usedVideoStorageBytes = (institute.usedVideoStorageBytes || 0) + bytes;
+          await institute.save();
+        }
+      }
+    }
+
+    await clearCachePattern("*");
+
+    return res.json({
+      message: "Upload completed. Video is now processing.",
+      video: {
+        id: video._id,
+        status: video.status,
+        processingProgress: video.processingProgress,
+      },
+    });
+  } catch (error) {
+    console.error("completeVideoUpload error:", error);
+    return res.status(500).json({ message: "Could not mark upload completed" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 2. BUNNY PROCESSING SYNCHRONIZATION & STATUS POLLING
+// -----------------------------------------------------------------------------
+
+export const checkVideoStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const video = await VideoLecture.findOne({ _id: id, institute: instituteId });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    if (video.status === "READY" || video.status === "FAILED") {
+      return res.json({
+        status: video.status,
+        processingProgress: video.processingProgress || 100,
+        video,
+      });
+    }
+
+    // Query Bunny API directly
+    const bunny = await getBunnySettingsHelper();
+    if (bunny.apiKey && bunny.libraryId && video.bunnyVideoId) {
+      try {
+        const bRes = await axios.get(
+          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${video.bunnyVideoId}`,
+          { headers: { AccessKey: bunny.apiKey, accept: "application/json" } }
+        );
+
+        const bData = bRes.data;
+        const bStatus = bData.status; // 0=Created, 1=Uploaded, 2=Processing, 3=Transcoding, 4=Finished, 5=Error
+        const progress = bData.encodeProgress || 0;
+
+        if (bStatus === 4 || bStatus === 3 || progress >= 99) {
+          video.status = "READY";
+          video.processingProgress = 100;
+          if (bData.length > 0) video.durationSeconds = bData.length;
+          if (bData.storageSize > 0) video.storageSizeBytes = bData.storageSize;
+          await video.save();
+        } else if (bStatus === 5) {
+          video.status = "FAILED";
+          video.processingProgress = 0;
+          await video.save();
+        } else {
+          video.processingProgress = Math.max(video.processingProgress || 10, progress);
+          await video.save();
+        }
+      } catch (bErr) {
+        console.warn("Bunny status check warning:", bErr.message);
+      }
+    }
+
+    return res.json({
+      status: video.status,
+      processingProgress: video.processingProgress,
+      video,
+    });
+  } catch (error) {
+    console.error("checkVideoStatus error:", error);
+    return res.status(500).json({ message: "Could not fetch video status" });
+  }
+};
+
+export const handleBunnyWebhook = async (req, res) => {
+  try {
+    const { VideoId, Status, LibraryId } = req.body;
+    if (!VideoId) {
+      return res.status(400).json({ message: "Missing VideoId" });
+    }
+
+    const video = await VideoLecture.findOne({ bunnyVideoId: String(VideoId) });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    if (Status === 4 || Status === 3 || Status === "Finished") {
+      video.status = "READY";
+      video.processingProgress = 100;
+      await video.save();
+    } else if (Status === 5 || Status === "Error") {
+      video.status = "FAILED";
+      await video.save();
+    }
+
+    await clearCachePattern("*");
+
+    return res.json({ message: "Webhook processed successfully" });
+  } catch (error) {
+    console.error("handleBunnyWebhook error:", error);
+    return res.status(500).json({ message: "Webhook handler failed" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 3. TEACHER VIDEO MANAGEMENT, SEARCH & ARCHIVE
+// -----------------------------------------------------------------------------
+
+export const getTeacherVideos = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found" });
+    }
+
+    const { search, playlistId, status, isArchived } = req.query;
+
+    const query = { institute: instituteId };
+
+    if (isArchived === "true") {
+      query.isArchived = true;
+    } else {
+      query.isArchived = { $ne: true };
+    }
+
+    if (playlistId) {
+      query.playlistId = playlistId;
+    }
+
+    if (status) {
+      query.status = status;
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      query.$or = [
+        { title: { $regex: q, $options: "i" } },
+        { description: { $regex: q, $options: "i" } },
+        { playlist: { $regex: q, $options: "i" } },
+      ];
+    }
+
+    const videos = await VideoLecture.find(query)
+      .sort({ createdAt: -1 })
+      .populate("playlistId", "name description");
+
+    const storageInfo = await getInstituteStorageAccount(instituteId);
+
+    const activeVideos = [];
+    const archivedVideos = [];
+
+    videos.forEach((v) => {
+      const vObj = typeof v.toObject === "function" ? v.toObject() : v;
+      if (v.isArchived || v.status === "ARCHIVED") {
+        archivedVideos.push(vObj);
+      } else {
+        activeVideos.push(vObj);
+      }
+    });
+
+    return res.json({
+      featureEnabled: institute.recordedLecturesFeatureEnabled !== false,
+      releaseVideosFeatureEnabled: institute.releaseVideosFeatureEnabled !== false,
+      storage: {
+        maxStorageGb: storageInfo.maxGb,
+        usedStorageBytes: storageInfo.usedBytes,
+        usedStorageGb: storageInfo.usedGb,
+        availableStorageGb: storageInfo.availableGb,
+        freeStorageGb: storageInfo.availableGb,
+        usagePercentage: storageInfo.limitBytes > 0 ? Math.min(100, Math.round((storageInfo.usedBytes / storageInfo.limitBytes) * 100)) : 0,
+      },
+      activeVideos,
+      expiredVideos: archivedVideos,
+      archivedVideos,
+      totalCount: videos.length,
+    });
+  } catch (error) {
+    console.error("getTeacherVideos error:", error);
+    return res.status(500).json({ message: "Could not fetch video lectures" });
+  }
+};
+
+export const updateVideoLecture = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    const {
+      title,
+      description,
+      playlist,
+      playlistId,
+      targetAudienceType,
+      targetAudienceMetadata,
+      thumbnailUrl,
+    } = req.body;
+
+    if (title !== undefined && title.trim()) video.title = title.trim();
+    if (description !== undefined) video.description = description.trim();
+    if (playlist !== undefined) video.playlist = playlist.trim();
+    if (playlistId !== undefined) video.playlistId = playlistId || null;
+    if (targetAudienceType !== undefined) video.targetAudienceType = targetAudienceType;
+    if (targetAudienceMetadata !== undefined) video.targetAudienceMetadata = targetAudienceMetadata;
+    if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : video.thumbnailUrl;
+
+    await video.save();
+    await clearCachePattern("*");
+
+    return res.json({ message: "Video lecture updated successfully", video });
+  } catch (error) {
+    console.error("updateVideoLecture error:", error);
+    return res.status(500).json({ message: "Could not update video lecture" });
+  }
+};
+
+export const archiveVideoLecture = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    video.isArchived = true;
+    video.archivedAt = new Date();
+    video.archivedBy = req.user._id;
+    await video.save();
+
+    await clearCachePattern("*");
+
+    return res.json({ message: "Video archived successfully", video });
+  } catch (error) {
+    console.error("archiveVideoLecture error:", error);
+    return res.status(500).json({ message: "Could not archive video lecture" });
+  }
+};
+
+export const restoreVideoLecture = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    video.isArchived = false;
+    video.archivedAt = null;
+    video.archivedBy = null;
+    await video.save();
+
+    await clearCachePattern("*");
+
+    return res.json({ message: "Video restored successfully", video });
+  } catch (error) {
+    console.error("restoreVideoLecture error:", error);
+    return res.status(500).json({ message: "Could not restore video lecture" });
+  }
+};
+
+export const deleteVideoLecture = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    if (!video) {
+      return res.status(404).json({ message: "Video lecture not found" });
+    }
+
+    const freedBytes = Number(video.fileSizeBytes || video.storageSizeBytes || 0);
+
+    // Call Bunny Delete Video API
+    try {
+      const bunny = await getBunnySettingsHelper();
+      if (bunny.apiKey && bunny.libraryId && video.bunnyVideoId) {
+        await axios.delete(
+          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${video.bunnyVideoId}`,
+          { headers: { AccessKey: bunny.apiKey } }
+        );
+      }
+    } catch (bErr) {
+      console.warn("Bunny API delete failed (soft ignored):", bErr.message);
+    }
+
+    await VideoLecture.findByIdAndDelete(video._id);
+    await VideoPlaylistItem.deleteMany({ video: video._id });
+    await VideoRelease.deleteMany({ video: video._id });
+    await VideoWatchLog.deleteMany({ video: video._id });
+
+    // Update institute storage
+    const storageAcc = await getInstituteStorageAccount(instituteId);
+    storageAcc.storage.usedStorageBytes = Math.max(0, storageAcc.storage.usedStorageBytes - freedBytes);
+    await storageAcc.storage.save();
+
+    const institute = await Institute.findById(instituteId);
+    if (institute) {
+      institute.usedVideoStorageBytes = Math.max(0, (institute.usedVideoStorageBytes || 0) - freedBytes);
+      await institute.save();
+    }
+
+    await clearCachePattern("*");
+
+    return res.json({ message: "Video lecture deleted permanently" });
+  } catch (error) {
+    console.error("deleteVideoLecture error:", error);
+    return res.status(500).json({ message: "Could not delete video lecture" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 4. PLAYLISTS API
+// -----------------------------------------------------------------------------
+
+export const getVideoPlaylists = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const playlists = await VideoPlaylist.find({ institute: instituteId, isArchived: { $ne: true } })
+      .sort({ createdAt: -1 });
+
+    const result = await Promise.all(
+      playlists.map(async (p) => {
+        const videoCount = await VideoPlaylistItem.countDocuments({ playlist: p._id });
+        const pObj = typeof p.toObject === "function" ? p.toObject() : p;
+        return {
+          ...pObj,
+          videoCount,
+        };
+      })
+    );
+
+    return res.json({ playlists: result });
+  } catch (error) {
+    console.error("getVideoPlaylists error:", error);
+    return res.status(500).json({ message: "Could not fetch video playlists" });
+  }
+};
+
+export const createVideoPlaylist = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const { name, description, thumbnailUrl } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Playlist name is required" });
+    }
+
+    const playlist = await VideoPlaylist.create({
+      institute: instituteId,
+      teacher: req.user._id,
+      name: name.trim(),
+      description: description ? description.trim() : "",
+      thumbnailUrl: thumbnailUrl ? thumbnailUrl.trim() : "",
+    });
+
+    return res.status(201).json(playlist);
+  } catch (error) {
+    console.error("createVideoPlaylist error:", error);
+    return res.status(500).json({ message: "Could not create video playlist" });
+  }
+};
+
+export const updateVideoPlaylist = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const playlist = await VideoPlaylist.findOne({ _id: req.params.id, institute: instituteId });
+    if (!playlist) {
+      return res.status(404).json({ message: "Playlist not found" });
+    }
+
+    const { name, description, thumbnailUrl } = req.body;
+    if (name !== undefined && name.trim()) playlist.name = name.trim();
+    if (description !== undefined) playlist.description = description.trim();
+    if (thumbnailUrl !== undefined) playlist.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : "";
+
+    await playlist.save();
+    return res.json({ message: "Playlist updated successfully", playlist });
+  } catch (error) {
+    console.error("updateVideoPlaylist error:", error);
+    return res.status(500).json({ message: "Could not update video playlist" });
+  }
+};
+
+export const getPlaylistVideos = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const playlist = await VideoPlaylist.findOne({ _id: req.params.id, institute: instituteId });
+    if (!playlist) {
+      return res.status(404).json({ message: "Playlist not found" });
+    }
+
+    const items = await VideoPlaylistItem.find({ playlist: playlist._id })
+      .sort({ sortOrder: 1 })
+      .populate("video");
+
+    const videos = items.map((i) => i.video).filter(Boolean);
+
+    return res.json({
+      playlist,
+      totalVideos: videos.length,
+      videos,
+    });
+  } catch (error) {
+    console.error("getPlaylistVideos error:", error);
+    return res.status(500).json({ message: "Could not fetch playlist videos" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 5. VIDEO RELEASE ENGINE (TEACHER ACCESS CONTROL)
+// -----------------------------------------------------------------------------
+
+export const createVideoRelease = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const institute = await Institute.findById(instituteId);
+    if (!institute || institute.releaseVideosFeatureEnabled === false) {
+      return res.status(403).json({ message: "Release Videos feature is disabled for your profile." });
+    }
+
+    const { videoIds = [], studentIds = [], startsAt, expiresAt, neverExpires } = req.body;
+
+    if (!Array.isArray(videoIds) || videoIds.length === 0) {
+      return res.status(400).json({ message: "Please select at least one video to release." });
+    }
+
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({ message: "Please select at least one student." });
+    }
+
+    const startDt = startsAt ? new Date(startsAt) : new Date();
+    const expiryDt = (neverExpires === true || !expiresAt) ? null : new Date(expiresAt);
+
+    // Verify all selected videos are READY and belong to institute
+    const readyVideos = await VideoLecture.find({
+      _id: { $in: videoIds },
+      institute: instituteId,
+      status: "READY",
+      isArchived: { $ne: true },
+    });
+
+    if (readyVideos.length === 0) {
+      return res.status(400).json({ message: "No ready, non-archived videos selected for release." });
+    }
+
+    const createdReleases = [];
+
+    for (const video of readyVideos) {
+      const release = await VideoRelease.create({
+        institute: instituteId,
+        teacher: req.user._id,
+        video: video._id,
+        startsAt: startDt,
+        expiresAt: expiryDt,
+        status: "ACTIVE",
+      });
+
+      for (const sId of studentIds) {
+        await VideoReleaseStudent.create({
+          release: release._id,
+          student: sId,
+        });
+      }
+
+      createdReleases.push(release);
+    }
+
+    await clearCachePattern("*");
+
+    return res.status(201).json({
+      message: `Successfully released ${readyVideos.length} video(s) to ${studentIds.length} student(s).`,
+      releasesCount: createdReleases.length,
+    });
+  } catch (error) {
+    console.error("createVideoRelease error:", error);
+    return res.status(500).json({ message: "Could not create video release" });
+  }
+};
+
+export const getVideoReleases = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const releases = await VideoRelease.find({ institute: instituteId })
+      .sort({ createdAt: -1 })
+      .populate("video", "title thumbnailUrl durationSeconds status")
+      .populate("teacher", "name email");
+
+    const result = await Promise.all(
+      releases.map(async (r) => {
+        const studentCount = await VideoReleaseStudent.countDocuments({ release: r._id });
+        const rObj = typeof r.toObject === "function" ? r.toObject() : r;
+        return {
+          ...rObj,
+          studentCount,
+        };
+      })
+    );
+
+    return res.json({ releases: result });
+  } catch (error) {
+    console.error("getVideoReleases error:", error);
+    return res.status(500).json({ message: "Could not fetch video releases" });
+  }
+};
+
+export const revokeVideoRelease = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    if (!instituteId) instituteId = String(req.user._id || "");
+
+    const release = await VideoRelease.findOne({ _id: req.params.id, institute: instituteId });
+    if (!release) {
+      return res.status(404).json({ message: "Release record not found" });
+    }
+
+    release.status = "REVOKED";
+    release.revokedAt = new Date();
+    release.revokedBy = req.user._id;
+    await release.save();
+
+    await clearCachePattern("*");
+
+    return res.json({ message: "Video release revoked successfully" });
+  } catch (error) {
+    console.error("revokeVideoRelease error:", error);
+    return res.status(500).json({ message: "Could not revoke video release" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 6. STUDENT RELEASED LECTURES & SECURE PLAYBACK
+// -----------------------------------------------------------------------------
+
+export const getStudentReleasedLectures = async (req, res) => {
+  try {
+    const student = req.user;
+    const studentId = String(student._id || student.id || "");
+    const instituteId = student.institute?._id || student.institute || student.user;
+
+    const now = new Date();
+
+    // 1. Find all release mappings for this student
+    const releaseMappings = await VideoReleaseStudent.find({ student: studentId }).select("release");
+    const releaseIds = releaseMappings.map((m) => m.release);
+
+    if (releaseIds.length === 0) {
+      return res.json({ videos: [] });
+    }
+
+    // 2. Query Active Valid Releases
+    const activeReleases = await VideoRelease.find({
+      _id: { $in: releaseIds },
+      status: "ACTIVE",
+      revokedAt: null,
+      startsAt: { $lte: now },
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+    }).populate("video");
+
+    // Group valid videos and calculate longest validity
+    const videoValidityMap = {};
+    activeReleases.forEach((r) => {
+      if (r.video && r.video.status === "READY" && !r.video.isArchived) {
+        const vId = String(r.video._id || r.video.id);
+        const existingExp = videoValidityMap[vId]?.expiresAt;
+        const currentExp = r.expiresAt;
+
+        if (!existingExp || (currentExp && new Date(currentExp) > new Date(existingExp))) {
+          videoValidityMap[vId] = {
+            video: r.video,
+            expiresAt: currentExp,
+            neverExpires: !currentExp,
+          };
+        }
+      }
+    });
+
+    const videos = Object.values(videoValidityMap).map((item) => {
+      const vObj = typeof item.video.toObject === "function" ? item.video.toObject() : item.video;
+      return {
+        ...vObj,
+        releaseExpiresAt: item.expiresAt,
+        releaseNeverExpires: item.neverExpires,
+      };
+    });
+
+    return res.json({ videos });
+  } catch (error) {
+    console.error("getStudentReleasedLectures error:", error);
+    return res.status(500).json({ message: "Could not fetch student video lectures" });
+  }
+};
+
+export const getStudentPlaybackAuthorization = async (req, res) => {
+  try {
+    const { id: videoId } = req.params;
+    const student = req.user;
+    const studentId = String(student._id || student.id || "");
+    const now = new Date();
+
+    const video = await VideoLecture.findById(videoId);
+    if (!video || video.status !== "READY" || video.isArchived) {
+      return res.status(404).json({ message: "Video lecture not available" });
+    }
+
+    // Verify Active Release
+    const releaseMappings = await VideoReleaseStudent.find({ student: studentId }).select("release");
+    const releaseIds = releaseMappings.map((m) => m.release);
+
+    const validRelease = await VideoRelease.findOne({
+      _id: { $in: releaseIds },
+      video: video._id,
+      status: "ACTIVE",
+      revokedAt: null,
+      startsAt: { $lte: now },
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+    });
+
+    if (!validRelease && req.user.role !== "super_admin" && req.user.role !== "institute_admin" && req.user.role !== "teacher") {
+      return res.status(403).json({ message: "You do not have active access to play this video lecture." });
+    }
+
+    const bunny = await getBunnySettingsHelper();
+    const hlsUrl = video.hlsUrl || `https://${bunny.cdnHostname}/${video.bunnyVideoId}/playlist.m3u8`;
+    const embedUrl = video.videoUrl || `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${video.bunnyVideoId}`;
+
+    return res.json({
+      authorized: true,
+      video: {
+        id: video._id,
+        title: video.title,
+        description: video.description,
+        hlsUrl,
+        embedUrl,
+        thumbnailUrl: video.thumbnailUrl,
+        durationSeconds: video.durationSeconds,
+      },
+    });
+  } catch (error) {
+    console.error("getStudentPlaybackAuthorization error:", error);
+    return res.status(500).json({ message: "Could not authorize video playback" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 7. THUMBNAIL UPLOAD UTILITY
+// -----------------------------------------------------------------------------
+
+export const uploadThumbnail = async (req, res) => {
+  try {
+    const { imageBase64 } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ message: "No image data provided" });
+    }
+
+    let uploadUrl = "";
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    if (cloudName && cloudName !== "your_cloud_name") {
+      try {
+        const result = await cloudinary.uploader.upload(imageBase64, {
+          folder: "video_thumbnails",
+        });
+        uploadUrl = result.secure_url;
+      } catch (cloudinaryErr) {
+        console.warn("Cloudinary upload fallback:", cloudinaryErr.message);
+      }
+    }
+
+    if (!uploadUrl) {
+      try {
+        const bucketName = process.env.SUPABASE_BUCKET || "notes";
+        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        const filename = `thumbnails/thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+
+        const { data, error } = await supabase.storage
+          .from(bucketName)
+          .upload(filename, buffer, { contentType: "image/jpeg", upsert: true });
+
+        if (!error && data) {
+          const { data: publicUrlData } = supabase.storage.from(bucketName).getPublicUrl(filename);
+          uploadUrl = publicUrlData?.publicUrl || "";
+        }
+      } catch (supabaseErr) {}
+    }
+
+    if (!uploadUrl) {
+      uploadUrl = imageBase64;
+    }
+
+    return res.json({ thumbnailUrl: uploadUrl });
+  } catch (error) {
+    console.error("uploadThumbnail error:", error);
+    return res.status(500).json({ message: "Could not upload thumbnail" });
+  }
+};
+
+// -----------------------------------------------------------------------------
+// 8. SUPER ADMIN CONTROLLERS
 // -----------------------------------------------------------------------------
 
 export const getBunnySettings = async (req, res) => {
@@ -114,11 +1083,11 @@ export const updateBunnySettings = async (req, res) => {
 export const updateInstituteVideoSettings = async (req, res) => {
   try {
     if (req.user?.role !== "super_admin") {
-      return res.status(403).json({ message: "Only super admin can update institute video settings" });
+      return res.status(403).json({ message: "Only super admin can update video feature settings" });
     }
 
     const { instituteId } = req.params;
-    const { recordedLecturesFeatureEnabled, maxVideoStorageGb } = req.body;
+    const { recordedLecturesFeatureEnabled, releaseVideosFeatureEnabled, maxVideoStorageGb } = req.body;
 
     const institute = await Institute.findById(instituteId);
     if (!institute) {
@@ -127,837 +1096,32 @@ export const updateInstituteVideoSettings = async (req, res) => {
 
     if (recordedLecturesFeatureEnabled !== undefined) {
       institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
-      if (!institute.allowedFeatures) institute.allowedFeatures = [];
-      if (institute.recordedLecturesFeatureEnabled) {
-        if (!institute.allowedFeatures.includes("recorded_lectures")) {
-          institute.allowedFeatures.push("recorded_lectures");
-        }
-      } else {
-        institute.allowedFeatures = institute.allowedFeatures.filter((f) => f !== "recorded_lectures");
-      }
+    }
+
+    if (releaseVideosFeatureEnabled !== undefined) {
+      institute.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
     }
 
     if (maxVideoStorageGb !== undefined) {
       institute.maxVideoStorageGb = Math.max(1, Number(maxVideoStorageGb));
+      const storageAcc = await getInstituteStorageAccount(instituteId);
+      storageAcc.storage.storageLimitBytes = institute.maxVideoStorageGb * 1024 * 1024 * 1024;
+      await storageAcc.storage.save();
     }
 
     await institute.save();
 
     return res.json({
-      message: "Institute video settings updated successfully",
+      message: "Institute video & release settings updated successfully",
       institute: {
         id: institute._id,
         recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled,
+        releaseVideosFeatureEnabled: institute.releaseVideosFeatureEnabled,
         maxVideoStorageGb: institute.maxVideoStorageGb,
-        usedVideoStorageBytes: institute.usedVideoStorageBytes || 0,
       },
     });
   } catch (error) {
     console.error("updateInstituteVideoSettings error:", error);
     return res.status(500).json({ message: "Could not update institute video settings" });
-  }
-};
-
-// -----------------------------------------------------------------------------
-// TEACHER / ADMIN: Video Management
-// -----------------------------------------------------------------------------
-
-export const getBunnyUploadSignature = async (req, res) => {
-  try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    if (instituteId) {
-      const institute = await Institute.findById(instituteId);
-      if (institute) {
-        const currentUsed = Number(institute.usedVideoStorageBytes || 0);
-        const maxBytes = Number(institute.maxVideoStorageGb || 50) * 1024 * 1024 * 1024;
-        const fileSizeBytes = Number(req.body.fileSizeBytes || 0);
-
-        if (currentUsed >= maxBytes) {
-          const freeMb = Math.max(0, Math.round((maxBytes - currentUsed) / (1024 * 1024)));
-          return res.status(400).json({
-            message: `Storage full! You have used 100% of your allocated ${institute.maxVideoStorageGb || 50} GB storage limit. Please contact Super Admin to upgrade storage.`
-          });
-        }
-
-        if (fileSizeBytes > 0 && (currentUsed + fileSizeBytes > maxBytes)) {
-          const freeBytes = Math.max(0, maxBytes - currentUsed);
-          const freeMb = (freeBytes / (1024 * 1024)).toFixed(1);
-          const fileMb = (fileSizeBytes / (1024 * 1024)).toFixed(1);
-          return res.status(400).json({
-            message: `Video size (${fileMb} MB) exceeds available storage (${freeMb} MB remaining out of ${institute.maxVideoStorageGb || 50} GB). Please free up storage or contact Admin.`
-          });
-        }
-      }
-    }
-
-    const bunny = await getBunnySettingsHelper();
-    const { title } = req.body;
-
-    const apiKey = (bunny.apiKey || "").trim();
-    const libraryId = (bunny.libraryId || "").trim();
-    const cdnHostname = (bunny.cdnHostname || "iframe.mediadelivery.net").trim();
-
-    if (!apiKey || !libraryId) {
-      return res.status(400).json({
-        message: "Bunny.net credentials are not configured in Super Admin settings.",
-      });
-    }
-
-    const apiKeyMasked = apiKey.length > 8 ? `${apiKey.substring(0, 4)}...${apiKey.substring(apiKey.length - 4)}` : apiKey;
-
-    // Call Bunny Stream Create Video API with both header and query param for maximum compatibility
-    const response = await axios.post(
-      `https://video.bunnycdn.com/library/${libraryId}/videos`,
-      { title: title || "Untitled Lecture" },
-      {
-        headers: {
-          AccessKey: apiKey,
-          accept: "application/json",
-          "content-type": "application/json",
-        },
-        params: {
-          AccessKey: apiKey,
-        },
-      }
-    );
-
-    const videoData = response.data;
-    const videoId = videoData.guid;
-
-    const directUploadUrl = `https://video.bunnycdn.com/library/${libraryId}/videos/${videoId}`;
-    const hlsUrl = `https://${cdnHostname}/${videoId}/playlist.m3u8`;
-    const embedUrl = `https://iframe.mediadelivery.net/embed/${libraryId}/${videoId}`;
-    const thumbnailUrl = `https://${cdnHostname}/${videoId}/thumbnail.jpg`;
-
-    return res.json({
-      bunnyVideoId: videoId,
-      libraryId: libraryId,
-      directUploadUrl,
-      hlsUrl,
-      embedUrl,
-      thumbnailUrl,
-      apiKey: apiKey,
-    });
-  } catch (error) {
-    const apiKey = (req.body?.apiKey || "").trim();
-    const bunnyErr = error.response?.data;
-    console.error("getBunnyUploadSignature error:", bunnyErr || error.message);
-    if (bunnyErr && bunnyErr.StatusCode === 401) {
-      return res.status(401).json({
-        message: "Bunny Stream Authentication Failed (401). Please check Super Admin -> Recorded Lectures -> Bunny Credentials.",
-        error: bunnyErr,
-        libraryIdUsed: req.body?.libraryId || undefined,
-      });
-    }
-    return res.status(500).json({
-      message: "Could not generate Bunny upload signature",
-      error: bunnyErr || error.message,
-    });
-  }
-};
-
-export const createVideoLecture = async (req, res) => {
-  try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
-    }
-
-    if (req.user.role !== "super_admin" && institute.recordedLecturesFeatureEnabled === false) {
-      return res.status(403).json({ message: "Recorded Lectures feature is disabled for this institute" });
-    }
-
-    const {
-      title,
-      description,
-      playlist,
-      bunnyVideoId,
-      videoUrl,
-      hlsUrl,
-      thumbnailUrl,
-      durationSeconds = 0,
-      fileSizeBytes = 0,
-      targetType = "batch",
-      batchIds = [],
-      studentIds = [],
-      expiryType = "none",
-      expiryDate,
-      presetExpiry,
-    } = req.body;
-
-    if (!title || !bunnyVideoId) {
-      return res.status(400).json({ message: "Video title and Bunny Video ID are required" });
-    }
-
-    // Check storage limit
-    const addedBytes = Number(fileSizeBytes || 0);
-    const currentUsed = Number(institute.usedVideoStorageBytes || 0);
-    const maxBytes = Number(institute.maxVideoStorageGb || 50) * 1024 * 1024 * 1024;
-
-    if (currentUsed + addedBytes > maxBytes) {
-      const freeMb = Math.max(0, Math.round((maxBytes - currentUsed) / (1024 * 1024)));
-      return res.status(400).json({
-        message: `Video upload exceeds storage limit. Free storage remaining: ${freeMb} MB out of ${institute.maxVideoStorageGb} GB. Contact Super Admin to upgrade storage.`,
-      });
-    }
-
-    // Calculate expiryDate
-    let finalExpiryDate = null;
-    let resolvedExpiryType = expiryType;
-
-    if (expiryType === "date" && expiryDate) {
-      finalExpiryDate = new Date(expiryDate);
-    } else if (expiryType === "preset" && presetExpiry) {
-      const now = new Date();
-      if (presetExpiry === "1_week") {
-        finalExpiryDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-      } else if (presetExpiry === "1_month") {
-        finalExpiryDate = new Date(now.setMonth(now.getMonth() + 1));
-      } else if (presetExpiry === "3_months") {
-        finalExpiryDate = new Date(now.setMonth(now.getMonth() + 3));
-      } else if (presetExpiry === "6_months") {
-        finalExpiryDate = new Date(now.setMonth(now.getMonth() + 6));
-      }
-    }
-
-    const bunny = await getBunnySettingsHelper();
-    const finalHlsUrl = hlsUrl || `https://${bunny.cdnHostname}/${bunnyVideoId}/playlist.m3u8`;
-    const finalVideoUrl = videoUrl || `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${bunnyVideoId}`;
-    const finalThumbnailUrl = (thumbnailUrl && thumbnailUrl.trim().length > 0)
-      ? thumbnailUrl.trim()
-      : `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
-
-    const video = await VideoLecture.create({
-      institute: instituteId,
-      createdBy: req.user._id,
-      title: title.trim(),
-      description: description ? description.trim() : "",
-      playlist: playlist ? playlist.trim() : "",
-      bunnyVideoId: bunnyVideoId.trim(),
-      videoUrl: finalVideoUrl,
-      hlsUrl: finalHlsUrl,
-      thumbnailUrl: finalThumbnailUrl,
-      durationSeconds: Number(durationSeconds || 0),
-      fileSizeBytes: Number(fileSizeBytes || addedBytes || 0),
-      targetType,
-      batches: Array.isArray(batchIds) ? batchIds.filter(Boolean) : [],
-      students: Array.isArray(studentIds) ? studentIds.filter(Boolean) : [],
-      expiryType: resolvedExpiryType,
-      expiryDate: finalExpiryDate,
-      status: "active",
-    });
-
-    // Update institute used storage
-    institute.usedVideoStorageBytes = currentUsed + Number(fileSizeBytes || addedBytes || 0);
-    await institute.save();
-
-    try {
-      let targetStudentIds = Array.isArray(studentIds) ? studentIds.filter(Boolean) : [];
-      if (targetType === "batch") {
-        const bIds = Array.isArray(batchIds) ? batchIds.filter(Boolean) : [];
-        const bQuery = bIds.length > 0 ? { batch: { $in: bIds } } : {};
-        const bStudents = await Student.find(bQuery).select("_id");
-        targetStudentIds = bStudents.map((s) => s._id);
-      }
-      sendStudentNotification({
-        studentIds: targetStudentIds,
-        instituteId,
-        title: "New Video Lecture",
-        message: `New video lecture available: ${title.trim()}.`,
-        type: "video",
-        data: { videoId: video._id, title: title.trim() },
-      });
-    } catch (nErr) {}
-
-    await clearCachePattern("*");
-
-    return res.status(201).json(video);
-  } catch (error) {
-    console.error("createVideoLecture error:", error);
-    return res.status(500).json({ message: error.message || "Could not save video lecture" });
-  }
-};
-
-export const uploadThumbnail = async (req, res) => {
-  try {
-    const { imageBase64 } = req.body;
-    if (!imageBase64) {
-      return res.status(400).json({ message: "No image data provided" });
-    }
-
-    let uploadUrl = "";
-
-    // 1. Try Cloudinary if configured
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    if (cloudName && cloudName !== "your_cloud_name") {
-      try {
-        const result = await cloudinary.uploader.upload(imageBase64, {
-          folder: "video_thumbnails",
-        });
-        uploadUrl = result.secure_url;
-      } catch (cloudinaryErr) {
-        console.warn("Cloudinary upload failed, trying Supabase fallback:", cloudinaryErr.message);
-      }
-    }
-
-    // 2. Try Supabase Storage if Cloudinary didn't produce a URL
-    if (!uploadUrl) {
-      try {
-        const bucketName = process.env.SUPABASE_BUCKET || "notes";
-        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-        const buffer = Buffer.from(base64Data, "base64");
-        const filename = `thumbnails/thumb_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
-
-        const { data, error } = await supabase.storage
-          .from(bucketName)
-          .upload(filename, buffer, {
-            contentType: "image/jpeg",
-            upsert: true,
-          });
-
-        if (!error && data) {
-          const { data: publicUrlData } = supabase.storage
-            .from(bucketName)
-            .getPublicUrl(filename);
-          uploadUrl = publicUrlData?.publicUrl || "";
-        } else if (error) {
-          console.warn("Supabase thumbnail upload error:", error.message);
-        }
-      } catch (supabaseErr) {
-        console.warn("Supabase upload exception:", supabaseErr.message);
-      }
-    }
-
-    // 3. Fallback: Return data URL if cloud storages are unavailable
-    if (!uploadUrl) {
-      uploadUrl = imageBase64;
-    }
-
-    return res.json({ thumbnailUrl: uploadUrl });
-  } catch (error) {
-    console.error("uploadThumbnail error:", error);
-    return res.status(500).json({ message: error.message || "Could not upload thumbnail" });
-  }
-};
-
-export const getTeacherVideos = async (req, res) => {
-  try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
-    }
-
-    const videos = await VideoLecture.find({ institute: instituteId })
-      .sort({ createdAt: -1 })
-      .populate("batches", "name")
-      .populate("students", "name enrollmentNumber");
-
-    const now = new Date();
-    const activeVideos = [];
-    const expiredVideos = [];
-    videos.forEach((v) => {
-      const isExpired = v.expiryDate && new Date(v.expiryDate).getTime() < now.getTime();
-      if (isExpired && v.status !== "expired") {
-        v.status = "expired";
-      }
-      const vObj = typeof v.toObject === "function" ? v.toObject() : v;
-
-      if (isExpired) {
-        expiredVideos.push(vObj);
-      } else {
-        activeVideos.push(vObj);
-      }
-    });
-
-    const maxGb = Number(institute.maxVideoStorageGb || 50);
-    let usedBytes = Number(institute.usedVideoStorageBytes ?? -1);
-    if (usedBytes < 0) {
-      usedBytes = await syncInstituteStorage(instituteId);
-    }
-    const usedGb = Number((usedBytes / (1024 * 1024 * 1024)).toFixed(2));
-    const freeGb = Number(Math.max(0, maxGb - usedGb).toFixed(2));
-    const usagePercentage = maxGb > 0 ? Math.min(100, Math.round((usedGb / maxGb) * 100)) : 0;
-
-    return res.json({
-      featureEnabled: institute.recordedLecturesFeatureEnabled !== false,
-      storage: {
-        maxStorageGb: maxGb,
-        usedStorageBytes: usedBytes,
-        usedStorageGb: usedGb,
-        freeStorageGb: freeGb,
-        usagePercentage,
-      },
-      activeVideos,
-      expiredVideos,
-      totalCount: videos.length,
-    });
-  } catch (error) {
-    console.error("getTeacherVideos error:", error);
-    return res.status(500).json({ message: "Could not fetch video lectures" });
-  }
-};
-
-export const updateVideoLecture = async (req, res) => {
-  try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
-    if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
-    }
-
-    const {
-      title,
-      description,
-      playlist,
-      targetType,
-      batchIds,
-      studentIds,
-      expiryType,
-      expiryDate,
-      presetExpiry,
-      thumbnailUrl,
-    } = req.body;
-
-    if (title !== undefined) video.title = title.trim();
-    if (description !== undefined) video.description = description.trim();
-    if (playlist !== undefined) video.playlist = playlist ? playlist.trim() : "";
-    if (targetType !== undefined) video.targetType = targetType;
-    if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : "";
-    if (Array.isArray(batchIds)) video.batches = batchIds.filter(Boolean);
-    if (Array.isArray(studentIds)) video.students = studentIds.filter(Boolean);
-
-    if (expiryType !== undefined) {
-      video.expiryType = expiryType;
-      if (expiryType === "none") {
-        video.expiryDate = null;
-      } else if (expiryType === "date" && expiryDate) {
-        video.expiryDate = new Date(expiryDate);
-      } else if (expiryType === "preset" && presetExpiry) {
-        const now = new Date();
-        if (presetExpiry === "1_week") {
-          video.expiryDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        } else if (presetExpiry === "1_month") {
-          video.expiryDate = new Date(now.setMonth(now.getMonth() + 1));
-        } else if (presetExpiry === "3_months") {
-          video.expiryDate = new Date(now.setMonth(now.getMonth() + 3));
-        } else if (presetExpiry === "6_months") {
-          video.expiryDate = new Date(now.setMonth(now.getMonth() + 6));
-        }
-      }
-    }
-
-    // Re-evaluate status
-    const now = new Date();
-    if (!video.expiryDate || new Date(video.expiryDate).getTime() >= now.getTime()) {
-      video.status = "active";
-    } else {
-      video.status = "expired";
-    }
-
-    await video.save();
-    await clearCachePattern("*");
-
-    return res.json({ message: "Video lecture updated successfully", video });
-  } catch (error) {
-    console.error("updateVideoLecture error:", error);
-    return res.status(500).json({ message: "Could not update video lecture" });
-  }
-};
-
-export const deleteVideoLecture = async (req, res) => {
-  try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
-    if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
-    }
-
-    const freedBytes = Number(video.fileSizeBytes || 0);
-
-    // Call Bunny Delete Video API if possible
-    try {
-      const bunny = await getBunnySettingsHelper();
-      if (bunny.apiKey && bunny.libraryId && video.bunnyVideoId) {
-        await axios.delete(
-          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${video.bunnyVideoId}`,
-          { headers: { AccessKey: bunny.apiKey } }
-        );
-      }
-    } catch (bErr) {
-      console.warn("Bunny API video delete failed (soft ignored):", bErr.message);
-    }
-
-    await VideoLecture.findByIdAndDelete(video._id);
-    await VideoWatchLog.deleteMany({ video: video._id });
-
-    // Update institute storage
-    const institute = await Institute.findById(instituteId);
-    if (institute) {
-      institute.usedVideoStorageBytes = Math.max(0, Number(institute.usedVideoStorageBytes || 0) - freedBytes);
-      await institute.save();
-    }
-
-    await clearCachePattern("*");
-
-    return res.json({ message: "Video lecture deleted successfully" });
-  } catch (error) {
-    console.error("deleteVideoLecture error:", error);
-    return res.status(500).json({ message: "Could not delete video lecture" });
-  }
-};
-
-// -----------------------------------------------------------------------------
-// STUDENT & WATCH PROGRESS API
-// -----------------------------------------------------------------------------
-
-export const recordStudentWatchProgress = async (req, res) => {
-  try {
-    const { videoId, watchTimeSeconds, totalDurationSeconds } = req.body;
-    const student = req.user;
-
-    if (!videoId) {
-      return res.status(400).json({ message: "Video ID is required" });
-    }
-
-    let video;
-    if (mongoose.Types.ObjectId.isValid(videoId)) {
-      video = await VideoLecture.findById(videoId);
-    }
-    if (!video) {
-      video = await VideoLecture.findOne({ bunnyVideoId: String(videoId) });
-    }
-
-    if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
-    }
-
-    const userId = student._id || student.id;
-    const duration = Number(totalDurationSeconds || video.durationSeconds || 1);
-    const watched = Math.min(duration, Number(watchTimeSeconds || 0));
-    const percentage = duration > 0 ? Math.min(100, Math.round((watched / duration) * 100)) : 0;
-
-    let log = await VideoWatchLog.findOne({ video: video._id, student: userId });
-
-    if (!log) {
-      log = new VideoWatchLog({
-        video: video._id,
-        student: userId,
-        institute: video.institute,
-        batch: student.batch || null,
-        watchTimeSeconds: watched,
-        totalDurationSeconds: duration,
-        watchPercentage: percentage,
-        lastWatchedAt: new Date(),
-      });
-      // Increment overall video views count
-      video.viewCount = Number(video.viewCount || 0) + 1;
-      await video.save();
-    } else {
-      log.watchTimeSeconds = Math.max(log.watchTimeSeconds || 0, watched);
-      log.totalDurationSeconds = duration;
-      log.watchPercentage = Math.max(log.watchPercentage || 0, percentage);
-      log.lastWatchedAt = new Date();
-    }
-
-    await log.save();
-
-    return res.json({
-      message: "Watch progress updated",
-      log: {
-        watchTimeSeconds: log.watchTimeSeconds,
-        watchPercentage: log.watchPercentage,
-      },
-    });
-  } catch (error) {
-    console.error("recordStudentWatchProgress error:", error);
-    return res.status(500).json({ message: "Could not record watch progress" });
-  }
-};
-
-export const getVideoWatchAnalytics = async (req, res) => {
-  try {
-    const { id: videoId } = req.params;
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    const video = await VideoLecture.findOne({ _id: videoId, institute: instituteId })
-      .populate("batches", "name")
-      .populate("students", "name enrollmentNumber");
-
-    if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
-    }
-
-    // Find all target students for this video
-    let targetStudents = [];
-    if (video.targetType === "batch" && Array.isArray(video.batches) && video.batches.length > 0) {
-      const batchIds = video.batches.map((b) => b._id || b);
-      targetStudents = await Student.find({ user: req.user.adminUser || req.user._id, batch: { $in: batchIds } })
-        .populate("batch", "name");
-    } else if (video.targetType === "student" && Array.isArray(video.students) && video.students.length > 0) {
-      const studentIds = video.students.map((s) => s._id || s);
-      targetStudents = await Student.find({ _id: { $in: studentIds } }).populate("batch", "name");
-    } else {
-      targetStudents = await Student.find({ user: req.user.adminUser || req.user._id }).populate("batch", "name");
-    }
-
-    const watchLogs = await VideoWatchLog.find({ video: videoId });
-    const watchMap = {};
-    watchLogs.forEach((l) => {
-      watchMap[String(l.student)] = l;
-    });
-
-    const studentAnalytics = targetStudents.map((s) => {
-      const sIdStr = String(s._id);
-      const log = watchMap[sIdStr];
-      const watchTime = log ? log.watchTimeSeconds : 0;
-      const totalDur = log ? log.totalDurationSeconds : (video.durationSeconds || 0);
-      const pct = log ? log.watchPercentage : 0;
-
-      return {
-        studentId: s._id,
-        name: s.name,
-        enrollmentNumber: s.enrollmentNumber || "N/A",
-        batchName: s.batch?.name || "General Batch",
-        watchTimeSeconds: watchTime,
-        totalDurationSeconds: totalDur,
-        watchPercentage: pct,
-        lastWatchedAt: log ? log.lastWatchedAt : null,
-        hasWatched: pct > 0,
-      };
-    });
-
-    return res.json({
-      video: {
-        id: video._id,
-        title: video.title,
-        durationSeconds: video.durationSeconds,
-        fileSizeBytes: video.fileSizeBytes,
-        viewCount: video.viewCount || 0,
-      },
-      totalAssignedStudents: studentAnalytics.length,
-      watchedStudentsCount: studentAnalytics.filter((s) => s.hasWatched).length,
-      studentAnalytics,
-    });
-  } catch (error) {
-    console.error("getVideoWatchAnalytics error:", error);
-    return res.status(500).json({ message: "Could not fetch watch analytics" });
-  }
-};
-
-// -----------------------------------------------------------------------------
-// SUPER ADMIN STATS & ANALYTICS
-// -----------------------------------------------------------------------------
-
-export const getSuperAdminVideoStats = async (req, res) => {
-  try {
-    if (req.user?.role !== "super_admin") {
-      return res.status(403).json({ message: "Only super admin can view global video stats" });
-    }
-
-    const [allVideos, allInstitutes, watchLogs] = await Promise.all([
-      VideoLecture.find().select("title durationSeconds fileSizeBytes viewCount createdAt institute status"),
-      Institute.find().select("name ownerName tuittionType maxVideoStorageGb usedVideoStorageBytes recordedLecturesFeatureEnabled"),
-      VideoWatchLog.find().select("watchTimeSeconds lastWatchedAt createdAt"),
-    ]);
-
-    let totalVideos = allVideos.length;
-    let totalStorageBytes = 0;
-    let totalViews = 0;
-
-    allVideos.forEach((v) => {
-      totalStorageBytes += Number(v.fileSizeBytes || 0);
-      totalViews += Number(v.viewCount || 0);
-    });
-
-    const totalStorageGb = Number((totalStorageBytes / (1024 * 1024 * 1024)).toFixed(2));
-
-    // Daily & Monthly views aggregation
-    const dailyViewsMap = {};
-    const monthlyViewsMap = {};
-
-    watchLogs.forEach((l) => {
-      const dt = new Date(l.lastWatchedAt || l.createdAt);
-      if (!isNaN(dt.getTime())) {
-        const dateKey = dt.toISOString().substring(0, 10);
-        const monthKey = dt.toISOString().substring(0, 7);
-        dailyViewsMap[dateKey] = (dailyViewsMap[dateKey] || 0) + 1;
-        monthlyViewsMap[monthKey] = (monthlyViewsMap[monthKey] || 0) + 1;
-      }
-    });
-
-    // Cost Calculations (Bunny.net Pricing: Storage = $0.01/GB/mo, Bandwidth = $0.005/GB)
-    const storageCostUsd = totalStorageGb * 0.01;
-    const estBandwidthGb = (totalViews * 0.5); // avg 0.5 GB per view
-    const bandwidthCostUsd = estBandwidthGb * 0.005;
-    const totalCostUsd = Number((storageCostUsd + bandwidthCostUsd).toFixed(2));
-    const totalCostInr = Math.round(totalCostUsd * 83.5);
-
-    // Institute Breakdown
-    const instVideoMap = {};
-    allVideos.forEach((v) => {
-      const k = String(v.institute);
-      if (!instVideoMap[k]) instVideoMap[k] = { count: 0, views: 0 };
-      instVideoMap[k].count++;
-      instVideoMap[k].views += Number(v.viewCount || 0);
-    });
-
-    const instituteStats = allInstitutes.map((inst) => {
-      const k = String(inst._id);
-      const vData = instVideoMap[k] || { count: 0, views: 0 };
-      const usedGb = Number(((inst.usedVideoStorageBytes || 0) / (1024 * 1024 * 1024)).toFixed(2));
-      const maxGb = Number(inst.maxVideoStorageGb || 50);
-
-      return {
-        instituteId: inst._id,
-        name: inst.name,
-        ownerName: inst.ownerName,
-        tuitionType: inst.tuitionType || "solo",
-        featureEnabled: inst.recordedLecturesFeatureEnabled !== false,
-        maxVideoStorageGb: maxGb,
-        usedVideoStorageGb: usedGb,
-        freeVideoStorageGb: Number(Math.max(0, maxGb - usedGb).toFixed(2)),
-        usagePercentage: maxGb > 0 ? Math.min(100, Math.round((usedGb / maxGb) * 100)) : 0,
-        videoCount: vData.count,
-        totalViews: vData.views,
-      };
-    });
-
-    return res.json({
-      summary: {
-        totalVideos,
-        totalStorageGb,
-        totalStorageBytes,
-        totalViews,
-        totalInstitutesCount: allInstitutes.length,
-        estimatedMonthlyCost: {
-          usd: totalCostUsd,
-          inr: totalCostInr,
-          storageCostUsd: Number(storageCostUsd.toFixed(2)),
-          bandwidthCostUsd: Number(bandwidthCostUsd.toFixed(2)),
-        },
-      },
-      dailyViews: dailyViewsMap,
-      monthlyViews: monthlyViewsMap,
-      instituteStats,
-    });
-  } catch (error) {
-    console.error("getSuperAdminVideoStats error:", error);
-    return res.status(500).json({ message: "Could not fetch super admin video stats" });
-  }
-};
-
-export const getInstituteVideoStatsSuperAdmin = async (req, res) => {
-  try {
-    if (req.user?.role !== "super_admin") {
-      return res.status(403).json({ message: "Only super admin can view institute video stats" });
-    }
-
-    const { instituteId } = req.params;
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
-    }
-
-    const videos = await VideoLecture.find({ institute: instituteId })
-      .sort({ createdAt: -1 })
-      .populate("batches", "name");
-
-    const maxGb = Number(institute.maxVideoStorageGb || 50);
-    const usedBytes = Number(institute.usedVideoStorageBytes || 0);
-    const usedGb = Number((usedBytes / (1024 * 1024 * 1024)).toFixed(2));
-    const freeGb = Number(Math.max(0, maxGb - usedGb).toFixed(2));
-
-    let totalViews = 0;
-    videos.forEach((v) => {
-      totalViews += Number(v.viewCount || 0);
-    });
-
-    return res.json({
-      institute: {
-        id: institute._id,
-        name: institute.name,
-        recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled !== false,
-        maxVideoStorageGb: maxGb,
-        usedVideoStorageGb: usedGb,
-        freeVideoStorageGb: freeGb,
-        usagePercentage: maxGb > 0 ? Math.min(100, Math.round((usedGb / maxGb) * 100)) : 0,
-      },
-      totalVideos: videos.length,
-      totalViews,
-      videos,
-    });
-  } catch (error) {
-    console.error("getInstituteVideoStatsSuperAdmin error:", error);
-    return res.status(500).json({ message: "Could not fetch institute video stats" });
-  }
-};
-
-export const getStudentVideos = async (req, res) => {
-  try {
-    const student = req.user;
-    const instituteId = student.institute?._id || student.institute || student.user;
-    const studentId = String(student._id || student.id || "");
-    const studentBatchId = student.batch?._id ? String(student.batch._id) : String(student.batch || "");
-
-    const now = new Date();
-    const videos = await VideoLecture.find({ institute: instituteId }).sort({ createdAt: -1 });
-
-    const visibleVideos = videos.filter((v) => {
-      // 1. Expiry check: Hide if expired
-      if (v.expiryDate && new Date(v.expiryDate).getTime() < now.getTime()) {
-        return false;
-      }
-
-      // 2. Target audience check:
-      if (v.targetType === "all" || !v.targetType) {
-        return true;
-      }
-
-      if (v.targetType === "batch") {
-        if (Array.isArray(v.batches) && v.batches.length > 0) {
-          const bStrs = v.batches.map((b) => String(b._id || b));
-          if (studentBatchId && bStrs.includes(studentBatchId)) {
-            return true;
-          }
-        }
-        return false;
-      }
-
-      if (v.targetType === "student") {
-        if (Array.isArray(v.students) && v.students.length > 0) {
-          const sStrs = v.students.map((s) => String(s._id || s));
-          if (studentId && sStrs.includes(studentId)) {
-            return true;
-          }
-        }
-        return false;
-      }
-
-      return true;
-    });
-
-    return res.json({ videos: visibleVideos });
-  } catch (error) {
-    console.error("getStudentVideos error:", error);
-    return res.status(500).json({ message: "Could not fetch student video lectures" });
   }
 };

@@ -3,42 +3,69 @@ import {
   getBunnySettings,
   updateBunnySettings,
   updateInstituteVideoSettings,
-  getBunnyUploadSignature,
-  createVideoLecture,
-  uploadThumbnail,
+  initVideoUpload,
+  completeVideoUpload,
+  checkVideoStatus,
+  handleBunnyWebhook,
   getTeacherVideos,
   updateVideoLecture,
+  archiveVideoLecture,
+  restoreVideoLecture,
   deleteVideoLecture,
-  recordStudentWatchProgress,
-  getVideoWatchAnalytics,
-  getSuperAdminVideoStats,
-  getInstituteVideoStatsSuperAdmin,
-  getStudentVideos,
+  getVideoPlaylists,
+  createVideoPlaylist,
+  updateVideoPlaylist,
+  getPlaylistVideos,
+  createVideoRelease,
+  getVideoReleases,
+  revokeVideoRelease,
+  getStudentReleasedLectures,
+  getStudentPlaybackAuthorization,
+  uploadThumbnail,
 } from "../controllers/videoController.js";
 import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+// Public Webhook from Bunny Stream
+router.post("/bunny/webhook", express.json(), handleBunnyWebhook);
+
+// Protected API Routes
 router.use(protect);
 
-// Super Admin Bunny & Storage Settings
+// Super Admin Settings
 router.get("/super-admin/bunny-settings", getBunnySettings);
 router.put("/super-admin/bunny-settings", updateBunnySettings);
 router.put("/super-admin/institute-settings/:instituteId", updateInstituteVideoSettings);
-router.get("/super-admin/stats", getSuperAdminVideoStats);
-router.get("/super-admin/institute-stats/:instituteId", getInstituteVideoStatsSuperAdmin);
 
-// Teacher Video Management & Upload Signature
-router.post("/bunny/signature", getBunnyUploadSignature);
-router.post("/thumbnail", uploadThumbnail);
+// Direct Upload Flow
+router.post("/upload/init", initVideoUpload);
+router.post("/bunny/signature", initVideoUpload); // Legacy compatibility alias
+router.post("/upload/complete", completeVideoUpload);
+router.get("/teacher/:id/status", checkVideoStatus);
+
+// Teacher Video Management & Search
 router.get("/teacher", getTeacherVideos);
-router.post("/teacher", createVideoLecture);
 router.put("/teacher/:id", updateVideoLecture);
+router.post("/teacher/:id/archive", archiveVideoLecture);
+router.post("/teacher/:id/restore", restoreVideoLecture);
 router.delete("/teacher/:id", deleteVideoLecture);
-router.get("/teacher/:id/analytics", getVideoWatchAnalytics);
+router.post("/thumbnail", uploadThumbnail);
 
-// Student Watch Log & Video Feed Endpoint
-router.get("/student", getStudentVideos);
-router.post("/student/progress", recordStudentWatchProgress);
+// Playlists
+router.get("/playlists", getVideoPlaylists);
+router.post("/playlists", createVideoPlaylist);
+router.put("/playlists/:id", updateVideoPlaylist);
+router.get("/playlists/:id/videos", getPlaylistVideos);
+
+// Video Releases
+router.post("/releases", createVideoRelease);
+router.get("/releases", getVideoReleases);
+router.post("/releases/:id/revoke", revokeVideoRelease);
+
+// Student Released Lectures & Playback Authorization
+router.get("/student/released", getStudentReleasedLectures);
+router.get("/student", getStudentReleasedLectures); // Legacy compatibility alias
+router.get("/student/:id/playback", getStudentPlaybackAuthorization);
 
 export default router;
