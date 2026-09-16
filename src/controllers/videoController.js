@@ -129,16 +129,13 @@ export const syncInstituteStorage = getInstituteStorageAccount;
 
 export const initVideoUpload = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
-
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
+    const instituteId = resolveInstituteId(req);
+    let institute = null;
+    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
+      institute = await Institute.findById(instituteId);
     }
 
-    if (req.user.role !== "super_admin" && institute.recordedLecturesFeatureEnabled === false) {
+    if (req.user.role !== "super_admin" && institute && institute.recordedLecturesFeatureEnabled === false) {
       return res.status(403).json({ message: "Recorded Lectures feature is disabled for this institute" });
     }
 
@@ -227,7 +224,7 @@ export const initVideoUpload = async (req, res) => {
     const thumbnailUrl = `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
 
     const video = await VideoLecture.create({
-      institute: instituteId,
+      institute: instituteId || String(req.user._id || ""),
       createdBy: req.user._id,
       bunnyVideoId,
       bunnyLibraryId: bunny.libraryId,
@@ -260,12 +257,14 @@ export const initVideoUpload = async (req, res) => {
     // Reserve Storage Bytes
     storageAcc.storage.reservedStorageBytes += fileSizeBytes;
     await storageAcc.storage.save();
-    institute.reservedVideoStorageBytes = (institute.reservedVideoStorageBytes || 0) + fileSizeBytes;
-    await institute.save();
+    if (institute) {
+      institute.reservedVideoStorageBytes = (institute.reservedVideoStorageBytes || 0) + fileSizeBytes;
+      await institute.save();
+    }
 
     // Create Upload Audit Log
     const uploadSession = await VideoUpload.create({
-      institute: instituteId,
+      institute: instituteId || String(req.user._id || ""),
       teacher: req.user._id,
       video: video._id,
       originalFileName: fileName || "video.mp4",
@@ -296,11 +295,12 @@ export const initVideoUpload = async (req, res) => {
 export const completeVideoUpload = async (req, res) => {
   try {
     const { videoId, uploadSessionId } = req.body;
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
 
-    const video = await VideoLecture.findOne({ _id: videoId, institute: instituteId });
+    const query = { _id: videoId };
+    if (instituteId) query.institute = instituteId;
+
+    const video = await VideoLecture.findOne(query);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -537,11 +537,11 @@ export const getTeacherVideos = async (req, res) => {
 
 export const updateVideoLecture = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    const video = await VideoLecture.findOne(query);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -576,11 +576,11 @@ export const updateVideoLecture = async (req, res) => {
 
 export const archiveVideoLecture = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    const video = await VideoLecture.findOne(query);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -601,11 +601,11 @@ export const archiveVideoLecture = async (req, res) => {
 
 export const restoreVideoLecture = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    const video = await VideoLecture.findOne(query);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -626,11 +626,11 @@ export const restoreVideoLecture = async (req, res) => {
 
 export const deleteVideoLecture = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const video = await VideoLecture.findOne({ _id: req.params.id, institute: instituteId });
+    const video = await VideoLecture.findOne(query);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -660,7 +660,10 @@ export const deleteVideoLecture = async (req, res) => {
     storageAcc.storage.usedStorageBytes = Math.max(0, storageAcc.storage.usedStorageBytes - freedBytes);
     await storageAcc.storage.save();
 
-    const institute = await Institute.findById(instituteId);
+    let institute = null;
+    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
+      institute = await Institute.findById(instituteId);
+    }
     if (institute) {
       institute.usedVideoStorageBytes = Math.max(0, (institute.usedVideoStorageBytes || 0) - freedBytes);
       await institute.save();
@@ -681,11 +684,11 @@ export const deleteVideoLecture = async (req, res) => {
 
 export const getVideoPlaylists = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { isArchived: { $ne: true } };
+    if (instituteId) query.institute = instituteId;
 
-    const playlists = await VideoPlaylist.find({ institute: instituteId, isArchived: { $ne: true } })
+    const playlists = await VideoPlaylist.find(query)
       .sort({ createdAt: -1 });
 
     const result = await Promise.all(
@@ -708,9 +711,7 @@ export const getVideoPlaylists = async (req, res) => {
 
 export const createVideoPlaylist = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req) || String(req.user._id || "");
 
     const { name, description, thumbnailUrl } = req.body;
     if (!name || !name.trim()) {
@@ -734,11 +735,11 @@ export const createVideoPlaylist = async (req, res) => {
 
 export const updateVideoPlaylist = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const playlist = await VideoPlaylist.findOne({ _id: req.params.id, institute: instituteId });
+    const playlist = await VideoPlaylist.findOne(query);
     if (!playlist) {
       return res.status(404).json({ message: "Playlist not found" });
     }
@@ -758,11 +759,11 @@ export const updateVideoPlaylist = async (req, res) => {
 
 export const getPlaylistVideos = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const playlist = await VideoPlaylist.findOne({ _id: req.params.id, institute: instituteId });
+    const playlist = await VideoPlaylist.findOne(query);
     if (!playlist) {
       return res.status(404).json({ message: "Playlist not found" });
     }
@@ -790,12 +791,13 @@ export const getPlaylistVideos = async (req, res) => {
 
 export const createVideoRelease = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req) || String(req.user._id || "");
 
-    const institute = await Institute.findById(instituteId);
-    if (!institute || institute.releaseVideosFeatureEnabled === false) {
+    let institute = null;
+    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
+      institute = await Institute.findById(instituteId);
+    }
+    if (institute && institute.releaseVideosFeatureEnabled === false) {
       return res.status(403).json({ message: "Release Videos feature is disabled for your profile." });
     }
 
@@ -815,7 +817,6 @@ export const createVideoRelease = async (req, res) => {
     // Verify all selected videos are READY and belong to institute
     const readyVideos = await VideoLecture.find({
       _id: { $in: videoIds },
-      institute: instituteId,
       status: "READY",
       isArchived: { $ne: true },
     });
@@ -860,11 +861,11 @@ export const createVideoRelease = async (req, res) => {
 
 export const getVideoReleases = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = {};
+    if (instituteId) query.institute = instituteId;
 
-    const releases = await VideoRelease.find({ institute: instituteId })
+    const releases = await VideoRelease.find(query)
       .sort({ createdAt: -1 })
       .populate("video", "title thumbnailUrl durationSeconds status")
       .populate("teacher", "name email");
@@ -889,11 +890,11 @@ export const getVideoReleases = async (req, res) => {
 
 export const revokeVideoRelease = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
 
-    const release = await VideoRelease.findOne({ _id: req.params.id, institute: instituteId });
+    const release = await VideoRelease.findOne(query);
     if (!release) {
       return res.status(404).json({ message: "Release record not found" });
     }
