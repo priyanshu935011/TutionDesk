@@ -208,8 +208,30 @@ function getFallbackFile(tableName) {
 function readFallbackData(tableName) {
   try {
     const filePath = getFallbackFile(tableName);
-    const content = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(content);
+    let data = [];
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, "utf8");
+      data = JSON.parse(content);
+    }
+    if (tableName.includes("_")) {
+      const altName = tableName.replace(/_/g, "");
+      const altPath = path.join(FALLBACK_DIR, `${altName}.json`);
+      if (fs.existsSync(altPath)) {
+        try {
+          const altContent = fs.readFileSync(altPath, "utf8");
+          const altData = JSON.parse(altContent);
+          if (Array.isArray(altData)) {
+            altData.forEach((item) => {
+              const itemId = String(item.id || item._id);
+              if (!data.some((d) => String(d.id || d._id) === itemId)) {
+                data.push(item);
+              }
+            });
+          }
+        } catch (_) {}
+      }
+    }
+    return data;
   } catch (err) {
     console.error(`Error reading fallback data for ${tableName}:`, err);
     return [];
@@ -1994,6 +2016,12 @@ const mockMongoose = {
     else if (modelName === "SystemMetric") tableName = "system_metrics";
     else if (modelName === "SystemSetting") tableName = "system_settings";
     else if (modelName === "VideoLecture") tableName = "video_lectures";
+    else if (modelName === "VideoPlaylist") tableName = "video_playlists";
+    else if (modelName === "VideoPlaylistItem") tableName = "video_playlist_items";
+    else if (modelName === "VideoRelease") tableName = "video_releases";
+    else if (modelName === "VideoReleaseStudent") tableName = "video_release_students";
+    else if (modelName === "VideoUpload") tableName = "video_uploads";
+    else if (modelName === "InstituteVideoStorage") tableName = "institute_video_storage";
     else if (modelName === "VideoWatchLog") tableName = "video_watch_logs";
     else if (modelName === "Notice") tableName = "notices";
     else if (modelName === "SystemLog") tableName = "system_logs";
