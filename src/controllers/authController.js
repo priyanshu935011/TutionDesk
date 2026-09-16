@@ -77,12 +77,23 @@ export const loginUser = async (req, res) => {
     }
 
     let user = null;
+    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
     try {
+      const emailRegex = new RegExp(`^${normalizedIdentifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
       user = await User.findOne({
         $or: [
+          { email: emailRegex },
           { email: normalizedIdentifier },
           { phone: normalizedIdentifier },
-          ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }] : [])
+          ...(cleanPhone.length >= 7
+            ? [
+                { phone: cleanPhone },
+                { phone: last10 },
+                { phone: `+91${last10}` },
+                { phone: `91${last10}` },
+                { email: `teacher_${last10}@classtech.local` }
+              ]
+            : [])
         ]
       });
     } catch (err) {
