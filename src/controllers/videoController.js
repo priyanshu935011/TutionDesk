@@ -86,6 +86,8 @@ export const getInstituteStorageAccount = async (instituteId) => {
   };
 };
 
+export const syncInstituteStorage = getInstituteStorageAccount;
+
 // -----------------------------------------------------------------------------
 // 1. UPLOAD INITIALIZATION & STORAGE QUOTA RESERVATION
 // -----------------------------------------------------------------------------
