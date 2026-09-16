@@ -760,9 +760,11 @@ export const updateStudent = async (req, res) => {
     const calculatedDueDate = resolveDueDate({ feePlanType, joinedOn: resolvedJoinedOn, dueDate: safeParseDate(dueDate) });
     student.dueDate = safeParseDate(calculatedDueDate) || calculatedDueDate;
     student.customFields = customFieldsObj;
-    student.markModified("customFields");
-    student.markModified("batches");
-    student.markModified("paymentHistory");
+    if (typeof student.markModified === "function") {
+      student.markModified("customFields");
+      student.markModified("batches");
+      student.markModified("paymentHistory");
+    }
 
     await student.save();
 
