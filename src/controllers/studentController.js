@@ -1718,16 +1718,12 @@ export const getStudentPortalData = async (req, res) => {
 export const downloadStudentNote = async (req, res) => {
   try {
     const student = req.student;
-    const institute = await Institute.findById(student.user).select("_id");
-
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
-    }
+    const instituteId = String(student.user?._id || student.user || "");
 
     const studentBatchId = student.batch?._id || student.batch?.id || student.batch || null;
     const note = await Note.findOne({
       _id: req.params.id,
-      institute: institute._id,
+      institute: instituteId,
       $or: [{ batch: studentBatchId }, { batch: null }],
     });
 

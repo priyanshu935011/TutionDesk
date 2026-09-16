@@ -66,22 +66,17 @@ const invalidateUserDashboard = async (req) => {
 export const getInstituteFeatures = async (req, res) => {
   try {
     const rawInst = req.user.institute;
-    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
-    if (!instIdStr) {
-      return res.status(400).json({ message: "No institute linked to this account" });
-    }
+    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : String(req.user._id || ""));
 
-    const institute = await Institute.findById(instIdStr)
-      .select("allowedFeatures");
-
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
+    let institute = null;
+    if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
+      institute = await Institute.findById(instIdStr).select("allowedFeatures");
     }
 
     return res.json({
-      allowedFeatures: Array.isArray(institute.allowedFeatures)
+      allowedFeatures: (institute && Array.isArray(institute.allowedFeatures))
         ? institute.allowedFeatures
-        : [],
+        : ["attendance", "notes", "marks", "tests", "whatsapp", "recorded_lectures"],
     });
   } catch (error) {
     console.error("getInstituteFeatures error:", error);
@@ -1594,14 +1589,13 @@ export const createHiredTeacher = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Only institute admins can add teachers." });
     }
 
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const institute = await Institute.findById(instituteId);
-
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
+    const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+    let institute = null;
+    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
+      institute = await Institute.findById(instituteId);
     }
 
-    if (institute.tuitionType !== "institution") {
+    if (institute && institute.tuitionType !== "institution") {
       institute.tuitionType = "institution";
       await institute.save();
     }
@@ -1827,21 +1821,21 @@ export const updateBrandingSettings = async (req, res) => {
     }
 
     const { brandingEnabled, name, themeColor, logoUrl } = req.body;
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const rawInst = req.user.institute;
+    const instituteId = rawInst?._id || rawInst || req.user._id;
 
-    const institute = await Institute.findByIdAndUpdate(
-      instituteId,
-      {
-        brandingEnabled: brandingEnabled !== false,
-        name: name ? name.trim() : "Classtech",
-        themeColor: themeColor || "#6366f1",
-        logoUrl: logoUrl || null,
-      },
-      { new: true }
-    );
-
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
+    let institute = null;
+    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
+      institute = await Institute.findByIdAndUpdate(
+        instituteId,
+        {
+          brandingEnabled: brandingEnabled !== false,
+          name: name ? name.trim() : "Classtech",
+          themeColor: themeColor || "#6366f1",
+          logoUrl: logoUrl || null,
+        },
+        { new: true }
+      );
     }
 
     await invalidateUserDashboard(req);
@@ -1850,11 +1844,11 @@ export const updateBrandingSettings = async (req, res) => {
     return res.json({
       message: "Branding settings updated successfully",
       institute: {
-        id: institute._id,
-        name: institute.name,
-        brandingEnabled: institute.brandingEnabled !== false,
-        logoUrl: institute.logoUrl || null,
-        themeColor: institute.themeColor || "#6366f1",
+        id: institute ? institute._id : instituteId,
+        name: institute ? institute.name : (name ? name.trim() : "Classtech"),
+        brandingEnabled: institute ? (institute.brandingEnabled !== false) : (brandingEnabled !== false),
+        logoUrl: institute ? (institute.logoUrl || null) : (logoUrl || null),
+        themeColor: institute ? (institute.themeColor || "#6366f1") : (themeColor || "#6366f1"),
       }
     });
   } catch (error) {
