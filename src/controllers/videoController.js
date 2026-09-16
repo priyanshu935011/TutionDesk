@@ -707,16 +707,27 @@ export const getVideoPlaylists = async (req, res) => {
 
 export const createVideoPlaylist = async (req, res) => {
   try {
-    const instituteId = resolveInstituteId(req) || String(req.user._id || "");
+    let instituteId = resolveInstituteId(req);
+    if (!instituteId && req.user?._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+      instituteId = String(req.user._id);
+    }
+
+    if (!instituteId || !mongoose.Types.ObjectId.isValid(instituteId)) {
+      return res.status(400).json({ message: "Invalid or missing institute ID." });
+    }
 
     const { name, description, thumbnailUrl } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Playlist name is required" });
     }
 
+    const teacherId = (req.user && req.user._id && mongoose.Types.ObjectId.isValid(String(req.user._id)))
+      ? req.user._id
+      : instituteId;
+
     const playlist = await VideoPlaylist.create({
       institute: instituteId,
-      teacher: req.user._id,
+      teacher: teacherId,
       name: name.trim(),
       description: description ? description.trim() : "",
       thumbnailUrl: thumbnailUrl ? thumbnailUrl.trim() : "",
@@ -725,7 +736,7 @@ export const createVideoPlaylist = async (req, res) => {
     return res.status(201).json(playlist);
   } catch (error) {
     console.error("createVideoPlaylist error:", error);
-    return res.status(500).json({ message: "Could not create video playlist" });
+    return res.status(500).json({ message: error.message || "Could not create video playlist" });
   }
 };
 
