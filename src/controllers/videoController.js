@@ -458,14 +458,29 @@ export const getTeacherVideos = async (req, res) => {
 
     let institute = null;
     if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
-      institute = await Institute.findById(instituteId);
+      try {
+        institute = await Institute.findById(instituteId);
+      } catch (_) {}
     }
 
     const { search, playlistId, status, isArchived } = req.query;
 
     const query = {};
-    if (instituteId) {
-      query.institute = instituteId;
+
+    if (req.user?.role === "super_admin" && !req.query?.instituteId) {
+      // Super admin sees all videos
+    } else {
+      const conditions = [];
+      if (instituteId && instituteId !== "000000000000000000000000") {
+        conditions.push({ institute: instituteId });
+      }
+      if (req.user?._id) {
+        conditions.push({ createdBy: req.user._id });
+        conditions.push({ institute: req.user._id });
+      }
+      if (conditions.length > 0) {
+        query.$or = conditions;
+      }
     }
 
     if (isArchived === "true") {
@@ -474,7 +489,7 @@ export const getTeacherVideos = async (req, res) => {
       query.isArchived = { $ne: true };
     }
 
-    if (playlistId) {
+    if (playlistId && mongoose.Types.ObjectId.isValid(playlistId)) {
       query.playlistId = playlistId;
     }
 
@@ -484,23 +499,47 @@ export const getTeacherVideos = async (req, res) => {
 
     if (search && search.trim()) {
       const q = search.trim();
-      query.$or = [
+      const searchOr = [
         { title: { $regex: q, $options: "i" } },
         { description: { $regex: q, $options: "i" } },
         { playlist: { $regex: q, $options: "i" } },
       ];
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: searchOr }];
+        delete query.$or;
+      } else {
+        query.$or = searchOr;
+      }
     }
 
-    const videos = await VideoLecture.find(query)
-      .sort({ createdAt: -1 })
-      .populate("playlistId", "name description");
+    let videos = [];
+    try {
+      videos = await VideoLecture.find(query)
+        .sort({ createdAt: -1 })
+        .populate("playlistId", "name description");
+    } catch (findErr) {
+      console.warn("getTeacherVideos populate fallback:", findErr.message);
+      videos = await VideoLecture.find(query).sort({ createdAt: -1 });
+    }
 
-    const storageInfo = await getInstituteStorageAccount(instituteId);
+    let storageInfo = {
+      maxGb: 50,
+      usedBytes: 0,
+      usedGb: 0,
+      availableGb: 50,
+      availableBytes: 50 * 1024 * 1024 * 1024,
+      limitBytes: 50 * 1024 * 1024 * 1024,
+    };
+    try {
+      storageInfo = await getInstituteStorageAccount(instituteId);
+    } catch (stErr) {
+      console.warn("getInstituteStorageAccount warning:", stErr.message);
+    }
 
     const activeVideos = [];
     const archivedVideos = [];
 
-    videos.forEach((v) => {
+    (videos || []).forEach((v) => {
       const vObj = typeof v.toObject === "function" ? v.toObject() : v;
       if (v.isArchived || v.status === "ARCHIVED") {
         archivedVideos.push(vObj);
@@ -527,7 +566,7 @@ export const getTeacherVideos = async (req, res) => {
     });
   } catch (error) {
     console.error("getTeacherVideos error:", error);
-    return res.status(500).json({ message: "Could not fetch video lectures" });
+    return res.status(500).json({ message: error.message || "Could not fetch video lectures" });
   }
 };
 
