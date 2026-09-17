@@ -324,6 +324,8 @@ export const createInstitute = async (req, res) => {
       allowedFeatures,
       studentCustomFields,
       studentPortalEnabled,
+      recordedLecturesFeatureEnabled,
+      releaseVideosFeatureEnabled,
       maxLeadFileSizeMb,
     } = req.body;
 
@@ -374,6 +376,8 @@ export const createInstitute = async (req, res) => {
       studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
       studentPortalEnabled: studentPortalEnabled !== false,
       quizFeatureEnabled: quizFeatureEnabled !== false,
+      recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== false,
+      releaseVideosFeatureEnabled: releaseVideosFeatureEnabled !== false,
       maxLeadFileSizeMb: Number(maxLeadFileSizeMb || 10),
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
@@ -448,6 +452,8 @@ export const updateInstitute = async (req, res) => {
       allowedFeatures,
       studentCustomFields,
       studentPortalEnabled,
+      recordedLecturesFeatureEnabled,
+      releaseVideosFeatureEnabled,
       maxLeadFileSizeMb,
     } = req.body;
 
@@ -473,6 +479,8 @@ export const updateInstitute = async (req, res) => {
     if (studentPortalEnabled !== undefined) institute.studentPortalEnabled = Boolean(studentPortalEnabled);
     if (maxLeadFileSizeMb !== undefined) institute.maxLeadFileSizeMb = Number(maxLeadFileSizeMb);
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
+    if (recordedLecturesFeatureEnabled !== undefined) institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+    if (releaseVideosFeatureEnabled !== undefined) institute.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
     if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
     if (themeColor !== undefined) institute.themeColor = themeColor;
