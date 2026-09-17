@@ -656,6 +656,27 @@ export const getTeacherVideos = async (req, res) => {
       } catch (_) {}
     }
 
+    if (!institute && req.user?.institute) {
+      if (typeof req.user.institute === "object" && req.user.institute._id) {
+        try {
+          institute = await Institute.findById(req.user.institute._id);
+        } catch (_) {}
+      } else if (typeof req.user.institute === "string" && mongoose.Types.ObjectId.isValid(req.user.institute)) {
+        try {
+          institute = await Institute.findById(req.user.institute);
+        } catch (_) {}
+      }
+    }
+
+    if (!institute && req.user) {
+      try {
+        const u = await User.findById(req.user._id || req.user.id).populate("institute");
+        if (u?.institute && typeof u.institute === "object") {
+          institute = u.institute;
+        }
+      } catch (_) {}
+    }
+
     const { search, playlistId, status, isArchived } = req.query;
 
     const query = {};
@@ -821,9 +842,27 @@ export const getTeacherVideos = async (req, res) => {
       }
     });
 
+    const checkReleaseVideosEnabled = (inst) => {
+      if (!inst) return true;
+      if (inst.releaseVideosFeatureEnabled === false || inst.release_videos_feature_enabled === false) {
+        return false;
+      }
+      if (Array.isArray(inst.allowedFeatures) && inst.allowedFeatures.length > 0) {
+        const hasFeature = inst.allowedFeatures.includes("release_videos") || inst.allowedFeatures.includes("releaseVideos");
+        if (!hasFeature) return false;
+      }
+      return true;
+    };
+
+    const isReleaseEnabled = checkReleaseVideosEnabled(institute);
+    const isRecordedEnabled = institute ? institute.recordedLecturesFeatureEnabled !== false : true;
+
     return res.json({
-      featureEnabled: institute ? institute.recordedLecturesFeatureEnabled !== false : true,
-      releaseVideosFeatureEnabled: institute ? institute.releaseVideosFeatureEnabled !== false : true,
+      featureEnabled: isRecordedEnabled,
+      recordedLecturesFeatureEnabled: isRecordedEnabled,
+      recorded_lectures_feature_enabled: isRecordedEnabled,
+      releaseVideosFeatureEnabled: isReleaseEnabled,
+      release_videos_feature_enabled: isReleaseEnabled,
       storage: {
         maxStorageGb: storageInfo.maxGb,
         usedStorageBytes: storageInfo.usedBytes,
