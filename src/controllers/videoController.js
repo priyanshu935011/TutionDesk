@@ -12,7 +12,7 @@ import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import SystemSetting from "../models/SystemSetting.js";
-import { clearCachePattern } from "../utils/cache.js";
+import { clearCachePattern, flushMemoryCache } from "../utils/cache.js";
 import cloudinary from "../utils/cloudinary.js";
 import { supabase, readFallbackData, syncVideoFallback } from "../utils/supabaseModel.js";
 
@@ -654,6 +654,21 @@ export const handleBunnyWebhook = async (req, res) => {
 
 export const getTeacherVideos = async (req, res) => {
   try {
+    const skipCache =
+      req.query?.refresh === "true" ||
+      req.query?.skipCache === "true" ||
+      String(req.headers["cache-control"] || "").includes("no-cache");
+
+    if (skipCache) {
+      try {
+        flushMemoryCache();
+        await clearCachePattern("*");
+      } catch (_) {}
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+
     const instituteId = resolveInstituteId(req);
 
     let institute = null;
