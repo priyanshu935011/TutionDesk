@@ -1053,26 +1053,34 @@ export const updateVideoLecture = async (req, res) => {
       };
     }
 
+    const dbPayload = {};
+
     if (title !== undefined && title !== null && String(title).trim()) {
       video.title = String(title).trim();
+      dbPayload.title = video.title;
     }
     if (description !== undefined) {
       video.description = description !== null ? String(description).trim() : "";
+      dbPayload.description = video.description;
     }
     if (playlist !== undefined) {
       video.playlist = playlist !== null ? String(playlist).trim() : "";
+      dbPayload.playlist = video.playlist;
     }
     if (playlistId !== undefined) {
       video.playlistId = playlistId || null;
+      dbPayload.playlist_id = video.playlistId;
     }
     if (resolvedTargetType !== undefined && resolvedTargetType !== null) {
       video.targetAudienceType = String(resolvedTargetType);
+      dbPayload.target_type = video.targetAudienceType;
     }
     if (resolvedMetadata && typeof resolvedMetadata === "object" && Object.keys(resolvedMetadata).length > 0) {
       video.targetAudienceMetadata = resolvedMetadata;
     }
     if (thumbnailUrl !== undefined) {
       video.thumbnailUrl = thumbnailUrl !== null ? String(thumbnailUrl).trim() : (video.thumbnailUrl || "");
+      dbPayload.thumbnail_url = video.thumbnailUrl;
     }
 
     if (typeof video.save === "function") {
@@ -1081,6 +1089,19 @@ export const updateVideoLecture = async (req, res) => {
       } catch (stErr) {
         console.warn("video.save warning in updateVideoLecture:", stErr.message);
       }
+    }
+
+    // Direct Supabase table update for absolute database persistence guarantee
+    try {
+      const targetId = String(video._id || video.id || video.bunnyVideoId || cleanId).trim();
+      if (targetId && Object.keys(dbPayload).length > 0) {
+        await supabase
+          .from("video_lectures")
+          .update(dbPayload)
+          .or(`id.eq.${targetId},bunny_video_id.eq.${targetId}`);
+      }
+    } catch (sbErr) {
+      console.warn("Direct Supabase update error in updateVideoLecture:", sbErr.message);
     }
 
     // Always sync fallback data so updated fields persist

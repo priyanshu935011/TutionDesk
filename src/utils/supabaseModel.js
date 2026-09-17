@@ -426,7 +426,7 @@ const snakeToCamel = (str) => {
   if (str === "file_url") return "pdfUrl";
   if (str === "student_ids") return "students";
   if (str === "batch_ids") return "batches";
-  if (str === "playlist_id") return "playlist";
+  if (str === "playlist_id") return "playlistId";
   if (str === "video_id") return "video";
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 };
