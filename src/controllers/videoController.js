@@ -761,52 +761,54 @@ export const getTeacherVideos = async (req, res) => {
       videos = await VideoLecture.find(query).sort({ createdAt: -1 });
     }
 
-    // Merge local fallback disk video lectures if missing from DB query, and overlay fallback edits onto DB items
-    try {
-      const fallbackList = readFallbackData("video_lectures");
-      const fbMap = new Map();
-      for (const fbItem of fallbackList) {
-        const fbId = String(fbItem._id || fbItem.id || "").trim();
-        const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
-        if (fbId) fbMap.set(fbId, fbItem);
-        if (fbBunnyId) fbMap.set(fbBunnyId, fbItem);
-      }
-
-      videos = (videos || []).map((v) => {
-        const vObj = typeof v.toObject === "function" ? v.toObject() : { ...v };
-        const vId = String(vObj._id || vObj.id || "").trim();
-        const vBunnyId = String(vObj.bunnyVideoId || vObj.bunny_video_id || "").trim();
-        const fb = fbMap.get(vId) || fbMap.get(vBunnyId);
-        if (fb) {
-          return { ...vObj, ...fb };
-        }
-        return vObj;
-      });
-
-      const existingKeySet = new Set(
-        (videos || []).map((v) => {
-          const vObj = typeof v.toObject === "function" ? v.toObject() : v;
-          return String(vObj._id || vObj.id || vObj.bunnyVideoId || "").trim();
-        }).filter(Boolean)
-      );
-
-      for (const fbItem of fallbackList) {
-        const fbId = String(fbItem._id || fbItem.id || "").trim();
-        const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
-
-        if ((fbId && existingKeySet.has(fbId)) || (fbBunnyId && existingKeySet.has(fbBunnyId))) {
-          continue;
+    // Merge local fallback disk video lectures only if NOT bypassing cache
+    if (!skipCache) {
+      try {
+        const fallbackList = readFallbackData("video_lectures");
+        const fbMap = new Map();
+        for (const fbItem of fallbackList) {
+          const fbId = String(fbItem._id || fbItem.id || "").trim();
+          const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
+          if (fbId) fbMap.set(fbId, fbItem);
+          if (fbBunnyId) fbMap.set(fbBunnyId, fbItem);
         }
 
-        if (isArchived === "true" && !fbItem.isArchived && fbItem.status !== "ARCHIVED") continue;
-        if (status && fbItem.status !== status) continue;
+        videos = (videos || []).map((v) => {
+          const vObj = typeof v.toObject === "function" ? v.toObject() : { ...v };
+          const vId = String(vObj._id || vObj.id || "").trim();
+          const vBunnyId = String(vObj.bunnyVideoId || vObj.bunny_video_id || "").trim();
+          const fb = fbMap.get(vId) || fbMap.get(vBunnyId);
+          if (fb) {
+            return { ...vObj, ...fb };
+          }
+          return vObj;
+        });
 
-        videos.push(fbItem);
-        if (fbId) existingKeySet.add(fbId);
-        if (fbBunnyId) existingKeySet.add(fbBunnyId);
+        const existingKeySet = new Set(
+          (videos || []).map((v) => {
+            const vObj = typeof v.toObject === "function" ? v.toObject() : v;
+            return String(vObj._id || vObj.id || vObj.bunnyVideoId || "").trim();
+          }).filter(Boolean)
+        );
+
+        for (const fbItem of fallbackList) {
+          const fbId = String(fbItem._id || fbItem.id || "").trim();
+          const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
+
+          if ((fbId && existingKeySet.has(fbId)) || (fbBunnyId && existingKeySet.has(fbBunnyId))) {
+            continue;
+          }
+
+          if (isArchived === "true" && !fbItem.isArchived && fbItem.status !== "ARCHIVED") continue;
+          if (status && fbItem.status !== status) continue;
+
+          videos.push(fbItem);
+          if (fbId) existingKeySet.add(fbId);
+          if (fbBunnyId) existingKeySet.add(fbBunnyId);
+        }
+      } catch (fbMergeErr) {
+        console.warn("getTeacherVideos fallback merge warning:", fbMergeErr.message);
       }
-    } catch (fbMergeErr) {
-      console.warn("getTeacherVideos fallback merge warning:", fbMergeErr.message);
     }
 
     let storageInfo = {
