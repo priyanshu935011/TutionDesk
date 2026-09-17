@@ -757,6 +757,58 @@ export const getTeacherVideos = async (req, res) => {
       console.warn("getInstituteStorageAccount warning:", stErr.message);
     }
 
+    // Live Bunny status check for any pending/processing video in results
+    const pendingList = (videos || []).filter((v) => {
+      const st = String(v.status || "").toUpperCase();
+      return st === "UPLOADING" || st === "PROCESSING";
+    });
+
+    if (pendingList.length > 0) {
+      try {
+        const bunny = await getBunnySettingsHelper();
+        if (bunny.apiKey && bunny.libraryId) {
+          await Promise.all(
+            pendingList.map(async (v) => {
+              const bunnyVid = String(v.bunnyVideoId || v.bunny_video_id || v._id || v.id || "").trim();
+              if (!bunnyVid) return;
+              try {
+                const bRes = await axios.get(
+                  `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${bunnyVid}`,
+                  {
+                    headers: { AccessKey: bunny.apiKey, accept: "application/json" },
+                    timeout: 5000,
+                  }
+                );
+                const bData = bRes.data;
+                const bStatus = bData.status; // 4=Finished, 3=Transcoding
+                const progress = Number(bData.encodeProgress || 0);
+
+                const isReady = bStatus === 4 || bStatus === 3 || progress >= 99;
+                const isFailed = bStatus === 5;
+                const finalStatus = isReady ? "READY" : isFailed ? "FAILED" : "PROCESSING";
+                const finalProgress = isReady ? 100 : isFailed ? 0 : Math.max(Number(v.processingProgress || 10), progress);
+
+                v.status = finalStatus;
+                v.processingProgress = finalProgress;
+                if (bData.length > 0) v.durationSeconds = bData.length;
+                if (bData.storageSize > 0) v.storageSizeBytes = bData.storageSize;
+
+                if (typeof v.save === "function") {
+                  try {
+                    await v.save();
+                  } catch (_) {}
+                }
+              } catch (err) {
+                console.warn(`getTeacherVideos live Bunny check warning for ${bunnyVid}:`, err.message);
+              }
+            })
+          );
+        }
+      } catch (bErr) {
+        console.warn("getTeacherVideos live Bunny check error:", bErr.message);
+      }
+    }
+
     const activeVideos = [];
     const archivedVideos = [];
 
