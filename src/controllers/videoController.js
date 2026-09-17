@@ -75,7 +75,7 @@ export const resolveInstituteId = (req) => {
     return String(userId).trim();
   }
 
-  return "000000000000000000000000";
+  return "00000000-0000-0000-0000-000000000000";
 };
 
 // Helper: Sync & calculate institute storage quota

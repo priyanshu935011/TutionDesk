@@ -1493,10 +1493,12 @@ class SupabaseModel {
         if (
           error.code === "42P01" ||
           error.code === "PGRST205" ||
+          error.code === "22P02" ||
+          error.message.includes("invalid input syntax for type uuid") ||
           error.message.includes("Could not find the table") ||
           (error.message.includes("relation") && error.message.includes("does not exist"))
         ) {
-          console.warn(`Table "${this.tableName}" not found in Supabase schema cache. Dynamically switching to local fallback store.`);
+          console.warn(`Table "${this.tableName}" invalid UUID or missing table error (${error.code || error.message}). Dynamically switching to local fallback store.`);
           MISSING_TABLES.add(this.tableName);
           return this.create(doc);
         }

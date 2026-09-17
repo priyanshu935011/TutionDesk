@@ -117,8 +117,8 @@ const protect = async (req, res, next) => {
     // Direct token payload fallback if user document is not in DB
     if (!user) {
       user = {
-        _id: userId || "000000000000000000000000",
-        id: userId || "000000000000000000000000",
+        _id: userId || "00000000-0000-0000-0000-000000000000",
+        id: userId || "00000000-0000-0000-0000-000000000000",
         email: decoded.email || "",
         role: decoded.role || "teacher",
         institute: decoded.institute || decoded.instituteId || null,
