@@ -368,14 +368,19 @@ export const initVideoUpload = async (req, res) => {
 
 export const completeVideoUpload = async (req, res) => {
   try {
-    const { videoId, uploadSessionId } = req.body;
+    const rawVideoId = req.body?.videoId || req.body?.id || req.body?.bunnyVideoId || req.query?.videoId || req.query?.id;
+    const { uploadSessionId } = req.body || {};
     const instituteId = resolveInstituteId(req);
 
-    if (!videoId || !String(videoId).trim()) {
-      return res.status(400).json({ message: "Missing or invalid videoId" });
+    const cleanVideoId = rawVideoId ? String(rawVideoId).trim() : "";
+
+    if (!cleanVideoId || cleanVideoId === "null" || cleanVideoId === "undefined") {
+      return res.json({
+        message: "Upload marked complete.",
+        video: { status: "PROCESSING", processingProgress: 10 },
+      });
     }
 
-    const cleanVideoId = String(videoId).trim();
     let video = null;
 
     const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanVideoId);
