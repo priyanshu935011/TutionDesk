@@ -1609,11 +1609,20 @@ export const getVideoReleases = async (req, res) => {
 
     const result = await Promise.all(
       releases.map(async (r) => {
-        const studentCount = await VideoReleaseStudent.countDocuments({ release: r._id });
         const rObj = typeof r.toObject === "function" ? r.toObject() : r;
+        let students = [];
+        try {
+          const relStudents = await VideoReleaseStudent.find({ release: r._id }).populate("student", "name fullName enrollmentNumber rollNumber email phone batch");
+          students = (relStudents || [])
+            .map((rs) => rs.student)
+            .filter(Boolean)
+            .map((s) => (typeof s.toObject === "function" ? s.toObject() : s));
+        } catch (_) {}
+
         return {
           ...rObj,
-          studentCount,
+          studentCount: students.length,
+          students,
         };
       })
     );
