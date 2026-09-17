@@ -14,7 +14,7 @@ import User from "../models/User.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern, flushMemoryCache } from "../utils/cache.js";
 import cloudinary from "../utils/cloudinary.js";
-import { supabase, readFallbackData, syncVideoFallback } from "../utils/supabaseModel.js";
+import { supabase, readFallbackData, writeFallbackData, syncVideoFallback } from "../utils/supabaseModel.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -132,7 +132,7 @@ export const getInstituteStorageAccount = async (instituteId) => {
         if (createdAt && createdAt > twoHoursAgo) {
           actualReservedBytes += bytes;
         }
-      } else if (!v.isArchived && st !== "ARCHIVED" && st !== "FAILED") {
+      } else if (st !== "FAILED" && st !== "CANCELLED") {
         videoStorageBytes += bytes;
       }
     }
@@ -818,8 +818,48 @@ export const getTeacherVideos = async (req, res) => {
       videos = await VideoLecture.find(query).sort({ createdAt: -1 });
     }
 
-    // Merge local fallback disk video lectures only if NOT bypassing cache
-    if (!skipCache) {
+    // Sync fresh database videos into local fallback store when bypassing cache, or merge fallback data when reading cache
+    if (skipCache) {
+      try {
+        const fallbackList = readFallbackData("video_lectures");
+        const fbIndexMap = new Map();
+        for (let i = 0; i < fallbackList.length; i++) {
+          const item = fallbackList[i];
+          const fbId = String(item._id || item.id || "").trim();
+          const fbBunnyId = String(item.bunnyVideoId || item.bunny_video_id || "").trim();
+          if (fbId) fbIndexMap.set(fbId, i);
+          if (fbBunnyId) fbIndexMap.set(fbBunnyId, i);
+        }
+
+        const rawVideoList = (videos || []).map((v) =>
+          typeof v.toObject === "function" ? v.toObject() : { ...v }
+        );
+
+        let cacheUpdated = false;
+        for (const vObj of rawVideoList) {
+          const vId = String(vObj._id || vObj.id || "").trim();
+          const vBunnyId = String(vObj.bunnyVideoId || vObj.bunny_video_id || "").trim();
+          const existingIdx = fbIndexMap.has(vId)
+            ? fbIndexMap.get(vId)
+            : fbIndexMap.has(vBunnyId)
+            ? fbIndexMap.get(vBunnyId)
+            : -1;
+
+          if (existingIdx !== -1 && existingIdx !== undefined) {
+            fallbackList[existingIdx] = { ...fallbackList[existingIdx], ...vObj };
+            cacheUpdated = true;
+          } else {
+            fallbackList.push(vObj);
+            cacheUpdated = true;
+          }
+        }
+        if (cacheUpdated) {
+          writeFallbackData("video_lectures", fallbackList);
+        }
+      } catch (syncErr) {
+        console.warn("getTeacherVideos uncached cache sync warning:", syncErr.message);
+      }
+    } else {
       try {
         const fallbackList = readFallbackData("video_lectures");
         const fbMap = new Map();
@@ -1132,6 +1172,19 @@ export const archiveVideoLecture = async (req, res) => {
       await video.save();
     }
 
+    try {
+      const targetId = String(video._id || video.id || video.bunnyVideoId || req.params.id).trim();
+      if (targetId) {
+        await supabase
+          .from("video_lectures")
+          .update({ is_archived: true, archived_at: new Date() })
+          .or(`id.eq.${targetId},bunny_video_id.eq.${targetId}`);
+      }
+    } catch (_) {}
+
+    video._tableName = "video_lectures";
+    syncVideoFallback(video);
+
     await clearCachePattern("*");
 
     return res.json({ message: "Video archived successfully", video });
@@ -1154,6 +1207,19 @@ export const restoreVideoLecture = async (req, res) => {
     if (typeof video.save === "function") {
       await video.save();
     }
+
+    try {
+      const targetId = String(video._id || video.id || video.bunnyVideoId || req.params.id).trim();
+      if (targetId) {
+        await supabase
+          .from("video_lectures")
+          .update({ is_archived: false, archived_at: null })
+          .or(`id.eq.${targetId},bunny_video_id.eq.${targetId}`);
+      }
+    } catch (_) {}
+
+    video._tableName = "video_lectures";
+    syncVideoFallback(video);
 
     await clearCachePattern("*");
 
