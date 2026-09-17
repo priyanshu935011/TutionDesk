@@ -1552,10 +1552,18 @@ export const createVideoRelease = async (req, res) => {
       try {
         release = await VideoRelease.create({
           institute: instituteId,
+          institute_id: instituteId,
           teacher: rawUserId || instituteId,
+          teacher_id: rawUserId || instituteId,
           video: vId,
+          video_id: vId,
+          videoId: vId,
           startsAt: startDt,
+          starts_at: startDt,
           expiresAt: expiryDt,
+          expires_at: expiryDt,
+          neverExpires: neverExpires === true || !expiresAt,
+          never_expires: neverExpires === true || !expiresAt,
           status: "ACTIVE",
         });
       } catch (relErr) {
@@ -1564,9 +1572,17 @@ export const createVideoRelease = async (req, res) => {
           _id: relId,
           id: relId,
           institute: instituteId,
+          institute_id: instituteId,
+          teacher: rawUserId || instituteId,
           video: vId,
+          video_id: vId,
+          videoId: vId,
           startsAt: startDt,
+          starts_at: startDt,
           expiresAt: expiryDt,
+          expires_at: expiryDt,
+          neverExpires: neverExpires === true || !expiresAt,
+          never_expires: neverExpires === true || !expiresAt,
           status: "ACTIVE",
         };
         writeFallbackData("video_releases", [release]);
@@ -1624,19 +1640,38 @@ export const getVideoReleases = async (req, res) => {
     const query = {};
     if (instituteId) query.institute = instituteId;
 
-    const releases = await VideoRelease.find(query)
-      .sort({ createdAt: -1 })
-      .populate("video", "title thumbnailUrl durationSeconds status hlsUrl videoUrl description")
-      .populate("teacher", "name email");
+    let releases = [];
+    try {
+      releases = await VideoRelease.find(query)
+        .sort({ createdAt: -1 })
+        .populate("video", "title thumbnailUrl durationSeconds status hlsUrl videoUrl description")
+        .populate("teacher", "name email");
+    } catch (_) {
+      try {
+        const fallbackReleases = readFallbackData("video_releases");
+        releases = fallbackReleases.filter((r) => {
+          const instId = String(r.institute || r.institute_id || r.instituteId || "").trim();
+          return !instituteId || instId === String(instituteId).trim();
+        });
+      } catch (_) {}
+    }
 
     const result = await Promise.all(
       releases.map(async (r) => {
         const rObj = typeof r.toObject === "function" ? r.toObject() : r;
         const relId = String(r._id || r.id || "").trim();
 
-        let videoObj = rObj.video;
-        if (!videoObj || typeof videoObj !== "object" || !videoObj.title) {
-          const videoIdStr = String(rObj.video || rObj.video_id || rObj.videoId || "").trim();
+        // 1. Resolve Video Lecture details
+        let videoObj = typeof rObj.video === "object" && rObj.video && rObj.video.title ? rObj.video : null;
+        let videoIdStr = String(
+          (typeof rObj.video === "object" && rObj.video ? rObj.video._id || rObj.video.id : null) ||
+          (typeof rObj.video === "string" ? rObj.video : null) ||
+          rObj.video_id ||
+          rObj.videoId ||
+          ""
+        ).trim();
+
+        if (!videoObj || !videoObj.title) {
           if (videoIdStr) {
             try {
               const vDoc = await VideoLecture.findOne({
@@ -1660,25 +1695,31 @@ export const getVideoReleases = async (req, res) => {
           }
         }
 
-        let students = [];
+        // If videoObj is still missing (e.g., video_id was not populated), attempt to grab matching video or default details
+        if (!videoObj) {
+          videoObj = {
+            id: videoIdStr || "video",
+            title: rObj.title || "Lecture Video",
+            status: "READY",
+          };
+        }
+
+        // 2. Resolve Student details
         let studentIds = [];
 
         try {
           const relStudents = await VideoReleaseStudent.find({
-            $or: [{ release: relId }, { release: r._id }, { release: r.id }],
-          }).populate("student", "name fullName enrollmentNumber rollNumber email phone batch");
+            $or: [{ release: relId }, { release: r._id }, { release: r.id }, { release_id: relId }],
+          });
 
-          students = (relStudents || [])
-            .map((rs) => rs.student)
-            .filter(Boolean)
-            .map((s) => (typeof s.toObject === "function" ? s.toObject() : s));
-
-          studentIds = (relStudents || [])
-            .map((rs) => String(rs.student?._id || rs.student?.id || rs.student || rs.student_id || ""))
-            .filter(Boolean);
+          if (relStudents && relStudents.length > 0) {
+            studentIds = relStudents
+              .map((rs) => String(rs.student?._id || rs.student?.id || rs.student || rs.student_id || ""))
+              .filter(Boolean);
+          }
         } catch (_) {}
 
-        if (students.length === 0) {
+        if (studentIds.length === 0) {
           try {
             const fallbackRelStudents = readFallbackData("video_release_students");
             const matchingRelStudents = fallbackRelStudents.filter(
@@ -1687,30 +1728,60 @@ export const getVideoReleases = async (req, res) => {
             studentIds = matchingRelStudents
               .map((rs) => String(rs.student || rs.student_id || ""))
               .filter(Boolean);
+          } catch (_) {}
+        }
 
-            if (studentIds.length > 0) {
-              const studentDocs = await Student.find({
-                $or: [{ _id: { $in: studentIds } }, { id: { $in: studentIds } }],
-              });
-              students = studentDocs.map((s) => (typeof s.toObject === "function" ? s.toObject() : s));
+        // De-duplicate student IDs
+        studentIds = [...new Set(studentIds)];
 
-              if (students.length === 0) {
-                const fallbackStudents = readFallbackData("students");
-                students = fallbackStudents.filter((s) => {
-                  const sId = String(s._id || s.id || "");
-                  return studentIds.includes(sId);
-                });
-              }
+        // Query Student collection for student objects
+        let populatedStudents = [];
+        if (studentIds.length > 0) {
+          try {
+            const studentDocs = await Student.find({
+              $or: [{ _id: { $in: studentIds } }, { id: { $in: studentIds } }],
+            });
+            if (studentDocs && studentDocs.length > 0) {
+              populatedStudents = studentDocs.map((s) => (typeof s.toObject === "function" ? s.toObject() : s));
             }
           } catch (_) {}
+
+          if (populatedStudents.length < studentIds.length) {
+            try {
+              const fallbackStudents = readFallbackData("students");
+              const existingIds = new Set(populatedStudents.map((s) => String(s._id || s.id || "")));
+              for (const s of fallbackStudents) {
+                const sId = String(s._id || s.id || "");
+                if (studentIds.includes(sId) && !existingIds.has(sId)) {
+                  populatedStudents.push(s);
+                  existingIds.add(sId);
+                }
+              }
+            } catch (_) {}
+          }
+        }
+
+        // Ensure every student ID has a corresponding object with name and roll number
+        const existingPopulatedIds = new Set(populatedStudents.map((s) => String(s._id || s.id || "")));
+        for (const sId of studentIds) {
+          if (!existingPopulatedIds.has(sId)) {
+            populatedStudents.push({
+              _id: sId,
+              id: sId,
+              name: `Student (${sId.length > 8 ? sId.substring(0, 8) : sId})`,
+              fullName: `Student (${sId.length > 8 ? sId.substring(0, 8) : sId})`,
+              enrollmentNumber: sId.length > 8 ? sId.substring(0, 8) : sId,
+              rollNumber: sId.length > 8 ? sId.substring(0, 8) : sId,
+            });
+          }
         }
 
         return {
           ...rObj,
-          video: videoObj || rObj.video,
-          studentCount: Math.max(students.length, studentIds.length, rObj.studentCount || 0),
+          video: videoObj,
+          studentCount: Math.max(populatedStudents.length, studentIds.length, rObj.studentCount || 0),
           studentIds,
-          students,
+          students: populatedStudents,
         };
       })
     );
