@@ -14,7 +14,7 @@ import User from "../models/User.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
 import cloudinary from "../utils/cloudinary.js";
-import { supabase, readFallbackData } from "../utils/supabaseModel.js";
+import { supabase, readFallbackData, syncVideoFallback } from "../utils/supabaseModel.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
