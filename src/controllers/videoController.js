@@ -618,12 +618,13 @@ export const getTeacherVideos = async (req, res) => {
       // Super admin sees all videos
     } else {
       const conditions = [];
-      if (instituteId && instituteId !== "000000000000000000000000") {
+      if (instituteId && instituteId !== "000000000000000000000000" && instituteId !== "00000000-0000-0000-0000-000000000000") {
         conditions.push({ institute: instituteId });
       }
-      if (req.user?._id) {
-        conditions.push({ createdBy: req.user._id });
-        conditions.push({ institute: req.user._id });
+      const userId = req.user?._id || req.user?.id;
+      if (userId) {
+        conditions.push({ createdBy: String(userId) });
+        conditions.push({ institute: String(userId) });
       }
       if (conditions.length > 0) {
         query.$or = conditions;
