@@ -93,10 +93,18 @@ export const getInstituteStorageAccount = async (instituteId) => {
     };
   }
 
-  let storage = await InstituteVideoStorage.findOne({ institute: instituteId });
+  let storage = null;
+  try {
+    storage = await InstituteVideoStorage.findOne({ institute: instituteId });
+  } catch (stErr) {
+    console.warn("InstituteVideoStorage findOne warning:", stErr.message);
+  }
+
   let institute = null;
   if (mongoose.Types.ObjectId.isValid(instituteId)) {
-    institute = await Institute.findById(instituteId);
+    try {
+      institute = await Institute.findById(instituteId);
+    } catch (_) {}
   }
 
   const maxGb = Number(institute?.maxVideoStorageGb || 50);
@@ -105,30 +113,40 @@ export const getInstituteStorageAccount = async (instituteId) => {
   if (!storage) {
     const usedBytes = Number(institute?.usedVideoStorageBytes || 0);
     const reservedBytes = Number(institute?.reservedVideoStorageBytes || 0);
-    storage = await InstituteVideoStorage.create({
-      institute: instituteId,
-      storageLimitBytes: limitBytes,
-      usedStorageBytes: usedBytes,
-      reservedStorageBytes: reservedBytes,
-    });
+    try {
+      storage = await InstituteVideoStorage.create({
+        institute: instituteId,
+        storageLimitBytes: limitBytes,
+        usedStorageBytes: usedBytes,
+        reservedStorageBytes: reservedBytes,
+      });
+    } catch (createErr) {
+      console.warn("InstituteVideoStorage create warning:", createErr.message);
+    }
   } else if (storage.storageLimitBytes !== limitBytes) {
     storage.storageLimitBytes = limitBytes;
-    await storage.save();
+    try {
+      await storage.save();
+    } catch (_) {}
   }
+
+  const usedStorageBytes = Number(storage?.usedStorageBytes || 0);
+  const reservedStorageBytes = Number(storage?.reservedStorageBytes || 0);
+  const storageLimitBytes = Number(storage?.storageLimitBytes || limitBytes);
 
   const availableBytes = Math.max(
     0,
-    storage.storageLimitBytes - storage.usedStorageBytes - storage.reservedStorageBytes
+    storageLimitBytes - usedStorageBytes - reservedStorageBytes
   );
 
   return {
     storage,
-    limitBytes: storage.storageLimitBytes,
-    usedBytes: storage.usedStorageBytes,
-    reservedBytes: storage.reservedStorageBytes,
+    limitBytes: storageLimitBytes,
+    usedBytes: usedStorageBytes,
+    reservedBytes: reservedStorageBytes,
     availableBytes,
     maxGb,
-    usedGb: Number((storage.usedStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    usedGb: Number((usedStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
     availableGb: Number((availableBytes / (1024 * 1024 * 1024)).toFixed(2)),
   };
 };
@@ -144,7 +162,9 @@ export const initVideoUpload = async (req, res) => {
     const instituteId = resolveInstituteId(req);
     let institute = null;
     if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
-      institute = await Institute.findById(instituteId);
+      try {
+        institute = await Institute.findById(instituteId);
+      } catch (_) {}
     }
 
     if (req.user?.role !== "super_admin" && institute && institute.recordedLecturesFeatureEnabled === false) {
@@ -230,18 +250,25 @@ export const initVideoUpload = async (req, res) => {
     if (playlistId) {
       targetPlaylistId = playlistId;
     } else if (playlistTitle) {
-      let existingPlaylist = await VideoPlaylist.findOne({
-        institute: instituteId,
-        name: { $regex: new RegExp(`^${playlistTitle}$`, "i") },
-      });
-      if (!existingPlaylist) {
-        existingPlaylist = await VideoPlaylist.create({
+      let existingPlaylist = null;
+      try {
+        existingPlaylist = await VideoPlaylist.findOne({
           institute: instituteId,
-          teacher: creatorId,
-          name: playlistTitle,
+          name: { $regex: new RegExp(`^${playlistTitle}$`, "i") },
         });
+      } catch (_) {}
+      if (!existingPlaylist) {
+        try {
+          existingPlaylist = await VideoPlaylist.create({
+            institute: instituteId,
+            teacher: creatorId,
+            name: playlistTitle,
+          });
+        } catch (_) {}
       }
-      targetPlaylistId = existingPlaylist._id;
+      if (existingPlaylist) {
+        targetPlaylistId = existingPlaylist._id || existingPlaylist.id;
+      }
     }
 
     // Create ClassTech Video Lecture (Status: UPLOADING)
@@ -271,38 +298,53 @@ export const initVideoUpload = async (req, res) => {
     });
 
     // If playlist specified, add playlist item entry
-    if (targetPlaylistId) {
-      const itemCount = await VideoPlaylistItem.countDocuments({ playlist: targetPlaylistId });
-      await VideoPlaylistItem.create({
-        playlist: targetPlaylistId,
-        playlist_id: targetPlaylistId,
-        video: video._id,
-        video_id: video._id,
-        sortOrder: itemCount + 1,
-      });
+    if (targetPlaylistId && video) {
+      try {
+        const itemCount = await VideoPlaylistItem.countDocuments({ playlist: targetPlaylistId });
+        await VideoPlaylistItem.create({
+          playlist: targetPlaylistId,
+          playlist_id: targetPlaylistId,
+          video: video._id || video.id,
+          video_id: video._id || video.id,
+          sortOrder: itemCount + 1,
+        });
+      } catch (plErr) {
+        console.warn("VideoPlaylistItem create warning:", plErr.message);
+      }
     }
 
     // Reserve Storage Bytes
-    storageAcc.storage.reservedStorageBytes += fileSizeBytes;
-    await storageAcc.storage.save();
+    if (storageAcc && storageAcc.storage) {
+      try {
+        storageAcc.storage.reservedStorageBytes = (storageAcc.storage.reservedStorageBytes || 0) + fileSizeBytes;
+        await storageAcc.storage.save();
+      } catch (_) {}
+    }
     if (institute) {
-      institute.reservedVideoStorageBytes = (institute.reservedVideoStorageBytes || 0) + fileSizeBytes;
-      await institute.save();
+      try {
+        institute.reservedVideoStorageBytes = (institute.reservedVideoStorageBytes || 0) + fileSizeBytes;
+        await institute.save();
+      } catch (_) {}
     }
 
     // Create Upload Audit Log
-    const uploadSession = await VideoUpload.create({
-      institute: instituteId,
-      teacher: creatorId,
-      video: video._id,
-      originalFileName: fileName || "video.mp4",
-      fileSizeBytes: fileSizeBytes,
-      reservationBytes: fileSizeBytes,
-      uploadStatus: "INITIATED",
-    });
+    let uploadSession = null;
+    try {
+      uploadSession = await VideoUpload.create({
+        institute: instituteId,
+        teacher: creatorId,
+        video: video._id || video.id,
+        originalFileName: fileName || "video.mp4",
+        fileSizeBytes: fileSizeBytes,
+        reservationBytes: fileSizeBytes,
+        uploadStatus: "INITIATED",
+      });
+    } catch (uErr) {
+      console.warn("VideoUpload session create warning:", uErr.message);
+    }
 
     const finalVideoId = String(video._id || video.id || "").trim();
-    const finalSessionId = String(uploadSession._id || uploadSession.id || "").trim();
+    const finalSessionId = String(uploadSession?._id || uploadSession?.id || "").trim();
 
     const directUploadUrl = `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${bunnyVideoId}`;
 
@@ -334,15 +376,20 @@ export const completeVideoUpload = async (req, res) => {
     }
 
     const cleanVideoId = String(videoId).trim();
-    const query = { $or: [{ _id: cleanVideoId }, { id: cleanVideoId }, { bunnyVideoId: cleanVideoId }] };
-    if (instituteId && instituteId !== "00000000-0000-0000-0000-000000000000") {
-      query.institute = instituteId;
+    let video = null;
+
+    try {
+      video = await VideoLecture.findOne({
+        $or: [{ _id: cleanVideoId }, { id: cleanVideoId }, { bunnyVideoId: cleanVideoId }]
+      });
+    } catch (_) {}
+
+    if (!video) {
+      try {
+        video = await VideoLecture.findById(cleanVideoId);
+      } catch (_) {}
     }
 
-    let video = await VideoLecture.findOne(query);
-    if (!video) {
-      video = await VideoLecture.findById(cleanVideoId);
-    }
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -350,39 +397,68 @@ export const completeVideoUpload = async (req, res) => {
     // Update status to PROCESSING
     video.status = "PROCESSING";
     video.processingProgress = 10;
-    await video.save();
+    try {
+      await video.save();
+    } catch (saveErr) {
+      console.warn("video.save() in completeVideoUpload warning:", saveErr.message);
+    }
 
     // Update Upload Session & Storage Reservation
     if (uploadSessionId) {
-      const cleanSessionId = String(uploadSessionId).trim();
-      const uploadSession = await VideoUpload.findOne({
-        $or: [{ _id: cleanSessionId }, { id: cleanSessionId }]
-      });
-      if (uploadSession) {
-        uploadSession.uploadStatus = "COMPLETED";
-        uploadSession.completedAt = new Date();
-        await uploadSession.save();
+      try {
+        const cleanSessionId = String(uploadSessionId).trim();
+        let uploadSession = null;
+        try {
+          uploadSession = await VideoUpload.findOne({
+            $or: [{ _id: cleanSessionId }, { id: cleanSessionId }]
+          });
+        } catch (_) {}
 
-        const storageAcc = await getInstituteStorageAccount(instituteId);
-        const institute = await Institute.findById(instituteId);
+        if (uploadSession) {
+          uploadSession.uploadStatus = "COMPLETED";
+          uploadSession.completedAt = new Date();
+          try {
+            await uploadSession.save();
+          } catch (_) {}
 
-        // Move reserved bytes to used bytes
-        const bytes = uploadSession.reservationBytes || video.fileSizeBytes || 0;
-        if (storageAcc && storageAcc.storage) {
-          storageAcc.storage.reservedStorageBytes = Math.max(0, storageAcc.storage.reservedStorageBytes - bytes);
-          storageAcc.storage.usedStorageBytes += bytes;
-          await storageAcc.storage.save();
+          try {
+            const storageAcc = await getInstituteStorageAccount(instituteId);
+            let institute = null;
+            if (mongoose.Types.ObjectId.isValid(instituteId)) {
+              try {
+                institute = await Institute.findById(instituteId);
+              } catch (_) {}
+            }
+
+            // Move reserved bytes to used bytes
+            const bytes = uploadSession.reservationBytes || video.fileSizeBytes || 0;
+            if (storageAcc && storageAcc.storage) {
+              storageAcc.storage.reservedStorageBytes = Math.max(0, (storageAcc.storage.reservedStorageBytes || 0) - bytes);
+              storageAcc.storage.usedStorageBytes = (storageAcc.storage.usedStorageBytes || 0) + bytes;
+              try {
+                await storageAcc.storage.save();
+              } catch (_) {}
+            }
+
+            if (institute) {
+              institute.reservedVideoStorageBytes = Math.max(0, (institute.reservedVideoStorageBytes || 0) - bytes);
+              institute.usedVideoStorageBytes = (institute.usedVideoStorageBytes || 0) + bytes;
+              try {
+                await institute.save();
+              } catch (_) {}
+            }
+          } catch (stErr) {
+            console.warn("Storage update error in completeVideoUpload:", stErr.message);
+          }
         }
-
-        if (institute) {
-          institute.reservedVideoStorageBytes = Math.max(0, (institute.reservedVideoStorageBytes || 0) - bytes);
-          institute.usedVideoStorageBytes = (institute.usedVideoStorageBytes || 0) + bytes;
-          await institute.save();
-        }
+      } catch (sessionErr) {
+        console.warn("uploadSession bookkeeping error:", sessionErr.message);
       }
     }
 
-    await clearCachePattern("*");
+    try {
+      await clearCachePattern("*");
+    } catch (_) {}
 
     return res.json({
       message: "Upload completed. Video is now processing.",
