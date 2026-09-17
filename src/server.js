@@ -162,8 +162,6 @@ app.use("/api/videos", videoRoutes);
 
 const PORT = process.env.PORT || 8080;
 
-import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
-
 initializeSupabaseStorage().then(() => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
