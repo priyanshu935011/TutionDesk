@@ -125,11 +125,10 @@ const protect = async (req, res, next) => {
       };
     }
 
-    req.user = user;
-
-    if (req.user.role !== "super_admin" && req.user.institute) {
+    if (req.user && req.user.role !== "super_admin" && req.user.institute) {
       const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");
-      const instId = typeof req.user.institute === "object" ? req.user.institute._id || req.user.institute.id : req.user.institute;
+      const rawInst = req.user.institute;
+      const instId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
 
       if (instId && mongoose.Types.ObjectId.isValid(instId)) {
         try {

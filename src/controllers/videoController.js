@@ -195,20 +195,34 @@ export const initVideoUpload = async (req, res) => {
     }
 
     // Call Bunny Stream Create Video API
-    const bunnyRes = await axios.post(
-      `https://video.bunnycdn.com/library/${bunny.libraryId}/videos`,
-      { title: title.trim() },
-      {
-        headers: {
-          AccessKey: bunny.apiKey,
-          accept: "application/json",
-          "content-type": "application/json",
-        },
-        params: { AccessKey: bunny.apiKey },
-      }
-    );
+    let bunnyRes;
+    try {
+      bunnyRes = await axios.post(
+        `https://video.bunnycdn.com/library/${bunny.libraryId}/videos`,
+        { title: title.trim() },
+        {
+          headers: {
+            AccessKey: bunny.apiKey,
+            accept: "application/json",
+            "content-type": "application/json",
+          },
+          params: { AccessKey: bunny.apiKey },
+        }
+      );
+    } catch (bErr) {
+      console.error("Bunny Stream API error:", bErr.response?.data || bErr.message);
+      const is401 = bErr.response?.status === 401;
+      return res.status(400).json({
+        message: is401
+          ? "Bunny Stream AccessKey / API Key is invalid or expired. Please update Bunny settings in Super Admin portal."
+          : `Failed to create video on Bunny CDN: ${bErr.response?.data?.message || bErr.message}`,
+      });
+    }
 
     const bunnyVideoId = bunnyRes.data.guid;
+
+    const rawUserId = req.user ? (req.user._id || req.user.id) : null;
+    const creatorId = isValidId(rawUserId) ? String(rawUserId).trim() : instituteId;
 
     // Resolve Playlist if specified
     let targetPlaylistId = null;
@@ -223,7 +237,7 @@ export const initVideoUpload = async (req, res) => {
       if (!existingPlaylist) {
         existingPlaylist = await VideoPlaylist.create({
           institute: instituteId,
-          teacher: req.user._id,
+          teacher: creatorId,
           name: playlistTitle,
         });
       }
@@ -236,8 +250,8 @@ export const initVideoUpload = async (req, res) => {
     const thumbnailUrl = `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
 
     const video = await VideoLecture.create({
-      institute: instituteId || String(req.user._id || ""),
-      createdBy: req.user._id,
+      institute: instituteId,
+      createdBy: creatorId,
       bunnyVideoId,
       bunnyLibraryId: bunny.libraryId,
       title: title.trim(),
@@ -276,8 +290,8 @@ export const initVideoUpload = async (req, res) => {
 
     // Create Upload Audit Log
     const uploadSession = await VideoUpload.create({
-      institute: instituteId || String(req.user._id || ""),
-      teacher: req.user._id,
+      institute: instituteId,
+      teacher: creatorId,
       video: video._id,
       originalFileName: fileName || "video.mp4",
       fileSizeBytes: fileSizeBytes,
