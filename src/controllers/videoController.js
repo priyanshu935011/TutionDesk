@@ -739,9 +739,28 @@ export const getTeacherVideos = async (req, res) => {
       videos = await VideoLecture.find(query).sort({ createdAt: -1 });
     }
 
-    // Merge local fallback disk video lectures if missing from DB query
+    // Merge local fallback disk video lectures if missing from DB query, and overlay fallback edits onto DB items
     try {
       const fallbackList = readFallbackData("video_lectures");
+      const fbMap = new Map();
+      for (const fbItem of fallbackList) {
+        const fbId = String(fbItem._id || fbItem.id || "").trim();
+        const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
+        if (fbId) fbMap.set(fbId, fbItem);
+        if (fbBunnyId) fbMap.set(fbBunnyId, fbItem);
+      }
+
+      videos = (videos || []).map((v) => {
+        const vObj = typeof v.toObject === "function" ? v.toObject() : { ...v };
+        const vId = String(vObj._id || vObj.id || "").trim();
+        const vBunnyId = String(vObj.bunnyVideoId || vObj.bunny_video_id || "").trim();
+        const fb = fbMap.get(vId) || fbMap.get(vBunnyId);
+        if (fb) {
+          return { ...vObj, ...fb };
+        }
+        return vObj;
+      });
+
       const existingKeySet = new Set(
         (videos || []).map((v) => {
           const vObj = typeof v.toObject === "function" ? v.toObject() : v;
@@ -920,7 +939,8 @@ const findVideoLectureById = async (id, req) => {
 
 export const updateVideoLecture = async (req, res) => {
   try {
-    const video = await findVideoLectureById(req.params.id, req);
+    const cleanId = String(req.params.id).trim();
+    const video = await findVideoLectureById(cleanId, req);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -931,24 +951,47 @@ export const updateVideoLecture = async (req, res) => {
       playlist,
       playlistId,
       targetAudienceType,
+      targetType,
       targetAudienceMetadata,
+      batchIds,
+      studentIds,
       thumbnailUrl,
     } = req.body;
+
+    const resolvedTargetType = targetAudienceType || targetType;
+    let resolvedMetadata = targetAudienceMetadata || {};
+    if (batchIds || studentIds) {
+      resolvedMetadata = {
+        ...resolvedMetadata,
+        ...(batchIds ? { batchIds } : {}),
+        ...(studentIds ? { studentIds } : {}),
+      };
+    }
 
     if (title !== undefined && title.trim()) video.title = title.trim();
     if (description !== undefined) video.description = description.trim();
     if (playlist !== undefined) video.playlist = playlist.trim();
     if (playlistId !== undefined) video.playlistId = playlistId || null;
-    if (targetAudienceType !== undefined) video.targetAudienceType = targetAudienceType;
-    if (targetAudienceMetadata !== undefined) video.targetAudienceMetadata = targetAudienceMetadata;
+    if (resolvedTargetType !== undefined) video.targetAudienceType = resolvedTargetType;
+    if (Object.keys(resolvedMetadata).length > 0) video.targetAudienceMetadata = resolvedMetadata;
     if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : video.thumbnailUrl;
 
     if (typeof video.save === "function") {
-      await video.save();
+      try {
+        await video.save();
+      } catch (stErr) {
+        console.warn("video.save warning in updateVideoLecture:", stErr.message);
+      }
     }
+
+    // Always sync fallback data so updated fields persist
+    syncVideoFallback(video);
+
     await clearCachePattern("*");
 
-    return res.json({ message: "Video lecture updated successfully", video });
+    const updatedObj = typeof video.toObject === "function" ? video.toObject() : { ...video };
+
+    return res.json({ message: "Video lecture updated successfully", video: updatedObj });
   } catch (error) {
     console.error("updateVideoLecture error:", error);
     return res.status(500).json({ message: "Could not update video lecture" });
