@@ -78,7 +78,7 @@ export const resolveInstituteId = (req) => {
   return "00000000-0000-0000-0000-000000000000";
 };
 
-// Helper: Sync & calculate institute storage quota
+// Helper: Sync & calculate institute storage quota authoritatively from database
 export const getInstituteStorageAccount = async (instituteId) => {
   if (!isValidId(instituteId)) {
     return {
@@ -110,43 +110,71 @@ export const getInstituteStorageAccount = async (instituteId) => {
   const maxGb = Number(institute?.maxVideoStorageGb || 50);
   const limitBytes = maxGb * 1024 * 1024 * 1024;
 
+  // Authoritatively calculate actual storage from database video_lectures table
+  let actualUsedBytes = 0;
+  let actualReservedBytes = 0;
+  try {
+    const dbVideos = await VideoLecture.find({ institute: instituteId });
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    for (const v of dbVideos) {
+      const bytes = Number(v.fileSizeBytes || v.uploadFileSizeBytes || v.storageSizeBytes || 0);
+      const st = String(v.status || "").toUpperCase();
+
+      if (st === "UPLOADING" || st === "PROCESSING") {
+        const createdAt = v.createdAt ? new Date(v.createdAt) : null;
+        if (createdAt && createdAt > twoHoursAgo) {
+          actualReservedBytes += bytes;
+        }
+      } else if (!v.isArchived && st !== "ARCHIVED" && st !== "FAILED") {
+        actualUsedBytes += bytes;
+      }
+    }
+  } catch (calcErr) {
+    console.warn("Recalculate video storage warning:", calcErr.message);
+  }
+
   if (!storage) {
-    const usedBytes = Number(institute?.usedVideoStorageBytes || 0);
-    const reservedBytes = Number(institute?.reservedVideoStorageBytes || 0);
     try {
       storage = await InstituteVideoStorage.create({
         institute: instituteId,
         storageLimitBytes: limitBytes,
-        usedStorageBytes: usedBytes,
-        reservedStorageBytes: reservedBytes,
+        usedStorageBytes: actualUsedBytes,
+        reservedStorageBytes: actualReservedBytes,
       });
     } catch (createErr) {
       console.warn("InstituteVideoStorage create warning:", createErr.message);
     }
-  } else if (storage.storageLimitBytes !== limitBytes) {
+  } else {
     storage.storageLimitBytes = limitBytes;
+    storage.usedStorageBytes = actualUsedBytes;
+    storage.reservedStorageBytes = actualReservedBytes;
     try {
       await storage.save();
     } catch (_) {}
   }
 
-  const usedStorageBytes = Number(storage?.usedStorageBytes || 0);
-  const reservedStorageBytes = Number(storage?.reservedStorageBytes || 0);
-  const storageLimitBytes = Number(storage?.storageLimitBytes || limitBytes);
+  if (institute) {
+    institute.usedVideoStorageBytes = actualUsedBytes;
+    institute.reservedVideoStorageBytes = actualReservedBytes;
+    try {
+      await institute.save();
+    } catch (_) {}
+  }
 
   const availableBytes = Math.max(
     0,
-    storageLimitBytes - usedStorageBytes - reservedStorageBytes
+    limitBytes - actualUsedBytes - actualReservedBytes
   );
 
   return {
     storage,
-    limitBytes: storageLimitBytes,
-    usedBytes: usedStorageBytes,
-    reservedBytes: reservedStorageBytes,
+    limitBytes,
+    usedBytes: actualUsedBytes,
+    reservedBytes: actualReservedBytes,
     availableBytes,
     maxGb,
-    usedGb: Number((usedStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    usedGb: Number((actualUsedBytes / (1024 * 1024 * 1024)).toFixed(2)),
     availableGb: Number((availableBytes / (1024 * 1024 * 1024)).toFixed(2)),
   };
 };
