@@ -301,13 +301,17 @@ export const initVideoUpload = async (req, res) => {
       uploadStatus: "INITIATED",
     });
 
+    const finalVideoId = String(video._id || video.id || "").trim();
+    const finalSessionId = String(uploadSession._id || uploadSession.id || "").trim();
+
     const directUploadUrl = `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${bunnyVideoId}`;
 
     return res.status(201).json({
-      videoId: video._id,
+      videoId: finalVideoId,
+      id: finalVideoId,
       bunnyVideoId,
       libraryId: bunny.libraryId,
-      uploadSessionId: uploadSession._id,
+      uploadSessionId: finalSessionId,
       directUploadUrl,
       hlsUrl,
       embedUrl,
@@ -325,10 +329,20 @@ export const completeVideoUpload = async (req, res) => {
     const { videoId, uploadSessionId } = req.body;
     const instituteId = resolveInstituteId(req);
 
-    const query = { _id: videoId };
-    if (instituteId) query.institute = instituteId;
+    if (!videoId || !String(videoId).trim()) {
+      return res.status(400).json({ message: "Missing or invalid videoId" });
+    }
 
-    const video = await VideoLecture.findOne(query);
+    const cleanVideoId = String(videoId).trim();
+    const query = { $or: [{ _id: cleanVideoId }, { id: cleanVideoId }, { bunnyVideoId: cleanVideoId }] };
+    if (instituteId && instituteId !== "00000000-0000-0000-0000-000000000000") {
+      query.institute = instituteId;
+    }
+
+    let video = await VideoLecture.findOne(query);
+    if (!video) {
+      video = await VideoLecture.findById(cleanVideoId);
+    }
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -340,7 +354,10 @@ export const completeVideoUpload = async (req, res) => {
 
     // Update Upload Session & Storage Reservation
     if (uploadSessionId) {
-      const uploadSession = await VideoUpload.findById(uploadSessionId);
+      const cleanSessionId = String(uploadSessionId).trim();
+      const uploadSession = await VideoUpload.findOne({
+        $or: [{ _id: cleanSessionId }, { id: cleanSessionId }]
+      });
       if (uploadSession) {
         uploadSession.uploadStatus = "COMPLETED";
         uploadSession.completedAt = new Date();
@@ -351,9 +368,11 @@ export const completeVideoUpload = async (req, res) => {
 
         // Move reserved bytes to used bytes
         const bytes = uploadSession.reservationBytes || video.fileSizeBytes || 0;
-        storageAcc.storage.reservedStorageBytes = Math.max(0, storageAcc.storage.reservedStorageBytes - bytes);
-        storageAcc.storage.usedStorageBytes += bytes;
-        await storageAcc.storage.save();
+        if (storageAcc && storageAcc.storage) {
+          storageAcc.storage.reservedStorageBytes = Math.max(0, storageAcc.storage.reservedStorageBytes - bytes);
+          storageAcc.storage.usedStorageBytes += bytes;
+          await storageAcc.storage.save();
+        }
 
         if (institute) {
           institute.reservedVideoStorageBytes = Math.max(0, (institute.reservedVideoStorageBytes || 0) - bytes);
@@ -368,7 +387,7 @@ export const completeVideoUpload = async (req, res) => {
     return res.json({
       message: "Upload completed. Video is now processing.",
       video: {
-        id: video._id,
+        id: video._id || video.id,
         status: video.status,
         processingProgress: video.processingProgress,
       },
@@ -386,11 +405,21 @@ export const completeVideoUpload = async (req, res) => {
 export const checkVideoStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const rawInst = req.user.institute;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
-    if (!instituteId) instituteId = String(req.user._id || "");
+    if (!id || !String(id).trim() || id === "undefined" || id === "null") {
+      return res.status(400).json({ message: "Invalid or missing video ID" });
+    }
 
-    const video = await VideoLecture.findOne({ _id: id, institute: instituteId });
+    const cleanId = String(id).trim();
+    const rawInst = req.user ? req.user.institute : null;
+    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+
+    let video = await VideoLecture.findOne({
+      $or: [{ _id: cleanId }, { id: cleanId }, { bunnyVideoId: cleanId }]
+    });
+
+    if (!video) {
+      video = await VideoLecture.findById(cleanId);
+    }
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
