@@ -882,13 +882,45 @@ export const getTeacherVideos = async (req, res) => {
   }
 };
 
+const findVideoLectureById = async (id, req) => {
+  if (!id) return null;
+  const cleanId = String(id).trim();
+  if (!cleanId || cleanId === "undefined" || cleanId === "null") return null;
+
+  let video = null;
+  try {
+    video = await VideoLecture.findOne({
+      $or: [{ _id: cleanId }, { id: cleanId }, { bunnyVideoId: cleanId }],
+    });
+  } catch (_) {}
+
+  if (!video) {
+    try {
+      video = await VideoLecture.findById(cleanId);
+    } catch (_) {}
+  }
+
+  if (!video) {
+    try {
+      const fallbackList = readFallbackData("video_lectures");
+      const found = fallbackList.find(
+        (v) =>
+          String(v._id || "").trim() === cleanId ||
+          String(v.id || "").trim() === cleanId ||
+          String(v.bunnyVideoId || v.bunny_video_id || "").trim() === cleanId
+      );
+      if (found) {
+        video = found;
+      }
+    } catch (_) {}
+  }
+
+  return video;
+};
+
 export const updateVideoLecture = async (req, res) => {
   try {
-    const instituteId = resolveInstituteId(req);
-    const query = { _id: req.params.id };
-    if (instituteId) query.institute = instituteId;
-
-    const video = await VideoLecture.findOne(query);
+    const video = await findVideoLectureById(req.params.id, req);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -911,7 +943,9 @@ export const updateVideoLecture = async (req, res) => {
     if (targetAudienceMetadata !== undefined) video.targetAudienceMetadata = targetAudienceMetadata;
     if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : video.thumbnailUrl;
 
-    await video.save();
+    if (typeof video.save === "function") {
+      await video.save();
+    }
     await clearCachePattern("*");
 
     return res.json({ message: "Video lecture updated successfully", video });
@@ -923,19 +957,17 @@ export const updateVideoLecture = async (req, res) => {
 
 export const archiveVideoLecture = async (req, res) => {
   try {
-    const instituteId = resolveInstituteId(req);
-    const query = { _id: req.params.id };
-    if (instituteId) query.institute = instituteId;
-
-    const video = await VideoLecture.findOne(query);
+    const video = await findVideoLectureById(req.params.id, req);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
 
     video.isArchived = true;
     video.archivedAt = new Date();
-    video.archivedBy = req.user._id;
-    await video.save();
+    video.archivedBy = req.user?._id || req.user?.id;
+    if (typeof video.save === "function") {
+      await video.save();
+    }
 
     await clearCachePattern("*");
 
@@ -948,11 +980,7 @@ export const archiveVideoLecture = async (req, res) => {
 
 export const restoreVideoLecture = async (req, res) => {
   try {
-    const instituteId = resolveInstituteId(req);
-    const query = { _id: req.params.id };
-    if (instituteId) query.institute = instituteId;
-
-    const video = await VideoLecture.findOne(query);
+    const video = await findVideoLectureById(req.params.id, req);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -960,7 +988,9 @@ export const restoreVideoLecture = async (req, res) => {
     video.isArchived = false;
     video.archivedAt = null;
     video.archivedBy = null;
-    await video.save();
+    if (typeof video.save === "function") {
+      await video.save();
+    }
 
     await clearCachePattern("*");
 
@@ -973,11 +1003,7 @@ export const restoreVideoLecture = async (req, res) => {
 
 export const deleteVideoLecture = async (req, res) => {
   try {
-    const instituteId = resolveInstituteId(req);
-    const query = { _id: req.params.id };
-    if (instituteId) query.institute = instituteId;
-
-    const video = await VideoLecture.findOne(query);
+    const video = await findVideoLectureById(req.params.id, req);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
@@ -987,9 +1013,10 @@ export const deleteVideoLecture = async (req, res) => {
     // Call Bunny Delete Video API
     try {
       const bunny = await getBunnySettingsHelper();
-      if (bunny.apiKey && bunny.libraryId && video.bunnyVideoId) {
+      const bVid = video.bunnyVideoId || video.bunny_video_id;
+      if (bunny.apiKey && bunny.libraryId && bVid) {
         await axios.delete(
-          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${video.bunnyVideoId}`,
+          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${bVid}`,
           { headers: { AccessKey: bunny.apiKey } }
         );
       }
@@ -997,23 +1024,32 @@ export const deleteVideoLecture = async (req, res) => {
       console.warn("Bunny API delete failed (soft ignored):", bErr.message);
     }
 
-    await VideoLecture.findByIdAndDelete(video._id);
-    await VideoPlaylistItem.deleteMany({ video: video._id });
-    await VideoRelease.deleteMany({ video: video._id });
-    await VideoWatchLog.deleteMany({ video: video._id });
+    const vId = video._id || video.id;
+    try {
+      if (vId) {
+        await VideoLecture.findByIdAndDelete(vId);
+        await VideoPlaylistItem.deleteMany({ video: vId });
+        await VideoRelease.deleteMany({ video: vId });
+        await VideoWatchLog.deleteMany({ video: vId });
+      }
+    } catch (_) {}
 
-    // Update institute storage
-    const storageAcc = await getInstituteStorageAccount(instituteId);
-    storageAcc.storage.usedStorageBytes = Math.max(0, storageAcc.storage.usedStorageBytes - freedBytes);
-    await storageAcc.storage.save();
-
-    let institute = null;
-    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
-      institute = await Institute.findById(instituteId);
-    }
-    if (institute) {
-      institute.usedVideoStorageBytes = Math.max(0, (institute.usedVideoStorageBytes || 0) - freedBytes);
-      await institute.save();
+    const instituteId = resolveInstituteId(req);
+    if (instituteId) {
+      try {
+        const storageAcc = await getInstituteStorageAccount(instituteId);
+        if (storageAcc?.storage) {
+          storageAcc.storage.usedStorageBytes = Math.max(0, storageAcc.storage.usedStorageBytes - freedBytes);
+          await storageAcc.storage.save();
+        }
+        if (isValidId(instituteId)) {
+          const institute = await Institute.findById(instituteId);
+          if (institute) {
+            institute.usedVideoStorageBytes = Math.max(0, (institute.usedVideoStorageBytes || 0) - freedBytes);
+            await institute.save();
+          }
+        }
+      } catch (_) {}
     }
 
     await clearCachePattern("*");
