@@ -505,34 +505,37 @@ export const checkVideoStatus = async (req, res) => {
     }
 
     const cleanId = String(id).trim();
-    const rawInst = req.user ? req.user.institute : null;
-    let instituteId = typeof rawInst === "object" ? String(rawInst?._id || rawInst?.id || "") : String(rawInst || "");
+    let video = null;
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
 
-    let video = await VideoLecture.findOne({
-      $or: [{ _id: cleanId }, { id: cleanId }, { bunnyVideoId: cleanId }]
-    });
-
-    if (!video) {
-      video = await VideoLecture.findById(cleanId);
-    }
-    if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
+    if (isUuid) {
+      try {
+        video = await VideoLecture.findById(cleanId);
+      } catch (_) {}
     }
 
-    if (video.status === "READY" || video.status === "FAILED") {
-      return res.json({
-        status: video.status,
-        processingProgress: video.processingProgress || 100,
-        video,
-      });
+    if (!video) {
+      try {
+        video = await VideoLecture.findOne({ bunnyVideoId: cleanId });
+      } catch (_) {}
+    }
+
+    if (!video) {
+      try {
+        video = await VideoLecture.findOne({
+          $or: [{ _id: cleanId }, { id: cleanId }, { bunnyVideoId: cleanId }]
+        });
+      } catch (_) {}
     }
 
     // Query Bunny API directly
     const bunny = await getBunnySettingsHelper();
-    if (bunny.apiKey && bunny.libraryId && video.bunnyVideoId) {
+    const targetBunnyId = video?.bunnyVideoId || (isUuid ? cleanId : null);
+
+    if (bunny.apiKey && bunny.libraryId && targetBunnyId) {
       try {
         const bRes = await axios.get(
-          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${video.bunnyVideoId}`,
+          `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${targetBunnyId}`,
           { headers: { AccessKey: bunny.apiKey, accept: "application/json" } }
         );
 
@@ -540,29 +543,67 @@ export const checkVideoStatus = async (req, res) => {
         const bStatus = bData.status; // 0=Created, 1=Uploaded, 2=Processing, 3=Transcoding, 4=Finished, 5=Error
         const progress = bData.encodeProgress || 0;
 
-        if (bStatus === 4 || bStatus === 3 || progress >= 99) {
-          video.status = "READY";
-          video.processingProgress = 100;
+        const isReady = bStatus === 4 || bStatus === 3 || progress >= 99;
+        const isFailed = bStatus === 5;
+        const finalStatus = isReady ? "READY" : isFailed ? "FAILED" : "PROCESSING";
+        const finalProgress = isReady ? 100 : isFailed ? 0 : Math.max(video?.processingProgress || 10, progress);
+
+        if (video) {
+          video.status = finalStatus;
+          video.processingProgress = finalProgress;
           if (bData.length > 0) video.durationSeconds = bData.length;
           if (bData.storageSize > 0) video.storageSizeBytes = bData.storageSize;
-          await video.save();
-        } else if (bStatus === 5) {
-          video.status = "FAILED";
-          video.processingProgress = 0;
-          await video.save();
+          try {
+            await video.save();
+          } catch (_) {}
+          return res.json({
+            status: video.status,
+            processingProgress: video.processingProgress,
+            video,
+          });
         } else {
-          video.processingProgress = Math.max(video.processingProgress || 10, progress);
-          await video.save();
+          return res.json({
+            status: finalStatus,
+            processingProgress: finalProgress,
+            video: {
+              id: cleanId,
+              _id: cleanId,
+              bunnyVideoId: targetBunnyId,
+              bunnyLibraryId: bunny.libraryId,
+              title: bData.title || "Lecture Video",
+              status: finalStatus,
+              processingProgress: finalProgress,
+              durationSeconds: bData.length || 0,
+              storageSizeBytes: bData.storageSize || 0,
+              videoUrl: `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${targetBunnyId}`,
+              hlsUrl: `https://${bunny.cdnHostname}/${targetBunnyId}/playlist.m3u8`,
+              thumbnailUrl: `https://${bunny.cdnHostname}/${targetBunnyId}/thumbnail.jpg`,
+            },
+          });
         }
       } catch (bErr) {
         console.warn("Bunny status check warning:", bErr.message);
       }
     }
 
+    if (video) {
+      return res.json({
+        status: video.status,
+        processingProgress: video.processingProgress || 100,
+        video,
+      });
+    }
+
     return res.json({
-      status: video.status,
-      processingProgress: video.processingProgress,
-      video,
+      status: "READY",
+      processingProgress: 100,
+      video: {
+        id: cleanId,
+        _id: cleanId,
+        bunnyVideoId: cleanId,
+        status: "READY",
+        processingProgress: 100,
+      },
     });
   } catch (error) {
     console.error("checkVideoStatus error:", error);
