@@ -12,7 +12,8 @@ const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs",
   "whatsapplog", "whatsapp_logs", "whatsapp_log", "system_settings", "systemsettings",
-  "system_setting", "systemsetting"
+  "system_setting", "systemsetting",
+  "video_lectures", "videolectures", "video_playlists", "videoplaylists", "video_playlist_items", "videoplaylistitems", "video_uploads", "videouploads", "institute_video_storages", "institutevideostorages"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -278,7 +279,13 @@ function matchFilter(doc, filter) {
     }
 
     let docVal = doc[key];
-    if (docVal === undefined) {
+    if (key === "_id" || key === "id") {
+      docVal = doc._id || doc.id;
+    } else if (key === "createdBy" || key === "created_by") {
+      docVal = doc.createdBy || doc.created_by || doc.createdBy?._id || doc.createdBy?.id;
+    } else if (key === "playlistId" || key === "playlist_id") {
+      docVal = doc.playlistId || doc.playlist_id;
+    } else if (docVal === undefined) {
       if (key === "user" || key === "institute") {
         docVal = doc.institute_id || doc.institute || doc.user;
       } else if (key === "batch") {
@@ -315,6 +322,10 @@ function matchFilter(doc, filter) {
           } else {
             if (cleanOpVal.map(String).includes(String(docVal))) return false;
           }
+        } else if (op === "$regex") {
+          const opt = val.$options || "i";
+          const re = new RegExp(opVal, opt);
+          if (!re.test(String(docVal || ""))) return false;
         } else if (op === "$gte") {
           if (!(docVal >= cleanOpVal)) return false;
         } else if (op === "$lte") {
