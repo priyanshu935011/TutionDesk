@@ -14,7 +14,7 @@ import User from "../models/User.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern } from "../utils/cache.js";
 import cloudinary from "../utils/cloudinary.js";
-import { supabase } from "../utils/supabaseModel.js";
+import { supabase, readFallbackData } from "../utils/supabaseModel.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -712,6 +712,35 @@ export const getTeacherVideos = async (req, res) => {
     } catch (findErr) {
       console.warn("getTeacherVideos populate fallback:", findErr.message);
       videos = await VideoLecture.find(query).sort({ createdAt: -1 });
+    }
+
+    // Merge local fallback disk video lectures if missing from DB query
+    try {
+      const fallbackList = readFallbackData("video_lectures");
+      const existingKeySet = new Set(
+        (videos || []).map((v) => {
+          const vObj = typeof v.toObject === "function" ? v.toObject() : v;
+          return String(vObj._id || vObj.id || vObj.bunnyVideoId || "").trim();
+        }).filter(Boolean)
+      );
+
+      for (const fbItem of fallbackList) {
+        const fbId = String(fbItem._id || fbItem.id || "").trim();
+        const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
+
+        if ((fbId && existingKeySet.has(fbId)) || (fbBunnyId && existingKeySet.has(fbBunnyId))) {
+          continue;
+        }
+
+        if (isArchived === "true" && !fbItem.isArchived && fbItem.status !== "ARCHIVED") continue;
+        if (status && fbItem.status !== status) continue;
+
+        videos.push(fbItem);
+        if (fbId) existingKeySet.add(fbId);
+        if (fbBunnyId) existingKeySet.add(fbBunnyId);
+      }
+    } catch (fbMergeErr) {
+      console.warn("getTeacherVideos fallback merge warning:", fbMergeErr.message);
     }
 
     let storageInfo = {

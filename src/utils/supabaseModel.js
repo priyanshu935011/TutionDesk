@@ -205,7 +205,7 @@ function getFallbackFile(tableName) {
   return filePath;
 }
 
-function readFallbackData(tableName) {
+export function readFallbackData(tableName) {
   try {
     const filePath = getFallbackFile(tableName);
     let data = [];
@@ -238,7 +238,7 @@ function readFallbackData(tableName) {
   }
 }
 
-function writeFallbackData(tableName, data) {
+export function writeFallbackData(tableName, data) {
   try {
     const filePath = getFallbackFile(tableName);
     const content = JSON.stringify(data, null, 2);
@@ -246,6 +246,36 @@ function writeFallbackData(tableName, data) {
     uploadMetadataFile(`${tableName}.json`, content);
   } catch (err) {
     console.error(`Error writing fallback data for ${tableName}:`, err);
+  }
+}
+
+export function syncVideoFallback(doc) {
+  if (!doc) return;
+  const tableName = doc._tableName || doc.tableName;
+  if (tableName && ["video_lectures", "video_playlists", "video_uploads"].includes(tableName)) {
+    try {
+      const fallbackData = readFallbackData(tableName);
+      const docObj = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
+      delete docObj._tableName;
+      delete docObj._model;
+      const docId = String(doc._id || doc.id || docObj.id || docObj._id || "");
+      const bunnyId = String(doc.bunnyVideoId || docObj.bunnyVideoId || docObj.bunny_video_id || "");
+      if (!docId && !bunnyId) return;
+
+      const existingIdx = fallbackData.findIndex((item) => {
+        const itemDocId = String(item.id || item._id || "");
+        const itemBunnyId = String(item.bunnyVideoId || item.bunny_video_id || "");
+        return (docId && itemDocId === docId) || (bunnyId && itemBunnyId === bunnyId);
+      });
+      if (existingIdx >= 0) {
+        fallbackData[existingIdx] = { ...fallbackData[existingIdx], ...docObj };
+      } else {
+        fallbackData.push(docObj);
+      }
+      writeFallbackData(tableName, fallbackData);
+    } catch (e) {
+      console.warn("syncVideoFallback warning:", e.message);
+    }
   }
 }
 
@@ -699,6 +729,7 @@ class SupabaseDocument {
         };
         writeBatchesMetadata(metadata);
       }
+
       if (this._tableName === "test_marks" && this._id) {
         const metadata = readTestsMetadata();
         const realId = String(this._id).split("_")[0];
@@ -710,6 +741,7 @@ class SupabaseDocument {
         };
         writeTestsMetadata(metadata);
       }
+      syncVideoFallback(this);
       return this;
     } else {
       // Insert
@@ -775,6 +807,7 @@ class SupabaseDocument {
         };
         writeBatchesMetadata(metadata);
       }
+      syncVideoFallback(this);
       return this;
     }
   }
@@ -1615,6 +1648,13 @@ class SupabaseModel {
         paymentHistory: doc.paymentHistory ?? []
       };
       writeStudentMetadata(metadata);
+    }
+
+    if (data && ["video_lectures", "video_playlists", "video_uploads"].includes(this.tableName)) {
+      try {
+        const createdDoc = new SupabaseDocument(this.tableName, { ...doc, ...data }, this);
+        syncVideoFallback(createdDoc);
+      } catch (_) {}
     }
 
     return new SupabaseDocument(this.tableName, data, this);
