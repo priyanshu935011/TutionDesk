@@ -1420,6 +1420,130 @@ export const recordStudentWatchProgress = async (req, res) => {
   }
 };
 
+export const getVideoWatchAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cleanId = id ? String(id).trim() : "";
+    if (!cleanId || cleanId === "null" || cleanId === "undefined") {
+      return res.status(400).json({ message: "Invalid or missing video ID" });
+    }
+
+    const instituteId = resolveInstituteId(req);
+
+    // 1. Find video lecture
+    let video = null;
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanId);
+    if (isUuid) {
+      try { video = await VideoLecture.findById(cleanId); } catch (_) {}
+    }
+    if (!video) {
+      try { video = await VideoLecture.findOne({ bunnyVideoId: cleanId }); } catch (_) {}
+    }
+    if (!video) {
+      try {
+        video = await VideoLecture.findOne({
+          $or: [{ _id: cleanId }, { id: cleanId }, { bunnyVideoId: cleanId }]
+        });
+      } catch (_) {}
+    }
+
+    const videoIdKeys = new Set([cleanId]);
+    if (video) {
+      if (video._id) videoIdKeys.add(String(video._id));
+      if (video.id) videoIdKeys.add(String(video.id));
+      if (video.bunnyVideoId) videoIdKeys.add(String(video.bunnyVideoId));
+    }
+
+    // 2. Fetch all students for the institute
+    let students = [];
+    try {
+      students = await Student.find({ institute: instituteId }).populate("batch", "name");
+    } catch (_) {
+      try { students = await Student.find({ institute: instituteId }); } catch (_) {}
+    }
+
+    if (!students || students.length === 0) {
+      try { students = await Student.find({}); } catch (_) {}
+    }
+
+    // 3. Fetch VideoWatchLog entries for video ID keys
+    let watchLogs = [];
+    try {
+      watchLogs = await VideoWatchLog.find({
+        $or: [
+          { video: { $in: Array.from(videoIdKeys) } },
+          { video: cleanId }
+        ]
+      });
+    } catch (logErr) {
+      console.warn("getVideoWatchAnalytics watchLogs find warning:", logErr.message);
+    }
+
+    // Also check fallback JSON data for watch logs if empty
+    try {
+      const fallbackLogs = readFallbackData("video_watch_logs");
+      (fallbackLogs || []).forEach(log => {
+        const vKey = String(log.video || "");
+        if (videoIdKeys.has(vKey)) {
+          watchLogs.push(log);
+        }
+      });
+    } catch (_) {}
+
+    // Map watch logs by student ID
+    const watchLogByStudent = new Map();
+    (watchLogs || []).forEach(log => {
+      const sId = String(log.student || log.student_id || log.studentId || "");
+      if (sId) {
+        const existing = watchLogByStudent.get(sId);
+        const sec = Number(log.watchTimeSeconds || log.watch_time_seconds || log.watchDurationSeconds || 0);
+        if (!existing || sec > existing.watchTimeSeconds) {
+          watchLogByStudent.set(sId, {
+            watchTimeSeconds: sec,
+            totalDurationSeconds: Number(log.totalDurationSeconds || log.total_duration_seconds || video?.durationSeconds || 0),
+            watchPercentage: Number(log.watchPercentage || log.watch_percentage || 0),
+          });
+        }
+      }
+    });
+
+    const studentAnalytics = (students || []).map(s => {
+      const sId = String(s._id || s.id || "");
+      const log = watchLogByStudent.get(sId);
+      const watchSec = log?.watchTimeSeconds || 0;
+      const totalSec = log?.totalDurationSeconds || video?.durationSeconds || 0;
+      let pct = log?.watchPercentage || 0;
+      if (!pct && totalSec > 0 && watchSec > 0) {
+        pct = Math.min(100, Math.round((watchSec / totalSec) * 100));
+      }
+
+      const batchObj = typeof s.batch === "object" ? s.batch : null;
+
+      return {
+        studentId: sId,
+        name: s.name || s.fullName || "Student",
+        enrollmentNumber: s.enrollmentNumber || s.rollNumber || "N/A",
+        batchName: batchObj?.name || (typeof s.batch === "string" ? s.batch : "Default Batch"),
+        watchTimeSeconds: watchSec,
+        totalVideoDurationSeconds: totalSec,
+        watchPercentage: pct,
+      };
+    });
+
+    const totalAssigned = studentAnalytics.length;
+    const watchedCount = studentAnalytics.filter(s => s.watchTimeSeconds > 0).length;
+
+    return res.json({
+      totalAssignedStudents: totalAssigned,
+      watchedStudentsCount: watchedCount,
+      studentAnalytics,
+    });
+  } catch (error) {
+    console.error("getVideoWatchAnalytics error:", error);
+    return res.status(500).json({ message: "Could not fetch watch analytics" });
+  }
+};
+
 // -----------------------------------------------------------------------------
 // 7. THUMBNAIL UPLOAD UTILITY
 // -----------------------------------------------------------------------------

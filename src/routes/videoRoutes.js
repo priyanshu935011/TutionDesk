@@ -22,6 +22,7 @@ import {
   getStudentReleasedLectures,
   getStudentPlaybackAuthorization,
   recordStudentWatchProgress,
+  getVideoWatchAnalytics,
   uploadThumbnail,
 } from "../controllers/videoController.js";
 import protect from "../middleware/authMiddleware.js";
@@ -47,6 +48,7 @@ router.get("/teacher/:id/status", checkVideoStatus);
 
 // Teacher Video Management & Search
 router.get("/teacher", getTeacherVideos);
+router.get("/teacher/:id/analytics", getVideoWatchAnalytics);
 router.put("/teacher/:id", updateVideoLecture);
 router.post("/teacher/:id/archive", archiveVideoLecture);
 router.post("/teacher/:id/restore", restoreVideoLecture);
