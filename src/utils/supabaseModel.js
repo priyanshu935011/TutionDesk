@@ -391,6 +391,11 @@ class SupabaseDocument {
     this._tableName = tableName;
     this._model = modelInstance;
 
+    if (!data || typeof data !== "object") {
+      this._id = null;
+      return;
+    }
+
     // Map database 'id' to mongoose '_id'
     if (data.id && !data._id) {
       this._id = data.id;
@@ -1554,7 +1559,7 @@ class SupabaseModel {
       }
     }
 
-    if (this.tableName === "institutes" && data) {
+    if (this.tableName === "institutes" && data && data.id) {
       const metadata = readInstitutesMetadata();
       metadata[data.id] = {
         flexibleDueDate: doc.flexibleDueDate ?? false,
@@ -1569,7 +1574,7 @@ class SupabaseModel {
       writeInstitutesMetadata(metadata);
     }
 
-    if (this.tableName === "students" && data) {
+    if (this.tableName === "students" && data && data.id) {
       const metadata = readStudentMetadata();
       metadata[data.id] = {
         customFields: doc.customFields ?? {},
