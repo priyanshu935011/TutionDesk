@@ -20,6 +20,9 @@ const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
 const BATCHES_METADATA_FILE = path.join(FALLBACK_DIR, "batches_metadata.json");
 
 const uploadMetadataFile = (filename, contentString) => {
+  if (filename && filename.toLowerCase().includes("video")) {
+    return; // Video operations execute strictly from database tables (no bucket storage)
+  }
   const bucketName = process.env.SUPABASE_BUCKET || "notes";
   supabase.storage
     .from(bucketName)
@@ -79,7 +82,7 @@ export const initializeSupabaseStorage = async () => {
     if (files && files.length > 0) {
       console.log(`[Supabase Storage Sync] Found ${files.length} metadata files in Supabase bucket. Syncing to local storage...`);
       for (const file of files) {
-        if (file.name.endsWith(".json")) {
+        if (file.name.endsWith(".json") && !file.name.toLowerCase().includes("video")) {
           const filePath = path.join(FALLBACK_DIR, file.name);
           console.log(`[Supabase Storage Sync] Downloading ${file.name} to ${filePath}...`);
           const { data: fileData, error: downloadError } = await supabase.storage
