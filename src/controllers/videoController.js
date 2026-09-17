@@ -1568,12 +1568,34 @@ export const getStudentReleasedLectures = async (req, res) => {
       }
     });
 
+    // Fetch watch logs for this student to attach watch history & resume state
+    let studentWatchMap = new Map();
+    try {
+      const watchLogs = await VideoWatchLog.find({ student: studentId });
+      (watchLogs || []).forEach((log) => {
+        const vKey = String(log.video || "").trim();
+        if (vKey) studentWatchMap.set(vKey, log);
+      });
+    } catch (_) {}
+
     const videos = Object.values(videoValidityMap).map((item) => {
       const vObj = typeof item.video.toObject === "function" ? item.video.toObject() : item.video;
+      const vId = String(vObj._id || vObj.id || "").trim();
+      const bVid = String(vObj.bunnyVideoId || "").trim();
+      const watchLog = studentWatchMap.get(vId) || studentWatchMap.get(bVid);
+      const watchSec = Number(watchLog?.watchTimeSeconds || 0);
+      const watchPct = Number(watchLog?.watchPercentage || 0);
+      const hasWatched = watchSec > 0 || watchPct > 0;
+
       return {
         ...vObj,
         releaseExpiresAt: item.expiresAt,
         releaseNeverExpires: item.neverExpires,
+        hasWatched,
+        isWatched: hasWatched,
+        watchTimeSeconds: watchSec,
+        lastWatchTimeSeconds: watchSec,
+        watchPercentage: watchPct,
       };
     });
 
@@ -1658,39 +1680,59 @@ export const recordStudentWatchProgress = async (req, res) => {
     const studentId = req.user?._id || req.user?.id || req.user?.studentId;
     const instituteId = resolveInstituteId(req);
 
-    // Save VideoWatchLog entry
+    let existingLog = null;
     try {
       if (studentId && isValidId(studentId)) {
-        await VideoWatchLog.create({
-          institute: instituteId,
+        existingLog = await VideoWatchLog.findOne({
           student: studentId,
           video: cleanVideoId,
-          watchTimeSeconds: watchSec,
-          totalDurationSeconds: totalSec,
-          watchPercentage: watchPct,
-          lastWatchedAt: new Date(),
         });
+      }
+    } catch (_) {}
+
+    // Save or update VideoWatchLog entry
+    try {
+      if (studentId && isValidId(studentId)) {
+        if (existingLog) {
+          existingLog.watchTimeSeconds = Math.max(Number(existingLog.watchTimeSeconds || 0), watchSec);
+          if (totalSec > 0) existingLog.totalDurationSeconds = totalSec;
+          if (watchPct > 0) existingLog.watchPercentage = Math.max(Number(existingLog.watchPercentage || 0), watchPct);
+          existingLog.lastWatchedAt = new Date();
+          await existingLog.save();
+        } else {
+          await VideoWatchLog.create({
+            institute: instituteId,
+            student: studentId,
+            video: cleanVideoId,
+            watchTimeSeconds: watchSec,
+            totalDurationSeconds: totalSec,
+            watchPercentage: watchPct,
+            lastWatchedAt: new Date(),
+          });
+        }
       }
     } catch (logErr) {
       console.warn("VideoWatchLog create warning:", logErr.message);
     }
 
-    // Increment viewCount on video lecture if applicable
-    try {
-      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanVideoId);
-      let video = null;
-      if (isUuid) {
-        try { video = await VideoLecture.findById(cleanVideoId); } catch (_) {}
+    // Increment viewCount ONLY ONCE PER USER if this user hasn't watched this video before
+    if (!existingLog && studentId) {
+      try {
+        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanVideoId);
+        let video = null;
+        if (isUuid) {
+          try { video = await VideoLecture.findById(cleanVideoId); } catch (_) {}
+        }
+        if (!video) {
+          try { video = await VideoLecture.findOne({ bunnyVideoId: cleanVideoId }); } catch (_) {}
+        }
+        if (video) {
+          video.viewCount = (video.viewCount || 0) + 1;
+          try { await video.save(); } catch (_) {}
+        }
+      } catch (vErr) {
+        console.warn("Increment viewCount warning:", vErr.message);
       }
-      if (!video) {
-        try { video = await VideoLecture.findOne({ bunnyVideoId: cleanVideoId }); } catch (_) {}
-      }
-      if (video) {
-        video.viewCount = (video.viewCount || 0) + 1;
-        try { await video.save(); } catch (_) {}
-      }
-    } catch (vErr) {
-      console.warn("Increment viewCount warning:", vErr.message);
     }
 
     return res.json({ message: "Watch progress recorded successfully" });
