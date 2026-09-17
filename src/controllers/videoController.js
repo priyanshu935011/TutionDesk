@@ -297,6 +297,10 @@ export const initVideoUpload = async (req, res) => {
       processingProgress: 0,
     });
 
+    try {
+      syncVideoFallback(video);
+    } catch (_) {}
+
     // If playlist specified, add playlist item entry
     if (targetPlaylistId && video) {
       try {
@@ -421,6 +425,9 @@ export const completeVideoUpload = async (req, res) => {
     } catch (saveErr) {
       console.warn("video.save() in completeVideoUpload warning:", saveErr.message);
     }
+    try {
+      syncVideoFallback(video);
+    } catch (_) {}
 
     // Update Upload Session & Storage Reservation
     if (uploadSessionId) {

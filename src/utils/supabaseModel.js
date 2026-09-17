@@ -1652,7 +1652,15 @@ class SupabaseModel {
 
     if (data && ["video_lectures", "video_playlists", "video_uploads"].includes(this.tableName)) {
       try {
-        const createdDoc = new SupabaseDocument(this.tableName, { ...doc, ...data }, this);
+        const mergedObj = { ...data };
+        if (doc && typeof doc === "object") {
+          for (const [k, v] of Object.entries(doc)) {
+            if (v !== undefined && v !== null && v !== "") {
+              mergedObj[k] = v;
+            }
+          }
+        }
+        const createdDoc = new SupabaseDocument(this.tableName, mergedObj, this);
         syncVideoFallback(createdDoc);
       } catch (_) {}
     }
