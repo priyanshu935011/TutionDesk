@@ -1067,36 +1067,55 @@ export const restoreVideoLecture = async (req, res) => {
 
 export const deleteVideoLecture = async (req, res) => {
   try {
-    const video = await findVideoLectureById(req.params.id, req);
+    const cleanId = String(req.params.id).trim();
+    const video = await findVideoLectureById(cleanId, req);
     if (!video) {
       return res.status(404).json({ message: "Video lecture not found" });
     }
 
     const freedBytes = Number(video.fileSizeBytes || video.storageSizeBytes || 0);
+    const vId = String(video._id || video.id || cleanId).trim();
+    const bVid = String(video.bunnyVideoId || video.bunny_video_id || "").trim();
 
     // Call Bunny Delete Video API
     try {
       const bunny = await getBunnySettingsHelper();
-      const bVid = video.bunnyVideoId || video.bunny_video_id;
       if (bunny.apiKey && bunny.libraryId && bVid) {
         await axios.delete(
           `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${bVid}`,
-          { headers: { AccessKey: bunny.apiKey } }
+          { headers: { AccessKey: bunny.apiKey }, timeout: 8000 }
         );
       }
     } catch (bErr) {
       console.warn("Bunny API delete failed (soft ignored):", bErr.message);
     }
 
-    const vId = video._id || video.id;
     try {
       if (vId) {
-        await VideoLecture.findByIdAndDelete(vId);
-        await VideoPlaylistItem.deleteMany({ video: vId });
-        await VideoRelease.deleteMany({ video: vId });
-        await VideoWatchLog.deleteMany({ video: vId });
+        await VideoLecture.deleteMany({ $or: [{ _id: vId }, { id: vId }, { bunnyVideoId: bVid }] });
+        await VideoPlaylistItem.deleteMany({ $or: [{ video: vId }, { video_id: vId }] });
+        await VideoRelease.deleteMany({ $or: [{ video: vId }, { video_id: vId }] });
+        await VideoWatchLog.deleteMany({ $or: [{ video: vId }, { video_id: vId }] });
       }
-    } catch (_) {}
+    } catch (delErr) {
+      console.warn("Video records delete warning:", delErr.message);
+    }
+
+    // Always clean up fallback data storage
+    try {
+      const tables = ["video_lectures", "video_playlists", "video_uploads"];
+      for (const tableName of tables) {
+        const fallbackList = readFallbackData(tableName);
+        const filtered = fallbackList.filter((item) => {
+          const itemId = String(item._id || item.id || "").trim();
+          const itemBunnyId = String(item.bunnyVideoId || item.bunny_video_id || "").trim();
+          return itemId !== vId && itemId !== cleanId && (bVid ? itemBunnyId !== bVid : true);
+        });
+        writeFallbackData(tableName, filtered);
+      }
+    } catch (fbDelErr) {
+      console.warn("Fallback storage delete warning:", fbDelErr.message);
+    }
 
     const instituteId = resolveInstituteId(req);
     if (instituteId) {

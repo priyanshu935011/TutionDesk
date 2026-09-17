@@ -1470,6 +1470,69 @@ class SupabaseModel {
     return new SupabaseQuery(this, "findOneAndUpdate", [filter, update, options]);
   }
 
+  async countDocuments(filter = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      return fallbackData.filter((doc) => matchFilter(doc, filter)).length;
+    }
+    try {
+      let query = this.supabase.from(this.tableName).select("id", { count: "exact", head: true });
+      query = this.applyFilters(query, filter);
+      const { count, error } = await query;
+      if (!error && count !== null) return count;
+    } catch (_) {}
+    const fallbackData = readFallbackData(this.tableName);
+    return fallbackData.filter((doc) => matchFilter(doc, filter)).length;
+  }
+
+  async deleteOne(filter = {}) {
+    return this.deleteMany(filter);
+  }
+
+  async findByIdAndDelete(id) {
+    return this.deleteMany({ _id: id });
+  }
+
+  async findOneAndDelete(filter = {}) {
+    return this.deleteMany(filter);
+  }
+
+  async deleteMany(filter = {}) {
+    if (MISSING_TABLES.has(this.tableName)) {
+      const fallbackData = readFallbackData(this.tableName);
+      const filtered = fallbackData.filter((doc) => !matchFilter(doc, filter));
+      writeFallbackData(this.tableName, filtered);
+      return { acknowledged: true, deletedCount: fallbackData.length - filtered.length };
+    }
+
+    try {
+      let query = this.supabase.from(this.tableName).delete();
+      query = this.applyFilters(query, filter);
+      const { data, error } = await query.select();
+      if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+        MISSING_TABLES.add(this.tableName);
+        const fallbackData = readFallbackData(this.tableName);
+        const filtered = fallbackData.filter((doc) => !matchFilter(doc, filter));
+        writeFallbackData(this.tableName, filtered);
+        return { acknowledged: true, deletedCount: fallbackData.length - filtered.length };
+      }
+      if (error) {
+        console.warn(`deleteMany error on ${this.tableName}:`, error.message);
+      }
+    } catch (err) {
+      console.warn(`deleteMany exception on ${this.tableName}:`, err.message);
+    }
+
+    // Always remove from fallback data store as well
+    try {
+      const fallbackData = readFallbackData(this.tableName);
+      const filtered = fallbackData.filter((doc) => !matchFilter(doc, filter));
+      writeFallbackData(this.tableName, filtered);
+    } catch (_) {}
+
+    return { acknowledged: true };
+  }
+
   async create(doc) {
     if (MISSING_TABLES.has(this.tableName)) {
       const data = Array.isArray(doc) ? doc : [doc];
