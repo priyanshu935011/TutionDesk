@@ -1335,7 +1335,10 @@ class SupabaseModel {
               } else {
                 const cleanItem = cleanValue(subVal);
                 if (cleanItem && String(cleanItem) !== "[object Object]") {
-                  orParts.push(`${dbSubKey}.eq.${cleanItem}`);
+                  const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
+                  if (dbSubKey !== "id" || isUuid) {
+                    orParts.push(`${dbSubKey}.eq.${cleanItem}`);
+                  }
                 }
               }
             }
@@ -1395,7 +1398,13 @@ class SupabaseModel {
             q = q.contains(dbKey, arr);
           }
         } else {
-          q = q.eq(dbKey, cleanValue(val));
+          const cleanItem = cleanValue(val);
+          const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
+          if (dbKey === "id" && !isUuid) {
+            // Non-UUID string passed for Postgres UUID 'id' column, skip eq to prevent 22P02
+          } else {
+            q = q.eq(dbKey, cleanItem);
+          }
         }
       }
     }

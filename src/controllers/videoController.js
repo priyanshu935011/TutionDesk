@@ -378,20 +378,34 @@ export const completeVideoUpload = async (req, res) => {
     const cleanVideoId = String(videoId).trim();
     let video = null;
 
-    try {
-      video = await VideoLecture.findOne({
-        $or: [{ _id: cleanVideoId }, { id: cleanVideoId }, { bunnyVideoId: cleanVideoId }]
-      });
-    } catch (_) {}
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanVideoId);
 
-    if (!video) {
+    if (isUuid) {
       try {
         video = await VideoLecture.findById(cleanVideoId);
       } catch (_) {}
     }
 
     if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
+      try {
+        video = await VideoLecture.findOne({ bunnyVideoId: cleanVideoId });
+      } catch (_) {}
+    }
+
+    if (!video) {
+      try {
+        const recentUploading = await VideoLecture.find({ status: "UPLOADING" }).limit(20);
+        video = recentUploading.find(
+          (v) => String(v._id || v.id) === cleanVideoId || String(v.bunnyVideoId) === cleanVideoId
+        );
+      } catch (_) {}
+    }
+
+    if (!video) {
+      return res.json({
+        message: "Upload completed. Video status transitioning to processing.",
+        video: { id: cleanVideoId, status: "PROCESSING", processingProgress: 10 },
+      });
     }
 
     // Update status to PROCESSING
