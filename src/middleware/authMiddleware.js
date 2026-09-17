@@ -132,7 +132,7 @@ const protect = async (req, res, next) => {
       const rawInst = req.user.institute;
       const instId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
 
-      if (instId && mongoose.Types.ObjectId.isValid(instId)) {
+      if (instId && String(instId).trim().length >= 8) {
         try {
           const institute = await Institute.findById(instId).select(
             "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan recordedLecturesFeatureEnabled releaseVideosFeatureEnabled"

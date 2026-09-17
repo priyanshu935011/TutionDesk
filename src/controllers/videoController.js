@@ -101,7 +101,7 @@ export const getInstituteStorageAccount = async (instituteId) => {
   }
 
   let institute = null;
-  if (mongoose.Types.ObjectId.isValid(instituteId)) {
+  if (isValidId(instituteId)) {
     try {
       institute = await Institute.findById(instituteId);
     } catch (_) {}
@@ -161,7 +161,7 @@ export const initVideoUpload = async (req, res) => {
   try {
     const instituteId = resolveInstituteId(req);
     let institute = null;
-    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
+    if (isValidId(instituteId)) {
       try {
         institute = await Institute.findById(instituteId);
       } catch (_) {}
@@ -650,18 +650,22 @@ export const getTeacherVideos = async (req, res) => {
     const instituteId = resolveInstituteId(req);
 
     let institute = null;
-    if (instituteId && mongoose.Types.ObjectId.isValid(instituteId)) {
+    if (isValidId(instituteId)) {
       try {
         institute = await Institute.findById(instituteId);
       } catch (_) {}
     }
 
     if (!institute && req.user?.institute) {
-      if (typeof req.user.institute === "object" && req.user.institute._id) {
-        try {
-          institute = await Institute.findById(req.user.institute._id);
-        } catch (_) {}
-      } else if (typeof req.user.institute === "string" && mongoose.Types.ObjectId.isValid(req.user.institute)) {
+      if (typeof req.user.institute === "object") {
+        const instObjId = req.user.institute._id || req.user.institute.id;
+        if (isValidId(instObjId)) {
+          try {
+            institute = await Institute.findById(instObjId);
+          } catch (_) {}
+        }
+        if (!institute) institute = req.user.institute;
+      } else if (typeof req.user.institute === "string" && isValidId(req.user.institute)) {
         try {
           institute = await Institute.findById(req.user.institute);
         } catch (_) {}
@@ -846,10 +850,6 @@ export const getTeacherVideos = async (req, res) => {
       if (!inst) return true;
       if (inst.releaseVideosFeatureEnabled === false || inst.release_videos_feature_enabled === false) {
         return false;
-      }
-      if (Array.isArray(inst.allowedFeatures) && inst.allowedFeatures.length > 0) {
-        const hasFeature = inst.allowedFeatures.includes("release_videos") || inst.allowedFeatures.includes("releaseVideos");
-        if (!hasFeature) return false;
       }
       return true;
     };
