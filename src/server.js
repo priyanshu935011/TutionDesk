@@ -26,6 +26,7 @@ import { reconnectAllSessions } from "./services/whatsappService.js";
 import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
+import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js";
 import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
 
 connectDB();
@@ -164,6 +165,7 @@ const PORT = process.env.PORT || 8080;
 initializeSupabaseStorage().then(() => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    startVideoProcessingWorker();
     reconnectAllSessions().catch((err) => {
       console.error("Failed to auto-resume WhatsApp sessions:", err);
     });
@@ -172,6 +174,7 @@ initializeSupabaseStorage().then(() => {
   console.error("Failed to initialize Supabase storage sync:", err);
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    startVideoProcessingWorker();
     reconnectAllSessions().catch((err) => {
       console.error("Failed to auto-resume WhatsApp sessions:", err);
     });
