@@ -1355,6 +1355,71 @@ export const getStudentPlaybackAuthorization = async (req, res) => {
   }
 };
 
+export const recordStudentWatchProgress = async (req, res) => {
+  try {
+    const rawVideoId = req.body?.videoId || req.body?.id || req.params?.id;
+    const cleanVideoId = rawVideoId ? String(rawVideoId).trim() : "";
+
+    if (!cleanVideoId || cleanVideoId === "null" || cleanVideoId === "undefined") {
+      return res.status(400).json({ message: "Invalid or missing videoId" });
+    }
+
+    const {
+      watchTimeSeconds,
+      watchDurationSeconds,
+      totalDurationSeconds,
+      totalVideoDurationSeconds,
+    } = req.body || {};
+
+    const watchSec = Number(watchTimeSeconds ?? watchDurationSeconds ?? 0);
+    const totalSec = Number(totalDurationSeconds ?? totalVideoDurationSeconds ?? 0);
+    const watchPct = totalSec > 0 ? Number(((watchSec / totalSec) * 100).toFixed(1)) : 0;
+
+    const studentId = req.user?._id || req.user?.id || req.user?.studentId;
+    const instituteId = resolveInstituteId(req);
+
+    // Save VideoWatchLog entry
+    try {
+      if (studentId && isValidId(studentId)) {
+        await VideoWatchLog.create({
+          institute: instituteId,
+          student: studentId,
+          video: cleanVideoId,
+          watchTimeSeconds: watchSec,
+          totalDurationSeconds: totalSec,
+          watchPercentage: watchPct,
+          lastWatchedAt: new Date(),
+        });
+      }
+    } catch (logErr) {
+      console.warn("VideoWatchLog create warning:", logErr.message);
+    }
+
+    // Increment viewCount on video lecture if applicable
+    try {
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanVideoId);
+      let video = null;
+      if (isUuid) {
+        try { video = await VideoLecture.findById(cleanVideoId); } catch (_) {}
+      }
+      if (!video) {
+        try { video = await VideoLecture.findOne({ bunnyVideoId: cleanVideoId }); } catch (_) {}
+      }
+      if (video) {
+        video.viewCount = (video.viewCount || 0) + 1;
+        try { await video.save(); } catch (_) {}
+      }
+    } catch (vErr) {
+      console.warn("Increment viewCount warning:", vErr.message);
+    }
+
+    return res.json({ message: "Watch progress recorded successfully" });
+  } catch (error) {
+    console.error("recordStudentWatchProgress error:", error);
+    return res.status(500).json({ message: "Could not record watch progress" });
+  }
+};
+
 // -----------------------------------------------------------------------------
 // 7. THUMBNAIL UPLOAD UTILITY
 // -----------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import {
   revokeVideoRelease,
   getStudentReleasedLectures,
   getStudentPlaybackAuthorization,
+  recordStudentWatchProgress,
   uploadThumbnail,
 } from "../controllers/videoController.js";
 import protect from "../middleware/authMiddleware.js";
@@ -71,5 +72,7 @@ router.post("/releases/:id/revoke", revokeVideoRelease);
 router.get("/student/released", getStudentReleasedLectures);
 router.get("/student", getStudentReleasedLectures); // Legacy compatibility alias
 router.get("/student/:id/playback", getStudentPlaybackAuthorization);
+router.post("/student/watch-progress", recordStudentWatchProgress);
+router.post("/student/:id/watch-progress", recordStudentWatchProgress);
 
 export default router;
