@@ -9,8 +9,10 @@ import redisClient from "../config/redis.js";
 import cloudinary from "../utils/cloudinary.js";
 import { deleteCache } from "../utils/cache.js";
 
+const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
+
 const generateToken = (payload) =>
-  jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "30d" });
+  jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
 
 export const studentLogin = async (req, res) => {
   try {

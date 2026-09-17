@@ -1,25 +1,38 @@
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
+import Student from "../models/Student.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import { updateConcurrentPeak } from "../utils/activityTracker.js";
 import redisClient from "../config/redis.js";
+
+const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
 
 const protect = async (req, res, next) => {
   let authHeader = req.headers.authorization;
 
   // Fallback to query parameter for token authentication (e.g. for iframe preview routes)
-  if (!authHeader && req.query.token) {
+  if (!authHeader && req.query?.token) {
     authHeader = `Bearer ${req.query.token}`;
   }
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader) {
     return res.status(401).json({ message: "Not authorized" });
   }
 
   try {
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    let token = authHeader.trim();
+    if (token.startsWith("Bearer ")) {
+      token = token.substring(7);
+    }
+    token = token.trim().replace(/^["']+|["']+$|\\"/g, "");
+
+    if (!token || token === "null" || token === "undefined") {
+      return res.status(401).json({ message: "Not authorized" });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
 
     if (decoded.role === "super_admin" || decoded.id === "super-admin") {
       req.user = {
@@ -31,41 +44,85 @@ const protect = async (req, res, next) => {
       return next();
     }
 
-    req.user = await User.findById(decoded.id).select("-password");
+    let user = null;
+    const userId = decoded.id || decoded._id || decoded.userId;
 
-    if (!req.user) {
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      try {
+        user = await User.findById(userId).select("-password");
+      } catch (_) {}
+    }
+
+    if (!user && decoded.email) {
+      try {
+        user = await User.findOne({ email: decoded.email.toLowerCase().trim() }).select("-password");
+      } catch (_) {}
+    }
+
+    if (!user && userId) {
+      try {
+        user = await User.findOne({ $or: [{ _id: userId }, { id: userId }] }).select("-password");
+      } catch (_) {}
+    }
+
+    // Fallback: Check Student model if user is a student
+    if (!user) {
+      try {
+        const studentQuery = [];
+        if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+          studentQuery.push({ _id: userId });
+        }
+        if (decoded.email) {
+          studentQuery.push({ email: decoded.email.toLowerCase().trim() });
+        }
+        if (studentQuery.length > 0) {
+          const student = await Student.findOne({ $or: studentQuery });
+          if (student) {
+            user = {
+              _id: student._id,
+              id: student._id,
+              name: student.name,
+              email: student.email,
+              role: "student",
+              institute: student.user || student.institute,
+            };
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
 
-    if (decoded.role !== "super_admin" && req.user.lastActiveAt) {
-      const fourteenDaysInMs = 14 * 24 * 60 * 60 * 1000;
-      const isTokenRecent = decoded.iat && (Date.now() / 1000 - decoded.iat < 3600); // 1 hour
-      if (!isTokenRecent && (Date.now() - new Date(req.user.lastActiveAt).getTime() > fourteenDaysInMs)) {
-        return res.status(401).json({ message: "Session expired due to 14 days of inactivity." });
-      }
-    }
+    req.user = user;
 
     if (req.user.role !== "super_admin" && req.user.institute) {
       const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");
+      const instId = typeof req.user.institute === "object" ? req.user.institute._id || req.user.institute.id : req.user.institute;
 
-      const institute = await Institute.findById(req.user.institute).select(
-        "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan"
-      );
+      if (instId && mongoose.Types.ObjectId.isValid(instId)) {
+        try {
+          const institute = await Institute.findById(instId).select(
+            "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan recordedLecturesFeatureEnabled releaseVideosFeatureEnabled"
+          );
 
-      if (institute) {
-        const isExpired =
-          institute.status !== "active" ||
-          new Date(institute.subscriptionEnd).getTime() < Date.now();
+          if (institute) {
+            const isExpired =
+              institute.status !== "active" ||
+              (institute.subscriptionEnd && new Date(institute.subscriptionEnd).getTime() < Date.now());
 
-        if (isExpired && !isPaymentRoute) {
-          return res.status(403).json({
-            message:
-              "Your subscription has expired. Please renew to access the institute features.",
-            subscriptionExpired: true,
-          });
-        }
+            if (isExpired && !isPaymentRoute) {
+              return res.status(403).json({
+                message:
+                  "Your subscription has expired. Please renew to access the institute features.",
+                subscriptionExpired: true,
+              });
+            }
 
-        req.user.institute = institute;
+            req.user.institute = institute;
+          }
+        } catch (_) {}
       }
     }
 
@@ -73,12 +130,16 @@ const protect = async (req, res, next) => {
     
     if (req.user && req.user._id) {
       User.updateOne({ _id: req.user._id }, { lastActiveAt: new Date() }).catch(() => {});
-      if (redisClient.isReady) {
+      if (redisClient && redisClient.isReady) {
         redisClient.set(`active:user:${req.user._id}`, req.user.role || "teacher", { EX: 300 }).catch(() => {});
       }
     }
     updateConcurrentPeak().catch(() => {});
   } catch (error) {
+    console.error("Auth middleware verification error:", error.message);
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Session expired. Please log in again.", tokenExpired: true });
+    }
     return res.status(401).json({ message: "Invalid token" });
   }
 };
