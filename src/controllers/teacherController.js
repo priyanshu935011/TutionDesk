@@ -939,9 +939,9 @@ export const uploadNote = async (req, res) => {
     // Check available storage for institute
     const newFileSizeBytes = req.file ? req.file.buffer.length : Number(req.body.fileSizeBytes || 0);
     if (instituteId) {
-      const currentUsed = await syncInstituteStorage(instituteId);
-      const instForStorage = await Institute.findById(instituteId);
-      const maxStorageGb = Number(instForStorage?.maxVideoStorageGb || 50);
+      const storageAcc = await syncInstituteStorage(instituteId);
+      const currentUsed = Number(storageAcc?.usedBytes || 0);
+      const maxStorageGb = Number(storageAcc?.maxGb || 50);
       const maxBytes = maxStorageGb * 1024 * 1024 * 1024;
       if (currentUsed + newFileSizeBytes > maxBytes) {
         const freeBytes = Math.max(0, maxBytes - currentUsed);

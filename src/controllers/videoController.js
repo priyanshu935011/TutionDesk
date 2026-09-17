@@ -78,7 +78,7 @@ export const resolveInstituteId = (req) => {
   return "00000000-0000-0000-0000-000000000000";
 };
 
-// Helper: Sync & calculate institute storage quota authoritatively from database
+// Helper: Sync & calculate global institute storage quota authoritatively from database (Videos + Notes)
 export const getInstituteStorageAccount = async (instituteId) => {
   if (!isValidId(instituteId)) {
     return {
@@ -90,6 +90,10 @@ export const getInstituteStorageAccount = async (instituteId) => {
       maxGb: 50,
       usedGb: 0,
       availableGb: 50,
+      videoStorageBytes: 0,
+      videoStorageGb: 0,
+      notesStorageBytes: 0,
+      notesStorageGb: 0,
     };
   }
 
@@ -110,9 +114,11 @@ export const getInstituteStorageAccount = async (instituteId) => {
   const maxGb = Number(institute?.maxVideoStorageGb || 50);
   const limitBytes = maxGb * 1024 * 1024 * 1024;
 
-  // Authoritatively calculate actual storage from database video_lectures table
-  let actualUsedBytes = 0;
+  // Authoritatively calculate global storage (Videos + Notes) from database tables
+  let videoStorageBytes = 0;
+  let notesStorageBytes = 0;
   let actualReservedBytes = 0;
+
   try {
     const dbVideos = await VideoLecture.find({ institute: instituteId });
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -127,12 +133,31 @@ export const getInstituteStorageAccount = async (instituteId) => {
           actualReservedBytes += bytes;
         }
       } else if (!v.isArchived && st !== "ARCHIVED" && st !== "FAILED") {
-        actualUsedBytes += bytes;
+        videoStorageBytes += bytes;
       }
     }
   } catch (calcErr) {
     console.warn("Recalculate video storage warning:", calcErr.message);
   }
+
+  // Calculate notes PDF file size total from Supabase notes table
+  try {
+    const { supabase: sb } = await import("../utils/supabase.js");
+    const { data: notesRows } = await sb
+      .from("notes")
+      .select("file_size_bytes, file_size")
+      .eq("institute_id", String(instituteId));
+
+    if (notesRows && Array.isArray(notesRows)) {
+      for (const n of notesRows) {
+        notesStorageBytes += Number(n.file_size_bytes || n.file_size || 0);
+      }
+    }
+  } catch (notesErr) {
+    console.warn("Recalculate notes storage warning:", notesErr.message);
+  }
+
+  const actualUsedBytes = videoStorageBytes + notesStorageBytes;
 
   if (!storage) {
     try {
@@ -176,6 +201,10 @@ export const getInstituteStorageAccount = async (instituteId) => {
     maxGb,
     usedGb: Number((actualUsedBytes / (1024 * 1024 * 1024)).toFixed(2)),
     availableGb: Number((availableBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    videoStorageBytes,
+    videoStorageGb: Number((videoStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    notesStorageBytes,
+    notesStorageGb: Number((notesStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
   };
 };
 
@@ -941,6 +970,10 @@ export const getTeacherVideos = async (req, res) => {
         availableStorageGb: storageInfo.availableGb,
         freeStorageGb: storageInfo.availableGb,
         usagePercentage: storageInfo.limitBytes > 0 ? Math.min(100, Math.round((storageInfo.usedBytes / storageInfo.limitBytes) * 100)) : 0,
+        videoStorageBytes: storageInfo.videoStorageBytes || 0,
+        videoStorageGb: storageInfo.videoStorageGb || 0,
+        notesStorageBytes: storageInfo.notesStorageBytes || 0,
+        notesStorageGb: storageInfo.notesStorageGb || 0,
       },
       activeVideos,
       expiredVideos: archivedVideos,
