@@ -119,11 +119,13 @@ const protect = async (req, res, next) => {
       user = {
         _id: userId || "00000000-0000-0000-0000-000000000000",
         id: userId || "00000000-0000-0000-0000-000000000000",
-        email: decoded.email || "",
-        role: decoded.role || "teacher",
-        institute: decoded.institute || decoded.instituteId || null,
+        email: decoded?.email || "",
+        role: decoded?.role || "teacher",
+        institute: decoded?.institute || decoded?.instituteId || null,
       };
     }
+
+    req.user = user;
 
     if (req.user && req.user.role !== "super_admin" && req.user.institute) {
       const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");

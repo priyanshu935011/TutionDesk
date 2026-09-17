@@ -147,7 +147,7 @@ export const initVideoUpload = async (req, res) => {
       institute = await Institute.findById(instituteId);
     }
 
-    if (req.user.role !== "super_admin" && institute && institute.recordedLecturesFeatureEnabled === false) {
+    if (req.user?.role !== "super_admin" && institute && institute.recordedLecturesFeatureEnabled === false) {
       return res.status(403).json({ message: "Recorded Lectures feature is disabled for this institute" });
     }
 
