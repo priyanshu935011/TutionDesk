@@ -633,8 +633,6 @@ export const getTeacherVideos = async (req, res) => {
 
     if (isArchived === "true") {
       query.isArchived = true;
-    } else {
-      query.isArchived = { $ne: true };
     }
 
     if (playlistId && mongoose.Types.ObjectId.isValid(playlistId)) {

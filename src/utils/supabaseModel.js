@@ -12,8 +12,7 @@ const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs",
   "whatsapplog", "whatsapp_logs", "whatsapp_log", "system_settings", "systemsettings",
-  "system_setting", "systemsetting",
-  "video_lectures", "videolectures", "video_playlists", "videoplaylists", "video_playlist_items", "videoplaylistitems", "video_uploads", "videouploads", "institute_video_storages", "institutevideostorages"
+  "system_setting", "systemsetting"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
