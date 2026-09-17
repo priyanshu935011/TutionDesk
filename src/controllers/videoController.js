@@ -762,17 +762,54 @@ export const getTeacherVideos = async (req, res) => {
 
     const { search, playlistId, status, isArchived } = req.query;
 
+    const isSuperAdmin = req.user?.role === "super_admin" && !req.query?.instituteId;
+
+    const belongsToInstitute = (item) => {
+      if (isSuperAdmin) return true;
+      if (!item || typeof item !== "object") return false;
+
+      const targetInst = isValidId(instituteId) ? String(instituteId).trim() : null;
+      const targetUser = (req.user?._id || req.user?.id) ? String(req.user._id || req.user.id).trim() : null;
+
+      const itemInst = String(
+        (item.institute && typeof item.institute === "object"
+          ? item.institute._id || item.institute.id
+          : item.institute) ||
+        item.instituteId ||
+        item.institute_id ||
+        ""
+      ).trim();
+
+      const itemCreatedBy = String(
+        (item.createdBy && typeof item.createdBy === "object"
+          ? item.createdBy._id || item.createdBy.id
+          : item.createdBy) ||
+        item.teacher ||
+        item.user ||
+        ""
+      ).trim();
+
+      if (targetInst && itemInst && itemInst === targetInst) return true;
+      if (targetInst && itemCreatedBy && itemCreatedBy === targetInst) return true;
+      if (targetUser && itemCreatedBy && itemCreatedBy === targetUser) return true;
+      if (targetUser && itemInst && itemInst === targetUser) return true;
+
+      if (!itemInst && !itemCreatedBy && !targetInst) return true;
+
+      return false;
+    };
+
     const query = {};
 
-    if (req.user?.role === "super_admin" && !req.query?.instituteId) {
-      // Super admin sees all videos
-    } else {
+    if (!isSuperAdmin) {
       const conditions = [];
-      if (instituteId && instituteId !== "000000000000000000000000" && instituteId !== "00000000-0000-0000-0000-000000000000") {
+      if (isValidId(instituteId) && instituteId !== "000000000000000000000000" && instituteId !== "00000000-0000-0000-0000-000000000000") {
         conditions.push({ institute: instituteId });
+        conditions.push({ institute: String(instituteId) });
       }
       const userId = req.user?._id || req.user?.id;
-      if (userId) {
+      if (userId && isValidId(userId)) {
+        conditions.push({ createdBy: userId });
         conditions.push({ createdBy: String(userId) });
         conditions.push({ institute: String(userId) });
       }
@@ -817,6 +854,8 @@ export const getTeacherVideos = async (req, res) => {
       console.warn("getTeacherVideos populate fallback:", findErr.message);
       videos = await VideoLecture.find(query).sort({ createdAt: -1 });
     }
+
+    videos = (videos || []).filter((v) => belongsToInstitute(v));
 
     // Sync fresh database videos into local fallback store when bypassing cache, or merge fallback data when reading cache
     if (skipCache) {
@@ -864,6 +903,7 @@ export const getTeacherVideos = async (req, res) => {
         const fallbackList = readFallbackData("video_lectures");
         const fbMap = new Map();
         for (const fbItem of fallbackList) {
+          if (!belongsToInstitute(fbItem)) continue;
           const fbId = String(fbItem._id || fbItem.id || "").trim();
           const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
           if (fbId) fbMap.set(fbId, fbItem);
@@ -889,6 +929,8 @@ export const getTeacherVideos = async (req, res) => {
         );
 
         for (const fbItem of fallbackList) {
+          if (!belongsToInstitute(fbItem)) continue;
+
           const fbId = String(fbItem._id || fbItem.id || "").trim();
           const fbBunnyId = String(fbItem.bunnyVideoId || fbItem.bunny_video_id || "").trim();
 
