@@ -383,6 +383,8 @@ const snakeToCamel = (str) => {
   if (str === "file_url") return "pdfUrl";
   if (str === "student_ids") return "students";
   if (str === "batch_ids") return "batches";
+  if (str === "playlist_id") return "playlist";
+  if (str === "video_id") return "video";
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 };
 
@@ -1484,6 +1486,11 @@ class SupabaseModel {
       delete payload.customFields;
     }
 
+    if (this.tableName === "video_playlist_items") {
+      if (payload.playlist && !payload.playlist_id) payload.playlist_id = payload.playlist;
+      if (payload.video && !payload.video_id) payload.video_id = payload.video;
+    }
+
     let attempt = 0;
     let data = null;
 
@@ -1499,11 +1506,13 @@ class SupabaseModel {
           error.code === "42P01" ||
           error.code === "PGRST205" ||
           error.code === "22P02" ||
+          error.code === "23502" ||
+          error.message.includes("violates not-null constraint") ||
           error.message.includes("invalid input syntax for type uuid") ||
           error.message.includes("Could not find the table") ||
           (error.message.includes("relation") && error.message.includes("does not exist"))
         ) {
-          console.warn(`Table "${this.tableName}" invalid UUID or missing table error (${error.code || error.message}). Dynamically switching to local fallback store.`);
+          console.warn(`Table "${this.tableName}" constraint error (${error.code || error.message}). Dynamically switching to local fallback store.`);
           MISSING_TABLES.add(this.tableName);
           return this.create(doc);
         }

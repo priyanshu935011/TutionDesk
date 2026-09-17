@@ -275,7 +275,9 @@ export const initVideoUpload = async (req, res) => {
       const itemCount = await VideoPlaylistItem.countDocuments({ playlist: targetPlaylistId });
       await VideoPlaylistItem.create({
         playlist: targetPlaylistId,
+        playlist_id: targetPlaylistId,
         video: video._id,
+        video_id: video._id,
         sortOrder: itemCount + 1,
       });
     }
