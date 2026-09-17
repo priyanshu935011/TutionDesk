@@ -968,13 +968,27 @@ export const updateVideoLecture = async (req, res) => {
       };
     }
 
-    if (title !== undefined && title.trim()) video.title = title.trim();
-    if (description !== undefined) video.description = description.trim();
-    if (playlist !== undefined) video.playlist = playlist.trim();
-    if (playlistId !== undefined) video.playlistId = playlistId || null;
-    if (resolvedTargetType !== undefined) video.targetAudienceType = resolvedTargetType;
-    if (Object.keys(resolvedMetadata).length > 0) video.targetAudienceMetadata = resolvedMetadata;
-    if (thumbnailUrl !== undefined) video.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : video.thumbnailUrl;
+    if (title !== undefined && title !== null && String(title).trim()) {
+      video.title = String(title).trim();
+    }
+    if (description !== undefined) {
+      video.description = description !== null ? String(description).trim() : "";
+    }
+    if (playlist !== undefined) {
+      video.playlist = playlist !== null ? String(playlist).trim() : "";
+    }
+    if (playlistId !== undefined) {
+      video.playlistId = playlistId || null;
+    }
+    if (resolvedTargetType !== undefined && resolvedTargetType !== null) {
+      video.targetAudienceType = String(resolvedTargetType);
+    }
+    if (resolvedMetadata && typeof resolvedMetadata === "object" && Object.keys(resolvedMetadata).length > 0) {
+      video.targetAudienceMetadata = resolvedMetadata;
+    }
+    if (thumbnailUrl !== undefined) {
+      video.thumbnailUrl = thumbnailUrl !== null ? String(thumbnailUrl).trim() : (video.thumbnailUrl || "");
+    }
 
     if (typeof video.save === "function") {
       try {
@@ -994,7 +1008,7 @@ export const updateVideoLecture = async (req, res) => {
     return res.json({ message: "Video lecture updated successfully", video: updatedObj });
   } catch (error) {
     console.error("updateVideoLecture error:", error);
-    return res.status(500).json({ message: "Could not update video lecture" });
+    return res.status(500).json({ message: "Could not update video lecture", error: error.message });
   }
 };
 
