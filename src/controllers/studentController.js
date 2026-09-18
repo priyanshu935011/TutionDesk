@@ -250,6 +250,7 @@ export const invalidateStudentCache = async (studentId) => {
       const sId = String(studentId);
       await deleteCache(`student:profile:${sId}`);
       await deleteCache(`student:basic:${sId}`);
+      await deleteCache(`student:personal:${sId}`);
       await deleteCache(`student:payments:${sId}`);
       await deleteCache(`student:attendance:${sId}`);
       await deleteCache(`student:tests:${sId}`);
@@ -259,6 +260,45 @@ export const invalidateStudentCache = async (studentId) => {
     await clearCachePattern("teacher:dashboard:*");
   } catch (err) {
     console.error("Error invalidating student cache:", err);
+  }
+};
+
+export const getStudentPersonalInfoById = async (req, res) => {
+  try {
+    const studentId = req.params.id;
+    const cacheKey = `student:personal:${studentId}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
+      : req.user._id;
+
+    const student = await Student.findOne({ _id: studentId, user: ownerId })
+      .select("_id phone email parentName parentPhone address joinedOn customFields profilePicture name enrollmentNumber batch batches");
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const payload = {
+      _id: student._id,
+      phone: student.phone || "",
+      email: student.email || "",
+      parentName: student.parentName || "",
+      parentPhone: student.parentPhone || "",
+      address: student.address || "",
+      joinedOn: student.joinedOn,
+      customFields: student.customFields || {},
+      profilePicture: student.profilePicture || "",
+    };
+
+    await setCache(cacheKey, payload, 3600);
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: "Could not fetch student personal info" });
   }
 };
 

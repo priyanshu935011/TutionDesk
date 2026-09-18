@@ -11,6 +11,7 @@ import {
   getStudentBasicById,
   getStudentById,
   getStudentPaymentsById,
+  getStudentPersonalInfoById,
   getStudents,
   markAttendance,
   markBatchAttendance,
@@ -30,6 +31,7 @@ router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
 router.route("/").get(getStudents).post(createStudent);
 router.get("/:id/basic", getStudentBasicById);
+router.get("/:id/personal-info", getStudentPersonalInfoById);
 router.get("/:id/payments", getStudentPaymentsById);
 router.get("/:id/attendance", getStudentAttendanceById);
 router.get("/:id", getStudentById);
