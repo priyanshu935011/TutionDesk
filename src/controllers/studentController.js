@@ -1453,6 +1453,30 @@ export const markBatchAttendance = async (req, res) => {
       } catch (sErr) {}
     }
 
+    // Sync single aggregated document to Supabase batch_attendance_records table
+    try {
+      const statusMap = {};
+      let pCount = 0;
+      let aCount = 0;
+      for (const rec of records) {
+        const sId = String(rec.studentId || rec.id || rec._id);
+        const st = String(rec.status || "unmarked").toLowerCase();
+        statusMap[sId] = st;
+        if (st === "present") pCount++;
+        else if (st === "absent") aCount++;
+      }
+      await supabase.from("batch_attendance_records").upsert({
+        batch_id: String(batchId),
+        date: targetDateStr,
+        attendance_map: statusMap,
+        total_count: records.length,
+        present_count: pCount,
+        absent_count: aCount,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "batch_id, date" });
+      await deleteCache(`attendance:batch:statusmap:${batchId}:${targetDateStr}`);
+    } catch (_) {}
+
     // Clear dashboard & student cache
     try {
       await clearCachePattern("teacher:dashboard:*");
@@ -2628,6 +2652,139 @@ export const getBatchAttendanceByDate = async (req, res) => {
   } catch (error) {
     console.error("getBatchAttendanceByDate error:", error);
     return res.status(500).json({ message: "Could not fetch batch attendance data." });
+  }
+};
+
+export const getBatchAttendanceStatusMap = async (req, res) => {
+  try {
+    const { batchId, date } = req.query;
+    if (!batchId || !date) {
+      return res.status(400).json({ message: "Batch ID and date query parameters are required." });
+    }
+
+    const targetDateStr = getISTDateStr(date);
+    const todayISTStr = getISTDateStr(new Date());
+    const isPastDate = targetDateStr < todayISTStr;
+
+    // Strategic Client & Redis Caching
+    // Past dates: Immutable cache in Redis (30 days) and HTTP Header max-age=2592000, immutable
+    // Today: Dynamic cache in Redis (5 min) and HTTP Header max-age=300
+    const cacheKey = `attendance:batch:statusmap:${batchId}:${targetDateStr}`;
+    const cachedPayload = await getCache(cacheKey);
+
+    if (isPastDate) {
+      res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+    } else {
+      res.setHeader("Cache-Control", "public, max-age=300");
+    }
+
+    if (cachedPayload) {
+      return res.status(200).json(cachedPayload);
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
+
+    // 1. Try fetching single aggregated document from Supabase batch_attendance_records table using compound index (batch_id, date)
+    let statusMap = {};
+    let summary = { total: 0, present: 0, absent: 0 };
+    let foundRecord = false;
+
+    try {
+      const { data: dbRec, error: dbErr } = await supabase
+        .from("batch_attendance_records")
+        .select("attendance_map, total_count, present_count, absent_count")
+        .eq("batch_id", String(batchId))
+        .eq("date", targetDateStr)
+        .maybeSingle();
+
+      if (!dbErr && dbRec && dbRec.attendance_map) {
+        statusMap = dbRec.attendance_map;
+        summary = {
+          total: dbRec.total_count || Object.keys(statusMap).length,
+          present: dbRec.present_count || Object.values(statusMap).filter(v => v === "present").length,
+          absent: dbRec.absent_count || Object.values(statusMap).filter(v => v === "absent").length,
+        };
+        foundRecord = true;
+      }
+    } catch (_) {}
+
+    // 2. Fallback if single document record not created yet: Query batch students & build minimal status map
+    if (!foundRecord) {
+      let batchObj = null;
+      try {
+        batchObj = await Batch.findById(batchId);
+      } catch (_) {}
+
+      if (!batchObj) {
+        batchObj = await Batch.findOne({ user: ownerId, name: { $regex: new RegExp(`^${String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, "i") } });
+      }
+
+      const bIdStr = batchObj ? String(batchObj._id) : String(batchId);
+      const bNameStr = batchObj ? batchObj.name.trim().toLowerCase() : String(batchId).trim().toLowerCase();
+
+      const allStudents = await Student.find({ user: ownerId, isArchived: { $ne: true } });
+      const batchStudents = allStudents.filter((s) => {
+        const set = new Set();
+        if (s.batchName) set.add(s.batchName.toString().trim().toLowerCase());
+        if (s.batch) set.add((s.batch._id || s.batch).toString().trim().toLowerCase());
+        if (Array.isArray(s.batches)) {
+          for (const b of s.batches) set.add((b._id || b).toString().trim().toLowerCase());
+        }
+        return set.has(bIdStr.toLowerCase()) || set.has(bNameStr);
+      });
+
+      let presentCount = 0;
+      let absentCount = 0;
+
+      for (const s of batchStudents) {
+        const sId = String(s._id || s.id);
+        const records = s.attendanceRecords || [];
+        const record = records.find((r) => r.date && getISTDateStr(r.date) === targetDateStr);
+        const st = record ? (record.status ? record.status.toLowerCase() : "unmarked") : "unmarked";
+        statusMap[sId] = st;
+        if (st === "present") presentCount++;
+        else if (st === "absent") absentCount++;
+      }
+
+      summary = {
+        total: batchStudents.length,
+        present: presentCount,
+        absent: absentCount,
+      };
+
+      // Upsert single document into Supabase batch_attendance_records table asynchronously
+      try {
+        await supabase.from("batch_attendance_records").upsert({
+          batch_id: String(batchId),
+          date: targetDateStr,
+          attendance_map: statusMap,
+          total_count: summary.total,
+          present_count: summary.present,
+          absent_count: summary.absent,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "batch_id, date" });
+      } catch (_) {}
+    }
+
+    const responsePayload = {
+      success: true,
+      batchId: String(batchId),
+      date: targetDateStr,
+      statusMap,
+      summary,
+      isPastDate,
+    };
+
+    // Strategic TTL: 30 days for past dates, 300 seconds for today
+    const ttlSeconds = isPastDate ? (30 * 24 * 3600) : 300;
+    await setCache(cacheKey, responsePayload, ttlSeconds);
+
+    return res.status(200).json(responsePayload);
+  } catch (error) {
+    console.error("getBatchAttendanceStatusMap error:", error);
+    return res.status(500).json({ message: "Could not fetch batch attendance status map." });
   }
 };
 
