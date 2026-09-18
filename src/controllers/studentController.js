@@ -266,10 +266,12 @@ export const invalidateStudentCache = async (studentId) => {
 export const getStudentPersonalInfoById = async (req, res) => {
   try {
     const studentId = req.params.id;
-    const cacheKey = `student:personal:${studentId}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -306,9 +308,12 @@ export const getStudentBasicById = async (req, res) => {
   try {
     const studentId = req.params.id;
     const cacheKey = `student:basic:${studentId}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -350,9 +355,12 @@ export const getStudentPaymentsById = async (req, res) => {
   try {
     const studentId = req.params.id;
     const cacheKey = `student:payments:${studentId}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -393,9 +401,12 @@ export const getStudentAttendanceById = async (req, res) => {
   try {
     const studentId = req.params.id;
     const cacheKey = `student:attendance:${studentId}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -435,9 +446,12 @@ export const getStudentById = async (req, res) => {
   try {
     const studentId = req.params.id;
     const cacheKey = `student:profile:${studentId}`;
-    const cachedData = await getCache(cacheKey);
-    if (cachedData) {
-      return res.json(cachedData);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -2554,9 +2568,12 @@ export const getBatchAttendanceByDate = async (req, res) => {
 
     const targetDateStr = getISTDateStr(date);
     const cacheKey = `attendance:batch:${batchId}:${targetDateStr}`;
-    const cachedPayload = await getCache(cacheKey);
-    if (cachedPayload) {
-      return res.status(200).json(cachedPayload);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedPayload = await getCache(cacheKey);
+      if (cachedPayload) {
+        return res.status(200).json(cachedPayload);
+      }
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -2669,15 +2686,15 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
     // Past dates: Immutable cache in Redis (30 days) and HTTP Header max-age=2592000, immutable
     // Today: Dynamic cache in Redis (5 min) and HTTP Header max-age=300
     const cacheKey = `attendance:batch:statusmap:${batchId}:${targetDateStr}`;
-    const cachedPayload = await getCache(cacheKey);
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
 
-    if (isPastDate) {
+    if (isPastDate && !isRefresh) {
       res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
     } else {
-      res.setHeader("Cache-Control", "public, max-age=300");
+      res.setHeader("Cache-Control", "no-cache");
     }
 
-    if (cachedPayload) {
+    if (cachedPayload && !isRefresh) {
       return res.status(200).json(cachedPayload);
     }
 
