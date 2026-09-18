@@ -2634,7 +2634,6 @@ export const getBatchAttendanceByDate = async (req, res) => {
         batches: sObj.batches || [],
         enrolledBatchIds: sObj.enrolledBatchIds || [],
         status: record ? (record.status ? record.status.toLowerCase() : "unmarked") : "unmarked",
-        attendanceRecords: records,
       };
     });
 
