@@ -7,7 +7,10 @@ import {
   createStudent,
   deleteStudent,
   getBatchAttendanceByDate,
+  getStudentAttendanceById,
+  getStudentBasicById,
   getStudentById,
+  getStudentPaymentsById,
   getStudents,
   markAttendance,
   markBatchAttendance,
@@ -26,6 +29,9 @@ router.get("/batch-attendance", getBatchAttendanceByDate);
 router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
 router.route("/").get(getStudents).post(createStudent);
+router.get("/:id/basic", getStudentBasicById);
+router.get("/:id/payments", getStudentPaymentsById);
+router.get("/:id/attendance", getStudentAttendanceById);
 router.get("/:id", getStudentById);
 router.put("/:id/archive", archiveStudent);
 router.post("/:id/send-credentials-whatsapp", sendStudentCredentialsWhatsApp);

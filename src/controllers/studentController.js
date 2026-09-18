@@ -244,12 +244,166 @@ export const getStudents = async (req, res) => {
   }
 };
 
-export const getStudentById = async (req, res) => {
+export const invalidateStudentCache = async (studentId) => {
   try {
+    if (studentId) {
+      const sId = String(studentId);
+      await deleteCache(`student:profile:${sId}`);
+      await deleteCache(`student:basic:${sId}`);
+      await deleteCache(`student:payments:${sId}`);
+      await deleteCache(`student:attendance:${sId}`);
+      await deleteCache(`student:tests:${sId}`);
+    }
+    await clearCachePattern("attendance:batch:*");
+    await clearCachePattern("teacher:students:*");
+    await clearCachePattern("teacher:dashboard:*");
+  } catch (err) {
+    console.error("Error invalidating student cache:", err);
+  }
+};
+
+export const getStudentBasicById = async (req, res) => {
+  try {
+    const studentId = req.params.id;
+    const cacheKey = `student:basic:${studentId}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
     const ownerId = req.user.role === "teacher" 
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
       : req.user._id;
-    const query = { _id: req.params.id, user: ownerId };
+
+    const query = { _id: studentId, user: ownerId };
+
+    if (req.user.role === "teacher") {
+      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
+      const batchIds = myBatches.map((b) => b._id);
+      query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }];
+    }
+
+    const student = await Student.findOne(query)
+      .select("_id name phone parentName parentPhone email address enrollmentNumber batch batches joinedOn dueDate feePlanType profilePicture customFields isArchived")
+      .populate("batch", "name scheduleDays startTime endTime")
+      .populate("batches", "name scheduleDays startTime endTime");
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const enrolledBatchIds = (student.batches && student.batches.length > 0)
+      ? student.batches.map((b) => (b?._id || b).toString())
+      : (student.batch ? [(student.batch?._id || student.batch).toString()] : []);
+
+    const obj = student.toJSON ? student.toJSON() : student;
+    obj.enrolledBatchIds = enrolledBatchIds;
+
+    await setCache(cacheKey, obj, 3600);
+    return res.json(obj);
+  } catch (error) {
+    return res.status(500).json({ message: "Could not fetch student basic info" });
+  }
+};
+
+export const getStudentPaymentsById = async (req, res) => {
+  try {
+    const studentId = req.params.id;
+    const cacheKey = `student:payments:${studentId}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
+      : req.user._id;
+
+    const student = await Student.findOne({ _id: studentId, user: ownerId })
+      .select("_id totalFees feePlanType dueDate paymentHistory paidAmount pendingAmount feeStatus");
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const paymentHistory = student.paymentHistory || [];
+    const paidAmount = paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const totalFees = Number(student.totalFees || 0);
+    const pendingAmount = Math.max(0, totalFees - paidAmount);
+
+    const payload = {
+      _id: student._id,
+      totalFees,
+      feePlanType: student.feePlanType || "monthly",
+      dueDate: student.dueDate,
+      feeStatus: pendingAmount === 0 ? "paid" : "unpaid",
+      paidAmount,
+      pendingAmount,
+      paymentHistory,
+    };
+
+    await setCache(cacheKey, payload, 3600);
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: "Could not fetch student payment info" });
+  }
+};
+
+export const getStudentAttendanceById = async (req, res) => {
+  try {
+    const studentId = req.params.id;
+    const cacheKey = `student:attendance:${studentId}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
+      : req.user._id;
+
+    const student = await Student.findOne({ _id: studentId, user: ownerId })
+      .select("_id attendanceRecords");
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const records = student.attendanceRecords || [];
+    const total = records.length;
+    const present = records.filter((r) => r.status === "present").length;
+    const absent = total - present;
+    const attendancePercentage = total > 0 ? Number(((present / total) * 100).toFixed(1)) : 0.0;
+
+    const payload = {
+      _id: student._id,
+      records,
+      total,
+      present,
+      absent,
+      attendancePercentage,
+    };
+
+    await setCache(cacheKey, payload, 3600);
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: "Could not fetch student attendance info" });
+  }
+};
+
+export const getStudentById = async (req, res) => {
+  try {
+    const studentId = req.params.id;
+    const cacheKey = `student:profile:${studentId}`;
+    const cachedData = await getCache(cacheKey);
+    if (cachedData) {
+      return res.json(cachedData);
+    }
+
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
+      : req.user._id;
+    const query = { _id: studentId, user: ownerId };
 
     if (req.user.role === "teacher") {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
@@ -276,6 +430,7 @@ export const getStudentById = async (req, res) => {
     const obj = student.toJSON();
     obj.enrolledBatchIds = enrolledBatchIds;
 
+    await setCache(cacheKey, obj, 3600);
     return res.json(obj);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch student" });
@@ -774,8 +929,7 @@ export const updateStudent = async (req, res) => {
       if (student.enrollmentNumber) {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
       }
-      await clearCachePattern("teacher:dashboard:*");
-      await clearCachePattern("teacher:students:*");
+      await invalidateStudentCache(student._id);
     } catch (_) {}
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
@@ -965,8 +1119,7 @@ export const addPayment = async (req, res) => {
       if (student.enrollmentNumber) {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
       }
-      await clearCachePattern("teacher:dashboard:*");
-      await clearCachePattern("teacher:students:*");
+      await invalidateStudentCache(student._id);
     } catch (cErr) {}
 
     return res.json(populatedStudent);
@@ -1086,8 +1239,7 @@ export const markAttendance = async (req, res) => {
       if (student.enrollmentNumber) {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
       }
-      await clearCachePattern("teacher:dashboard:*");
-      await clearCachePattern("teacher:students:*");
+      await invalidateStudentCache(student._id);
     } catch (cErr) {}
 
     let whatsappStatus = { sent: false, reason: "Attendance status is not absent." };
@@ -1265,7 +1417,9 @@ export const markBatchAttendance = async (req, res) => {
     try {
       await clearCachePattern("teacher:dashboard:*");
       await clearCachePattern("teacher:students:*");
+      await clearCachePattern("attendance:batch:*");
       for (const s of batchStudents) {
+        await invalidateStudentCache(s._id);
         if (s.enrollmentNumber) {
           await deleteCache(`student:dashboard:${s.enrollmentNumber}`);
         }
@@ -2334,6 +2488,13 @@ export const getBatchAttendanceByDate = async (req, res) => {
       return res.status(400).json({ message: "Batch ID and date query parameters are required." });
     }
 
+    const targetDateStr = getISTDateStr(date);
+    const cacheKey = `attendance:batch:${batchId}:${targetDateStr}`;
+    const cachedPayload = await getCache(cacheKey);
+    if (cachedPayload) {
+      return res.status(200).json(cachedPayload);
+    }
+
     const ownerId = req.user.role === "teacher" 
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
@@ -2354,8 +2515,6 @@ export const getBatchAttendanceByDate = async (req, res) => {
       user: ownerId,
       isArchived: { $ne: true }
     });
-
-    const targetDateStr = getISTDateStr(date);
 
     const batchStudents = allStudents.filter((s) => {
       const studentBatchNamesAndIds = new Set();
@@ -2415,14 +2574,17 @@ export const getBatchAttendanceByDate = async (req, res) => {
       };
     });
 
-    return res.status(200).json({
+    const responsePayload = {
       success: true,
       batchId: bIdStr,
       batchName: batchObj ? batchObj.name : batchId,
       date: targetDateStr,
       totalCount: responseStudents.length,
       students: responseStudents,
-    });
+    };
+
+    await setCache(cacheKey, responsePayload, 1800);
+    return res.status(200).json(responsePayload);
   } catch (error) {
     console.error("getBatchAttendanceByDate error:", error);
     return res.status(500).json({ message: "Could not fetch batch attendance data." });
