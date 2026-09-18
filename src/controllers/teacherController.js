@@ -106,7 +106,13 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     const cacheKey = `teacher:dashboard:${req.user._id}`;
-    if (req.query.nocache !== "true") {
+    const forceRefresh =
+      req.query.nocache === "true" ||
+      req.query.refresh === "true" ||
+      req.query.skipCache === "true" ||
+      req.query.skipCache === true;
+
+    if (!forceRefresh) {
       const cachedData = await getCache(cacheKey);
       if (cachedData) {
         // ALWAYS attach fresh live institute from MongoDB so allowedFeatures & branding are never stale
@@ -177,7 +183,7 @@ export const getTeacherDashboard = async (req, res) => {
       }
     }
 
-    const [rawStudents, batches, quizzes, notes, testResults] = await Promise.all([
+    const [rawStudents, batches, quizzes, totalNotesCount, totalTestResultsCount] = await Promise.all([
       Student.find(studentQuery)
         .select("_id name enrollmentNumber phone parentPhone batch batches enrolledBatchIds pendingAmount totalFees paidAmount paymentHistory isArchived attendanceRecords")
         .populate("batch", "name scheduleDays startTime endTime")
@@ -187,15 +193,8 @@ export const getTeacherDashboard = async (req, res) => {
         .sort({ createdAt: -1 })
         .populate("teacher", "name email"),
       Quiz.find(quizQuery).select("_id title batches institute createdAt").sort({ createdAt: -1 }),
-      Note.find(noteQuery)
-        .select("_id title pdfUrl file_url fileSizeBytes file_size_bytes category targetType batch students createdAt created_at")
-        .sort({ createdAt: -1 })
-        .populate("batch", "name")
-        .populate("students", "name enrollmentNumber"),
-      TestResult.find(testQuery)
-        .select("_id title test_name subject score totalMarks max_marks examDate test_date student createdAt created_at")
-        .sort({ createdAt: -1 })
-        .populate("student", "name enrollmentNumber email"),
+      Note.countDocuments(noteQuery),
+      TestResult.countDocuments(testQuery),
     ]);
 
     // Exclude students who are marked archived or belong exclusively to archived batches
@@ -234,8 +233,8 @@ export const getTeacherDashboard = async (req, res) => {
       totalStudents: students.length,
       totalBatches: batches.filter((b) => b.status !== "archived").length,
       totalQuizzes: quizzes.length,
-      totalNotes: notes.length,
-      totalTestResults: testResults.length,
+      totalNotes: totalNotesCount,
+      totalTestResults: totalTestResultsCount,
       liveQuiz: getActiveSessionForTeacher(instituteId),
       totalCollectedFees: req.user.role === "institute_admin" ? totalCollectedFees : undefined,
       totalPendingFees: req.user.role === "institute_admin" ? totalPendingFees : undefined,
@@ -291,8 +290,8 @@ export const getTeacherDashboard = async (req, res) => {
       students: [],
       batches: processedBatches,
       quizzes: quizzes,
-      notes: notes,
-      testResults: testResults,
+      notes: [],
+      testResults: [],
       institute,
       user: {
         id: req.user._id,
