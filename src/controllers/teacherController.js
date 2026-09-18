@@ -2177,3 +2177,58 @@ export const getOutstandingStudents = async (req, res) => {
     return res.status(500).json({ message: "Could not fetch outstanding students" });
   }
 };
+
+export const getQuickSummary = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+    const institute = await Institute.findById(instituteId);
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found." });
+    }
+
+    let storageInfo = {
+      maxGb: 50,
+      usedBytes: 0,
+      usedGb: 0,
+      availableGb: 50,
+      limitBytes: 50 * 1024 * 1024 * 1024,
+      videoStorageBytes: 0,
+      videoStorageGb: 0,
+      notesStorageBytes: 0,
+      notesStorageGb: 0,
+    };
+
+    try {
+      storageInfo = await syncInstituteStorage(instituteId);
+    } catch (stErr) {
+      console.warn("getQuickSummary storage calculation warning:", stErr.message);
+    }
+
+    const limitBytes = storageInfo.limitBytes || (storageInfo.maxGb * 1024 * 1024 * 1024);
+    const usedBytes = storageInfo.usedBytes || 0;
+    const usagePercentage = limitBytes > 0 ? Math.min(100, Math.round((usedBytes / limitBytes) * 100)) : 0;
+
+    return res.json({
+      storage: {
+        maxStorageGb: storageInfo.maxGb,
+        usedStorageBytes: storageInfo.usedBytes,
+        usedStorageGb: storageInfo.usedGb,
+        availableStorageGb: storageInfo.availableGb,
+        freeStorageGb: storageInfo.availableGb,
+        usagePercentage,
+        videoStorageBytes: storageInfo.videoStorageBytes || 0,
+        videoStorageGb: storageInfo.videoStorageGb || 0,
+        notesStorageBytes: storageInfo.notesStorageBytes || 0,
+        notesStorageGb: storageInfo.notesStorageGb || 0,
+      },
+      walletBalance: institute.walletBalance || 0,
+      perMessageCharge: institute.perMessageCharge ?? 0.25,
+    });
+  } catch (error) {
+    console.error("getQuickSummary error:", error);
+    return res.status(500).json({ message: "Could not fetch quick summary." });
+  }
+};

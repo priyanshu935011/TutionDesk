@@ -1637,8 +1637,6 @@ export const getWalletInfo = async (req, res) => {
     const payments = await CashfreePayment.find({ institute: instituteId, type: "wallet_recharge" }).sort({ createdAt: -1 });
 
     return res.json({
-      walletBalance: institute.walletBalance || 0,
-      perMessageCharge: institute.perMessageCharge || 0.10,
       history: payments
     });
   } catch (error) {
