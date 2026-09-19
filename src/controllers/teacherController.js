@@ -1823,18 +1823,27 @@ export const updateBrandingSettings = async (req, res) => {
     const rawInst = req.user.institute;
     const instituteId = rawInst?._id || rawInst || req.user._id;
 
+    const updateFields = {
+      brandingEnabled: brandingEnabled !== false,
+      name: name ? name.trim() : "Classtech",
+      themeColor: themeColor || "#4C3FBE",
+      logoUrl: logoUrl || null,
+    };
+
     let institute = null;
     if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
-      institute = await Institute.findByIdAndUpdate(
-        instituteId,
-        {
-          brandingEnabled: brandingEnabled !== false,
-          name: name ? name.trim() : "Classtech",
-          themeColor: themeColor || "#4C3FBE",
-          logoUrl: logoUrl || null,
-        },
-        { new: true }
-      );
+      institute = await Institute.findByIdAndUpdate(instituteId, updateFields, { new: true });
+    }
+    if (!institute) {
+      institute = await Institute.findOneAndUpdate({ adminUser: req.user._id }, updateFields, { new: true });
+    }
+    if (!institute && req.user._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+      institute = await Institute.findByIdAndUpdate(req.user._id, updateFields, { new: true });
+    }
+
+    // Also update any other institute document matching adminUser
+    if (req.user._id) {
+      await Institute.updateMany({ adminUser: req.user._id }, updateFields).catch(() => {});
     }
 
     await invalidateUserDashboard(req);

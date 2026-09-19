@@ -1678,9 +1678,22 @@ export const getStudentPortalData = async (req, res) => {
     }
 
     for (const student of students) {
-      const institute = await Institute.findById(student.user).select(
+      let institute = await Institute.findById(student.user).select(
         "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser allowedFeatures studentCustomFields"
       );
+      if (!institute) {
+        institute = await Institute.findOne({ adminUser: student.user }).select(
+          "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser allowedFeatures studentCustomFields"
+        );
+      }
+      if (!institute) {
+        const uDoc = await User.findById(student.user).select("institute");
+        if (uDoc && uDoc.institute) {
+          institute = await Institute.findById(uDoc.institute).select(
+            "_id name status subscriptionEnd quizFeatureEnabled brandingEnabled logoUrl themeColor adminUser allowedFeatures studentCustomFields"
+          );
+        }
+      }
       if (!institute) continue;
 
       const isExpired =
@@ -1947,7 +1960,16 @@ export const getStudentPortalData = async (req, res) => {
 
         if (classes.length === 0 && students.length > 0) {
       const s = students[0];
-      const inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+      let inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+      if (!inst) {
+        inst = await Institute.findOne({ adminUser: s.user }).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+      }
+      if (!inst) {
+        const uDoc = await User.findById(s.user).select("institute");
+        if (uDoc && uDoc.institute) {
+          inst = await Institute.findById(uDoc.institute).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+        }
+      }
       classes.push({
         studentId: s._id,
         student: {
