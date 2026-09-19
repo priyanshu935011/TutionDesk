@@ -1743,7 +1743,7 @@ export const getStudentPortalData = async (req, res) => {
 
         const currentBatchIdVal = batch ? (batch._id || batch.id) : null;
 
-        const [notes, testResults, liveQuiz, rawQuizzes, rawVideos] = await Promise.all([
+        const [notes, testResults, liveQuiz, rawQuizzes, rawVideos, notices] = await Promise.all([
           Note.find({
             institute: instituteId,
             $or: [
@@ -1781,7 +1781,26 @@ export const getStudentPortalData = async (req, res) => {
                 ],
               }).sort({ createdAt: -1 })
             : Promise.resolve([]),
+          Notice.find({
+            institute: instituteId,
+            $or: [
+              { targetType: "all" },
+              { targetType: "batch", batches: currentBatchIdVal },
+              { targetType: "batch", batch: currentBatchIdVal },
+              { targetType: "student", students: student._id },
+              { targetType: null },
+            ],
+          }).sort({ createdAt: -1 }),
         ]);
+
+        const rawAttendance = student.attendanceRecords || student.attendance || [];
+        const batchAttendanceRecords = currentBatchIdVal
+          ? rawAttendance.filter((a) => !a.batchId || String(a.batchId) === String(currentBatchIdVal))
+          : rawAttendance;
+
+        const batchNotes = notes || [];
+        const batchTestResults = testResults || [];
+        const studentNotices = notices || [];
 
         const now = new Date();
         const recordedLectures = (rawVideos || [])
