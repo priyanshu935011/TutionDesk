@@ -1902,8 +1902,8 @@ export const getStudentPortalData = async (req, res) => {
           recordedLectures,
           recordedLecturesFeatureEnabled: isVideosEnabled,
           brandingEnabled: institute.brandingEnabled !== false,
-          logoUrl: institute.logoUrl || null,
-          themeColor: institute.themeColor || "#4C3FBE",
+          logoUrl: (institute.brandingEnabled !== false) ? (institute.logoUrl || null) : null,
+          themeColor: (institute.brandingEnabled !== false) ? (institute.themeColor || "#ff0fd3") : "#ff0fd3",
           allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
           showAds: adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId)),
           adsenseClientId: (adsConfig.enableAds && adsConfig.adTuitions.includes(String(instituteId))) ? adsConfig.adsenseClientId : "",
@@ -2001,9 +2001,9 @@ export const getStudentPortalData = async (req, res) => {
         attendance: s.attendanceRecords || [],
         notes: [],
         testResults: [],
-        brandingEnabled: inst ? inst.brandingEnabled !== false : true,
-        logoUrl: inst ? inst.logoUrl : null,
-        themeColor: inst ? inst.themeColor || "#4C3FBE" : "#4C3FBE",
+        brandingEnabled: inst ? inst.brandingEnabled !== false : false,
+        logoUrl: (inst && inst.brandingEnabled !== false) ? (inst.logoUrl || null) : null,
+        themeColor: (inst && inst.brandingEnabled !== false) ? (inst.themeColor || "#ff0fd3") : "#ff0fd3",
       });
     }
 
