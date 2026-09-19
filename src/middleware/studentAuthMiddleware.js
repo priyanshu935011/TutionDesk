@@ -24,9 +24,29 @@ const protectStudent = async (req, res, next) => {
     if (decoded.email && decoded.email.trim() !== "") {
       siblingQueries.push({ email: decoded.email.toLowerCase().trim() });
     }
+    const cleanPhone = decoded.phone ? decoded.phone.replace(/\D/g, "") : "";
+    const cleanParentPhone = decoded.parentPhone ? decoded.parentPhone.replace(/\D/g, "") : "";
+
     if (decoded.phone && decoded.phone.trim() !== "") {
       siblingQueries.push({ phone: decoded.phone.trim() });
+      siblingQueries.push({ parentPhone: decoded.phone.trim() });
     }
+    if (cleanPhone.length >= 7) {
+      const last10 = cleanPhone.slice(-10);
+      siblingQueries.push({ phone: new RegExp(last10 + "$") });
+      siblingQueries.push({ parentPhone: new RegExp(last10 + "$") });
+    }
+
+    if (decoded.parentPhone && decoded.parentPhone.trim() !== "") {
+      siblingQueries.push({ phone: decoded.parentPhone.trim() });
+      siblingQueries.push({ parentPhone: decoded.parentPhone.trim() });
+    }
+    if (cleanParentPhone.length >= 7) {
+      const last10P = cleanParentPhone.slice(-10);
+      siblingQueries.push({ phone: new RegExp(last10P + "$") });
+      siblingQueries.push({ parentPhone: new RegExp(last10P + "$") });
+    }
+
     if (decoded.enrollmentNumber) {
       siblingQueries.push({ enrollmentNumber: decoded.enrollmentNumber });
     }

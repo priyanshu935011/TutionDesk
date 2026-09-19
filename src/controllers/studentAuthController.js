@@ -414,6 +414,7 @@ export const switchProfile = async (req, res) => {
 
     const currentEmail = req.studentEmail; // from protectStudent
     const currentPhone = req.student?.phone;
+    const currentParentPhone = req.student?.parentPhone;
 
     // Find all student records matching targetEnrollmentNumber
     const siblingRecords = await Student.find({ enrollmentNumber: targetEnrollmentNumber });
@@ -421,11 +422,25 @@ export const switchProfile = async (req, res) => {
       return res.status(404).json({ message: "Profile not found" });
     }
 
-    // Verify security: target student MUST share either the email or the phone with the current student
     const firstSibling = siblingRecords[0];
+
+    const phoneMatches = (p1, p2) => {
+      if (!p1 || !p2) return false;
+      if (p1.trim() === p2.trim()) return true;
+      const c1 = p1.replace(/\D/g, "");
+      const c2 = p2.replace(/\D/g, "");
+      if (c1.length >= 7 && c2.length >= 7) {
+        return c1.slice(-10) === c2.slice(-10);
+      }
+      return false;
+    };
+
     const sharesContact =
       (currentEmail && currentEmail.trim() !== "" && firstSibling.email && firstSibling.email.toLowerCase().trim() === currentEmail.toLowerCase().trim()) ||
-      (currentPhone && currentPhone.trim() !== "" && firstSibling.phone && firstSibling.phone.trim() === currentPhone.trim());
+      phoneMatches(currentPhone, firstSibling.phone) ||
+      phoneMatches(currentPhone, firstSibling.parentPhone) ||
+      phoneMatches(currentParentPhone, firstSibling.phone) ||
+      phoneMatches(currentParentPhone, firstSibling.parentPhone);
 
     if (!sharesContact) {
       return res.status(403).json({ message: "Access denied. You can only switch to sibling profiles sharing your contact info." });
@@ -460,6 +475,7 @@ export const switchProfile = async (req, res) => {
         instituteId: firstSibling.user,
         email: firstSibling.email,
         phone: firstSibling.phone,
+        parentPhone: firstSibling.parentPhone,
         enrollmentNumber: firstSibling.enrollmentNumber,
         sessionId,
       }),
@@ -468,6 +484,7 @@ export const switchProfile = async (req, res) => {
         name: firstSibling.name,
         email: firstSibling.email,
         phone: firstSibling.phone,
+        parentPhone: firstSibling.parentPhone,
         role: "student",
         enrollmentNumber: firstSibling.enrollmentNumber,
       }

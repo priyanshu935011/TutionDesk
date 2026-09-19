@@ -1875,20 +1875,38 @@ export const getStudentPortalData = async (req, res) => {
       }
     }
 
-    // Query all sibling profiles sharing same email or phone (must be non-empty)
+    // Query all sibling profiles sharing same email, phone, parentPhone, or enrollmentNumber
     const siblingProfilesQuery = [];
-    if (req.student?.email && req.student.email.trim() !== "") {
-      siblingProfilesQuery.push({ email: req.student.email.toLowerCase().trim() });
-    }
-    if (req.student?.phone && req.student.phone.trim() !== "") {
-      siblingProfilesQuery.push({ phone: req.student.phone.trim() });
-    }
+    const phonesSet = new Set();
+    const emailsSet = new Set();
+    const enrollmentsSet = new Set();
+
+    const allRecords = [...(req.students || []), ...(req.student ? [req.student] : [])];
+    allRecords.forEach((s) => {
+      if (s.email && s.email.trim()) emailsSet.add(s.email.toLowerCase().trim());
+      if (s.phone && s.phone.trim()) phonesSet.add(s.phone.trim());
+      if (s.parentPhone && s.parentPhone.trim()) phonesSet.add(s.parentPhone.trim());
+      if (s.enrollmentNumber) enrollmentsSet.add(s.enrollmentNumber);
+    });
+
+    emailsSet.forEach((e) => siblingProfilesQuery.push({ email: e }));
+    phonesSet.forEach((p) => {
+      siblingProfilesQuery.push({ phone: p });
+      siblingProfilesQuery.push({ parentPhone: p });
+      const clean = p.replace(/\D/g, "");
+      if (clean.length >= 7) {
+        const last10 = clean.slice(-10);
+        siblingProfilesQuery.push({ phone: new RegExp(last10 + "$") });
+        siblingProfilesQuery.push({ parentPhone: new RegExp(last10 + "$") });
+      }
+    });
+    enrollmentsSet.forEach((enr) => siblingProfilesQuery.push({ enrollmentNumber: enr }));
 
     let siblingProfiles = [];
     if (siblingProfilesQuery.length > 0) {
       const allSiblingStudents = await Student.find({
         $or: siblingProfilesQuery
-      }).select("name enrollmentNumber email phone");
+      }).select("name enrollmentNumber email phone parentPhone user");
 
       const profilesMap = new Map();
       allSiblingStudents.forEach((s) => {
@@ -1896,6 +1914,8 @@ export const getStudentPortalData = async (req, res) => {
           profilesMap.set(s.enrollmentNumber, {
             name: s.name,
             enrollmentNumber: s.enrollmentNumber,
+            email: s.email || "",
+            phone: s.phone || s.parentPhone || "",
           });
         }
       });
