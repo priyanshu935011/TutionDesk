@@ -241,6 +241,16 @@ export function readFallbackData(tableName) {
   }
 }
 
+export function toValidUUID(str) {
+  if (!str) return crypto.randomUUID();
+  const s = String(str).trim();
+  if (/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s)) {
+    return s;
+  }
+  const hash = crypto.createHash("md5").update(s).digest("hex");
+  return `${hash.substring(0, 8)}-${hash.substring(8, 12)}-4${hash.substring(13, 16)}-a${hash.substring(17, 20)}-${hash.substring(20, 32)}`;
+}
+
 export function writeFallbackData(tableName, data) {
   try {
     const filePath = getFallbackFile(tableName);
@@ -1404,6 +1414,17 @@ class SupabaseModel {
         else if (dbKey === "batch") dbKey = "batch_id";
         else if (dbKey === "institute") dbKey = "institute_id";
       }
+      if (this.tableName === "video_release_students") {
+        if (dbKey === "release") dbKey = "release_id";
+        else if (dbKey === "student") dbKey = "student_id";
+        else if (dbKey === "video") dbKey = "video_id";
+      }
+      if (this.tableName === "video_releases") {
+        if (dbKey === "release") dbKey = "id";
+        else if (dbKey === "video") dbKey = "video_id";
+        else if (dbKey === "teacher") dbKey = "teacher_id";
+        else if (dbKey === "institute") dbKey = "institute_id";
+      }
 
       if (val === null) {
         q = q.is(dbKey, null);
@@ -1607,6 +1628,33 @@ class SupabaseModel {
     if (this.tableName === "video_playlist_items") {
       if (payload.playlist && !payload.playlist_id) payload.playlist_id = payload.playlist;
       if (payload.video && !payload.video_id) payload.video_id = payload.video;
+    }
+
+    if (this.tableName === "video_release_students") {
+      const rawRel = payload.release_id || payload.release;
+      if (rawRel) {
+        payload.release_id = toValidUUID(rawRel);
+      }
+      payload.video_id = String(payload.video_id || payload.video || "").trim();
+      payload.student_id = String(payload.student_id || payload.student || "").trim();
+      delete payload.release;
+      delete payload.student;
+      delete payload.video;
+    }
+
+    if (this.tableName === "video_releases") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+      }
+      if (payload.teacher || payload.teacher_id) {
+        payload.teacher_id = toValidUUID(payload.teacher_id || payload.teacher);
+      }
+      if (payload.video || payload.video_id) {
+        payload.video_id = String(payload.video_id || payload.video || "").trim();
+      }
+      delete payload.institute;
+      delete payload.teacher;
+      delete payload.video;
     }
 
     let attempt = 0;

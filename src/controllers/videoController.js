@@ -14,7 +14,7 @@ import User from "../models/User.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern, flushMemoryCache } from "../utils/cache.js";
 import cloudinary from "../utils/cloudinary.js";
-import { supabase, readFallbackData, writeFallbackData, syncVideoFallback } from "../utils/supabaseModel.js";
+import { supabase, readFallbackData, writeFallbackData, syncVideoFallback, toValidUUID } from "../utils/supabaseModel.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -1579,11 +1579,14 @@ export const createVideoRelease = async (req, res) => {
       for (const sId of studentIds) {
         const relIdStr = String(release._id || release.id || release).trim();
         const sIdStr = String(typeof sId === "object" ? sId._id || sId.id || sId : sId).trim();
+        const validRelUuid = toValidUUID(relIdStr);
 
         try {
           await VideoReleaseStudent.create({
             release: relIdStr,
-            release_id: relIdStr,
+            release_id: validRelUuid,
+            video: vId,
+            video_id: vId,
             student: sIdStr,
             student_id: sIdStr,
           });
@@ -1593,19 +1596,27 @@ export const createVideoRelease = async (req, res) => {
 
         try {
           if (supabase) {
-            await supabase.from("video_release_students").insert({
-              release_id: relIdStr,
+            const { error: sbErr } = await supabase.from("video_release_students").insert({
+              release_id: validRelUuid,
+              video_id: vId,
               student_id: sIdStr,
             });
+            if (sbErr) {
+              console.error("[Supabase Direct Insert Error video_release_students]:", sbErr);
+            }
           }
-        } catch (_) {}
+        } catch (sbEx) {
+          console.error("[Supabase Direct Insert Exception video_release_students]:", sbEx);
+        }
 
         try {
           const fallbackRelStudents = readFallbackData("video_release_students");
           fallbackRelStudents.push({
             _id: `vrs_${Date.now()}_${Math.random().toString(36).substring(7)}`,
             release: relIdStr,
-            release_id: relIdStr,
+            release_id: validRelUuid,
+            video: vId,
+            video_id: vId,
             student: sIdStr,
             student_id: sIdStr,
           });
