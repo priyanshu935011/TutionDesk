@@ -1614,6 +1614,11 @@ export const markBatchAttendance = async (req, res) => {
 
 export const getStudentPortalData = async (req, res) => {
   try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+
     const studentEnrollment = req.student?.enrollmentNumber || req.students[0]?.enrollmentNumber || req.studentEmail;
     const cacheKey = `student:dashboard:${studentEnrollment}`;
     

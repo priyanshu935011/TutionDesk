@@ -21,6 +21,14 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(protectStudent);
 
+router.use((req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+  next();
+});
+
 router.get("/dashboard", getStudentPortalData);
 router.get("/notes/:id/download", downloadStudentNote);
 router.get("/notifications", getStudentNotifications);
