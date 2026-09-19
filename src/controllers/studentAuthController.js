@@ -205,7 +205,7 @@ export const studentLogin = async (req, res) => {
               name: activeInstitute.name,
               brandingEnabled: activeInstitute.brandingEnabled !== false,
               logoUrl: (activeInstitute.brandingEnabled !== false) ? (activeInstitute.logoUrl || null) : null,
-              themeColor: (activeInstitute.brandingEnabled !== false) ? (activeInstitute.themeColor || "#ff0fd3") : "#ff0fd3",
+              themeColor: (activeInstitute.brandingEnabled !== false) ? (activeInstitute.themeColor || "#4C3FBE") : "#4C3FBE",
             }
           : null,
       },
