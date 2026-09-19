@@ -12,6 +12,7 @@ import Notice from "../models/Notice.js";
 import VideoLecture from "../models/VideoLecture.js";
 import VideoRelease from "../models/VideoRelease.js";
 import VideoReleaseStudent from "../models/VideoReleaseStudent.js";
+import { supabase, readFallbackData, toValidUUID } from "../utils/supabaseModel.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
@@ -1967,6 +1968,7 @@ export const getStudentVideos = async (req, res) => {
     for (const student of students) {
       const currentBatchIdVal = student.batch?._id || student.batch;
       const studentId = student._id;
+      const sIdStr = String(student._id || student.id || "").trim();
 
       // 1. Direct target audience videos
       const rawVideos = await VideoLecture.find({
@@ -1985,20 +1987,61 @@ export const getStudentVideos = async (req, res) => {
 
       // 2. Educator released videos for student
       try {
+        const relIds = [];
+        const directVideoIds = [];
+
+        // 2a. Query VideoReleaseStudent Mongoose model
         const releaseMappings = await VideoReleaseStudent.find({
           $or: [
             { student: studentId },
-            { student_id: String(studentId) },
-            { student: String(studentId) },
+            { student_id: sIdStr },
+            { student: sIdStr },
           ],
-        }).select("release release_id");
-        const releaseIds = releaseMappings.map((m) => m.release || m.release_id).filter(Boolean);
+        });
 
-        if (releaseIds.length > 0) {
+        for (const m of releaseMappings || []) {
+          if (m.release_id) relIds.push(String(m.release_id));
+          if (m.release) relIds.push(String(m.release));
+          if (m.video_id) directVideoIds.push(String(m.video_id));
+          if (m.video) directVideoIds.push(String(m.video));
+        }
+
+        // 2b. Query Supabase table video_release_students directly
+        try {
+          if (supabase) {
+            const { data: sbVrs } = await supabase
+              .from("video_release_students")
+              .select("release_id, video_id, student_id")
+              .eq("student_id", sIdStr);
+
+            if (Array.isArray(sbVrs)) {
+              for (const r of sbVrs) {
+                if (r.release_id) relIds.push(String(r.release_id));
+                if (r.video_id) directVideoIds.push(String(r.video_id));
+              }
+            }
+          }
+        } catch (_) {}
+
+        // 2c. Query fallback JSON storage for video_release_students
+        try {
+          const fallbackVrs = readFallbackData("video_release_students");
+          for (const item of fallbackVrs || []) {
+            const itemStudentId = String(item.student_id || item.student || "").trim();
+            if (itemStudentId === sIdStr) {
+              if (item.release_id || item.release) relIds.push(String(item.release_id || item.release));
+              if (item.video_id || item.video) directVideoIds.push(String(item.video_id || item.video));
+            }
+          }
+        } catch (_) {}
+
+        // 2d. Fetch active VideoRelease records
+        const cleanRelIds = Array.from(new Set(relIds.filter(Boolean)));
+        if (cleanRelIds.length > 0) {
           const activeReleases = await VideoRelease.find({
             $or: [
-              { _id: { $in: releaseIds } },
-              { id: { $in: releaseIds } },
+              { _id: { $in: cleanRelIds } },
+              { id: { $in: cleanRelIds } },
             ],
             status: "ACTIVE",
             revokedAt: null,
@@ -2006,11 +2049,34 @@ export const getStudentVideos = async (req, res) => {
             $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
           }).populate("video");
 
-          activeReleases.forEach((r) => {
-            if (r.video && (r.video.status === "READY" || r.video.status === "active") && !r.video.isArchived) {
-              videosList.push(r.video);
+          for (const r of activeReleases || []) {
+            if (r.video) {
+              const vObj = typeof r.video.toObject === "function" ? r.video.toObject() : r.video;
+              if ((vObj.status === "READY" || vObj.status === "active") && !vObj.isArchived) {
+                if (r.expiresAt || r.expires_at) {
+                  vObj.expiryDate = r.expiresAt || r.expires_at;
+                }
+                videosList.push(vObj);
+              }
+            } else if (r.video_id || r.video) {
+              directVideoIds.push(String(r.video_id || r.video));
             }
+          }
+        }
+
+        // 2e. Fetch video lectures directly by collected video_ids
+        const cleanDirectVideoIds = Array.from(new Set(directVideoIds.filter(Boolean)));
+        if (cleanDirectVideoIds.length > 0) {
+          const relVideos = await VideoLecture.find({
+            $or: [
+              { _id: { $in: cleanDirectVideoIds } },
+              { id: { $in: cleanDirectVideoIds } },
+              { bunnyVideoId: { $in: cleanDirectVideoIds } },
+            ],
+            isArchived: { $ne: true },
           });
+
+          videosList.push(...relVideos);
         }
       } catch (relErr) {
         console.error("Error fetching release videos in getStudentVideos:", relErr);
@@ -2019,21 +2085,31 @@ export const getStudentVideos = async (req, res) => {
 
     const recordedLecturesMap = new Map();
     videosList
-      .filter((v) => (v.status === "active" || v.status === "READY") && (!v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime()))
+      .filter((v) => {
+        if (!v) return false;
+        const st = (v.status || "").toLowerCase();
+        const isActiveOrReady = st === "active" || st === "ready" || st === "";
+        const notExpired = !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime();
+        return isActiveOrReady && notExpired && !v.isArchived;
+      })
       .forEach((v) => {
-        recordedLecturesMap.set(String(v._id), {
-          _id: v._id,
-          title: v.title,
-          description: v.description,
-          bunnyVideoId: v.bunnyVideoId,
-          videoUrl: v.videoUrl,
-          hlsUrl: v.hlsUrl,
-          thumbnailUrl: v.thumbnailUrl,
-          durationSeconds: v.durationSeconds,
-          fileSizeBytes: v.fileSizeBytes,
-          createdAt: v.createdAt,
-          expiryDate: v.expiryDate,
-        });
+        const vIdStr = String(v._id || v.id || v.bunnyVideoId || "");
+        if (vIdStr) {
+          recordedLecturesMap.set(vIdStr, {
+            _id: v._id || v.id,
+            title: v.title,
+            description: v.description || "",
+            playlist: v.playlist || "",
+            bunnyVideoId: v.bunnyVideoId,
+            videoUrl: v.videoUrl,
+            hlsUrl: v.hlsUrl,
+            thumbnailUrl: v.thumbnailUrl,
+            durationSeconds: v.durationSeconds || 0,
+            fileSizeBytes: v.fileSizeBytes || 0,
+            createdAt: v.createdAt,
+            expiryDate: v.expiryDate,
+          });
+        }
       });
 
     return res.json({ success: true, recordedLectures: Array.from(recordedLecturesMap.values()) });
