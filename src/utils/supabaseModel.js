@@ -20,8 +20,8 @@ const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
 const BATCHES_METADATA_FILE = path.join(FALLBACK_DIR, "batches_metadata.json");
 
 const uploadMetadataFile = (filename, contentString) => {
-  if (filename && filename.toLowerCase().includes("video")) {
-    return; // Video operations execute strictly from database tables (no bucket storage)
+  if (filename && (filename.toLowerCase().includes("video") || filename.toLowerCase().includes("note"))) {
+    return; // Video and notes operations execute strictly from database tables (no bucket storage)
   }
   const bucketName = process.env.SUPABASE_BUCKET || "notes";
   supabase.storage
@@ -1698,7 +1698,10 @@ class SupabaseModel {
         .maybeSingle();
 
       if (error && error.message) {
-        if (
+        const strictTables = ["notes", "institutes", "students", "batches"];
+        const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
+
+        if (!isStrictTable && (
           error.code === "42P01" ||
           error.code === "PGRST205" ||
           error.code === "22P02" ||
@@ -1707,7 +1710,7 @@ class SupabaseModel {
           error.message.includes("invalid input syntax for type uuid") ||
           error.message.includes("Could not find the table") ||
           (error.message.includes("relation") && error.message.includes("does not exist"))
-        ) {
+        )) {
           console.warn(`Table "${this.tableName}" constraint error (${error.code || error.message}). Dynamically switching to local fallback store.`);
           MISSING_TABLES.add(this.tableName);
           return this.create(doc);

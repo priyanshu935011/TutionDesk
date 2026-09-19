@@ -1126,6 +1126,7 @@ export const uploadNote = async (req, res) => {
     };
 
     let noteData = null;
+    let finalError = null;
     try {
       const { data: nData, error: noteError } = await sb
         .from("notes")
@@ -1135,7 +1136,7 @@ export const uploadNote = async (req, res) => {
 
       if (noteError) {
         console.error("Supabase notes insert error:", noteError.message);
-        // If batch_id FK failed, retry with batch_id = null while keeping batch_ids jsonb intact!
+        // Retry with batch_id = null if batch_id FK failed
         const fallbackPayload = { ...notePayload, batch_id: null };
         const { data: retryData, error: retryErr } = await sb
           .from("notes")
@@ -1144,7 +1145,8 @@ export const uploadNote = async (req, res) => {
           .maybeSingle();
 
         if (retryErr) {
-          console.error("Supabase notes fallback insert error:", retryErr.message);
+          console.error("Supabase notes retry insert error:", retryErr.message);
+          finalError = retryErr;
         } else {
           noteData = retryData;
         }
@@ -1153,28 +1155,13 @@ export const uploadNote = async (req, res) => {
       }
     } catch (e) {
       console.error("Supabase insert exception:", e.message);
+      finalError = e;
     }
 
-    // Only fallback to Note.create if direct Supabase insert did not complete
     if (!noteData) {
-      try {
-        await Note.create({
-          institute: instituteId,
-          createdBy: req.user._id,
-          title: title.trim(),
-          pdfUrl: secure_url,
-          pdfPublicId: public_id,
-          targetType: targetType || "batch",
-          batch: primaryBatchId,
-          batches: resolvedBatchIds,
-          students: resolvedStudentIds,
-          category: noteCategory,
-          type: noteCategory,
-          fileSizeBytes: fileSizeVal,
-        });
-      } catch (mErr) {
-        console.error("MongoDB note sync error:", mErr.message);
-      }
+      return res.status(500).json({
+        message: "Failed to insert record into notes table: " + (finalError?.message || "Unknown DB error")
+      });
     }
 
     // Update institute used storage directly in DB for uploaded note
