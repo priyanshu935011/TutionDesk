@@ -1630,22 +1630,22 @@ export const getStudentSyncData = async (req, res) => {
     }
 
     const students = req.students || (req.student ? [req.student] : []);
-    const classes = [];
+    const siblings = [];
 
     for (const student of students) {
       let institute = await Institute.findById(student.user).select(
-        "_id name status subscriptionEnd brandingEnabled logoUrl themeColor studentCustomFields allowedFeatures quizFeatureEnabled recordedLecturesFeatureEnabled adminUser"
+        "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser"
       );
       if (!institute) {
         institute = await Institute.findOne({ adminUser: student.user }).select(
-          "_id name status subscriptionEnd brandingEnabled logoUrl themeColor studentCustomFields allowedFeatures quizFeatureEnabled recordedLecturesFeatureEnabled adminUser"
+          "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser"
         );
       }
       if (!institute) {
         const uDoc = await User.findById(student.user).select("institute");
         if (uDoc && uDoc.institute) {
           institute = await Institute.findById(uDoc.institute).select(
-            "_id name status subscriptionEnd brandingEnabled logoUrl themeColor studentCustomFields allowedFeatures quizFeatureEnabled recordedLecturesFeatureEnabled adminUser"
+            "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser"
           );
         }
       }
@@ -1686,7 +1686,7 @@ export const getStudentSyncData = async (req, res) => {
       for (const currentBatchItem of uniqueBatches) {
         let batch = typeof currentBatchItem === "object" ? currentBatchItem : null;
         if (!batch && currentBatchItem && currentBatchItem !== "unassigned") {
-          batch = await Batch.findById(currentBatchItem).populate("teacher", "name email");
+          batch = await Batch.findById(currentBatchItem).select("name scheduleDays startTime endTime teacher");
         }
 
         let teacherName = academyAdmin ? academyAdmin.name : institute.name;
@@ -1703,7 +1703,8 @@ export const getStudentSyncData = async (req, res) => {
 
         const currentBatchIdVal = batch ? (batch._id || batch.id) : null;
 
-        const [notes, notices] = await Promise.all([
+        // Fetch top 3 notes & notices for fast homepage preview summary
+        const [notes, notices, totalNotesCount, totalNoticesCount] = await Promise.all([
           Note.find({
             institute: instituteId,
             $or: [
@@ -1714,8 +1715,9 @@ export const getStudentSyncData = async (req, res) => {
               { targetType: null, batch: null }
             ],
           })
-            .select("_id title fileUrl subject createdAt")
-            .sort({ createdAt: -1 }),
+            .select("_id title subject createdAt fileUrl")
+            .sort({ createdAt: -1 })
+            .limit(3),
           Notice.find({
             institute: instituteId,
             $or: [
@@ -1725,7 +1727,30 @@ export const getStudentSyncData = async (req, res) => {
               { targetType: "student", students: student._id },
               { targetType: null },
             ],
-          }).sort({ createdAt: -1 }),
+          })
+            .select("_id title content noticeType createdAt holidayDate originalTime rescheduledDate rescheduledTime")
+            .sort({ createdAt: -1 })
+            .limit(3),
+          Note.countDocuments({
+            institute: instituteId,
+            $or: [
+              { targetType: "batch", batch: currentBatchIdVal },
+              { targetType: "batch", batch: null },
+              { targetType: "student", students: student._id },
+              { targetType: null, batch: currentBatchIdVal },
+              { targetType: null, batch: null }
+            ],
+          }),
+          Notice.countDocuments({
+            institute: instituteId,
+            $or: [
+              { targetType: "all" },
+              { targetType: "batch", batches: currentBatchIdVal },
+              { targetType: "batch", batch: currentBatchIdVal },
+              { targetType: "student", students: student._id },
+              { targetType: null },
+            ],
+          }),
         ]);
 
         const rawAttendance = student.attendanceRecords || student.attendance || [];
@@ -1733,12 +1758,27 @@ export const getStudentSyncData = async (req, res) => {
           ? rawAttendance.filter((a) => !a.batchId || String(a.batchId) === String(currentBatchIdVal))
           : rawAttendance;
 
-        const totalFees = Number(student.totalFees || 0);
-        const paidAmount = (student.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-        const pendingAmount = Math.max(0, totalFees - paidAmount);
+        const totalClasses = batchAttendanceRecords.length;
+        const presentCount = batchAttendanceRecords.filter((a) => a.status === "present").length;
+        const absentCount = batchAttendanceRecords.filter((a) => a.status === "absent").length;
+        const attendancePercentage = totalClasses > 0 ? Number(((presentCount / totalClasses) * 100).toFixed(1)) : 100;
 
-        classes.push({
+        const totalFees = Number(student.totalFees || 0);
+        const paidFees = (student.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        const pendingFees = Math.max(0, totalFees - paidFees);
+
+        const timetable = batch
+          ? {
+              batchName: batch.name,
+              scheduleDays: batch.scheduleDays || [],
+              startTime: batch.startTime,
+              endTime: batch.endTime,
+            }
+          : null;
+
+        siblings.push({
           studentId: student._id,
+          enrollmentNumber: student.enrollmentNumber,
           student: {
             id: student._id,
             name: student.name,
@@ -1746,53 +1786,46 @@ export const getStudentSyncData = async (req, res) => {
             phone: student.phone,
             parentName: student.parentName || "",
             parentPhone: student.parentPhone || "",
-            address: student.address || "",
-            profilePicture: student.profilePicture || "",
             enrollmentNumber: student.enrollmentNumber,
-            batch: batch || student.batch,
-            paidAmount: paidAmount,
-            pendingAmount: pendingAmount,
-            totalFees: totalFees,
-            feePlanType: student.feePlanType,
-            paymentHistory: student.paymentHistory || [],
-            dueDate: student.dueDate,
+            profilePicture: student.profilePicture || "",
           },
           teacherName,
           instituteName: institute.name,
           batchName: batch ? batch.name : "Unassigned",
-          timetable: batch
-            ? {
-                batchName: batch.name,
-                scheduleDays: batch.scheduleDays || [],
-                startTime: batch.startTime,
-                endTime: batch.endTime,
-              }
-            : null,
-          feesHistory: student.paymentHistory || [],
-          attendance: batchAttendanceRecords,
-          notes: notes || [],
-          testResults: [],
-          studentCustomFields: institute.studentCustomFields || [],
-          notices: (notices || []).map((n) => ({
-            _id: n._id,
-            title: n.title,
-            content: n.content,
-            noticeType: n.noticeType || "general",
-            targetType: n.targetType,
-            createdAt: n.createdAt,
-            holidayDate: n.holidayDate,
-            originalTime: n.originalTime,
-            rescheduledDate: n.rescheduledDate,
-            rescheduledTime: n.rescheduledTime,
-          })),
-          quizzes: [],
-          quizFeatureEnabled: institute.quizFeatureEnabled !== false,
-          recordedLectures: [],
-          recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled !== false,
           brandingEnabled: institute.brandingEnabled !== false,
           logoUrl: (institute.brandingEnabled !== false) ? (institute.logoUrl || null) : null,
           themeColor: (institute.brandingEnabled !== false) ? (institute.themeColor || "#4C3FBE") : "#4C3FBE",
           allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+
+          // Clean Summary Section requested by user
+          summary: {
+            enrollmentNumber: student.enrollmentNumber,
+            attendance: {
+              totalClasses,
+              presentCount,
+              absentCount,
+              attendancePercentage,
+            },
+            fees: {
+              totalFees,
+              paidFees,
+              pendingFees,
+              feePlanType: student.feePlanType || "monthly",
+              dueDate: student.dueDate || null,
+            },
+            studyNotesCount: totalNotesCount,
+            noticeBoardCount: totalNoticesCount,
+            classSchedule: timetable,
+          },
+
+          // Homepage Lightweight Previews:
+          attendance: batchAttendanceRecords,
+          paidAmount: paidFees,
+          pendingAmount: pendingFees,
+          totalFees: totalFees,
+          notes: notes || [],
+          notices: notices || [],
+          timetable: timetable,
         });
       }
     }
@@ -1847,56 +1880,19 @@ export const getStudentSyncData = async (req, res) => {
       console.error("Error fetching sibling profiles in getStudentSyncData:", siblingErr);
     }
 
-    if (classes.length === 0 && students.length > 0) {
-      const s = students[0];
-      let inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor studentCustomFields");
-      if (!inst) {
-        inst = await Institute.findOne({ adminUser: s.user }).select("name brandingEnabled logoUrl themeColor studentCustomFields");
-      }
-      if (!inst) {
-        const uDoc = await User.findById(s.user).select("institute");
-        if (uDoc && uDoc.institute) {
-          inst = await Institute.findById(uDoc.institute).select("name brandingEnabled logoUrl themeColor studentCustomFields");
-        }
-      }
-      classes.push({
-        studentId: s._id,
-        student: {
-          id: s._id,
-          name: s.name,
-          email: s.email,
-          phone: s.phone,
-          parentName: s.parentName || "",
-          parentPhone: s.parentPhone || "",
-          address: s.address || "",
-          profilePicture: s.profilePicture || "",
-          enrollmentNumber: s.enrollmentNumber,
-          batch: s.batch,
-          paidAmount: s.paidAmount || 0,
-          pendingAmount: s.pendingAmount || 0,
-          totalFees: s.totalFees || 0,
-          paymentHistory: s.paymentHistory || [],
-        },
-        teacherName: inst ? inst.name : "Tuition Teacher",
-        instituteName: inst ? inst.name : "Classtech",
-        studentCustomFields: inst?.studentCustomFields || [],
-        batchName: s.batch ? s.batch.name : "General Batch",
-        attendance: s.attendanceRecords || [],
-        notes: [],
-        testResults: [],
-        brandingEnabled: inst ? inst.brandingEnabled !== false : false,
-        logoUrl: (inst && inst.brandingEnabled !== false) ? (inst.logoUrl || null) : null,
-        themeColor: (inst && inst.brandingEnabled !== false) ? (inst.themeColor || "#4C3FBE") : "#4C3FBE",
-      });
-    }
+    const responsePayload = {
+      isSyncSummary: true,
+      siblings: siblings,
+      classes: siblings,
+      siblingProfiles: siblingProfiles,
+    };
 
-    const responsePayload = { classes, siblingProfiles };
     await setCache(cacheKey, responsePayload, 300);
 
     return res.json(responsePayload);
   } catch (error) {
     console.error("getStudentSyncData error:", error);
-    return res.status(500).json({ message: "Server error fetching student sync data" });
+    return res.status(500).json({ message: "Server error fetching student sync summary data" });
   }
 };
 
