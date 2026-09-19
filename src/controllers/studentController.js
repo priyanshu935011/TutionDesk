@@ -1612,6 +1612,294 @@ export const markBatchAttendance = async (req, res) => {
   }
 };
 
+export const getStudentSyncData = async (req, res) => {
+  try {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
+
+    const studentEnrollment = req.student?.enrollmentNumber || req.students[0]?.enrollmentNumber || req.studentEmail;
+    const cacheKey = `student:sync:${studentEnrollment}`;
+    
+    if (req.query.nocache !== "true" && req.query.refresh !== "true") {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json(cachedData);
+      }
+    }
+
+    const students = req.students || (req.student ? [req.student] : []);
+    const classes = [];
+
+    for (const student of students) {
+      let institute = await Institute.findById(student.user).select(
+        "_id name status subscriptionEnd brandingEnabled logoUrl themeColor studentCustomFields allowedFeatures quizFeatureEnabled recordedLecturesFeatureEnabled adminUser"
+      );
+      if (!institute) {
+        institute = await Institute.findOne({ adminUser: student.user }).select(
+          "_id name status subscriptionEnd brandingEnabled logoUrl themeColor studentCustomFields allowedFeatures quizFeatureEnabled recordedLecturesFeatureEnabled adminUser"
+        );
+      }
+      if (!institute) {
+        const uDoc = await User.findById(student.user).select("institute");
+        if (uDoc && uDoc.institute) {
+          institute = await Institute.findById(uDoc.institute).select(
+            "_id name status subscriptionEnd brandingEnabled logoUrl themeColor studentCustomFields allowedFeatures quizFeatureEnabled recordedLecturesFeatureEnabled adminUser"
+          );
+        }
+      }
+      if (!institute) continue;
+
+      const isExpired =
+        institute.status !== "active" ||
+        new Date(institute.subscriptionEnd).getTime() < Date.now();
+
+      if (isExpired) continue;
+
+      const academyAdmin = institute.adminUser
+        ? await User.findById(institute.adminUser).select("name email")
+        : null;
+
+      const instituteId = institute._id;
+
+      let rawBatches = [];
+      if (Array.isArray(student.batches) && student.batches.length > 0) {
+        rawBatches.push(...student.batches);
+      }
+      if (student.batch) {
+        rawBatches.push(student.batch);
+      }
+      if (rawBatches.length === 0) {
+        rawBatches = [null];
+      }
+
+      const batchMap = new Map();
+      for (const b of rawBatches) {
+        const bKey = b ? String(b._id || b.id || b) : "unassigned";
+        if (!batchMap.has(bKey)) {
+          batchMap.set(bKey, b);
+        }
+      }
+      const uniqueBatches = Array.from(batchMap.values());
+
+      for (const currentBatchItem of uniqueBatches) {
+        let batch = typeof currentBatchItem === "object" ? currentBatchItem : null;
+        if (!batch && currentBatchItem && currentBatchItem !== "unassigned") {
+          batch = await Batch.findById(currentBatchItem).populate("teacher", "name email");
+        }
+
+        let teacherName = academyAdmin ? academyAdmin.name : institute.name;
+        if (batch && batch.teacher) {
+          if (batch.teacher.name) {
+            teacherName = batch.teacher.name;
+          } else {
+            const teacherUser = await User.findById(batch.teacher).select("name");
+            if (teacherUser) {
+              teacherName = teacherUser.name;
+            }
+          }
+        }
+
+        const currentBatchIdVal = batch ? (batch._id || batch.id) : null;
+
+        const [notes, notices] = await Promise.all([
+          Note.find({
+            institute: instituteId,
+            $or: [
+              { targetType: "batch", batch: currentBatchIdVal },
+              { targetType: "batch", batch: null },
+              { targetType: "student", students: student._id },
+              { targetType: null, batch: currentBatchIdVal },
+              { targetType: null, batch: null }
+            ],
+          })
+            .select("_id title fileUrl subject createdAt")
+            .sort({ createdAt: -1 }),
+          Notice.find({
+            institute: instituteId,
+            $or: [
+              { targetType: "all" },
+              { targetType: "batch", batches: currentBatchIdVal },
+              { targetType: "batch", batch: currentBatchIdVal },
+              { targetType: "student", students: student._id },
+              { targetType: null },
+            ],
+          }).sort({ createdAt: -1 }),
+        ]);
+
+        const rawAttendance = student.attendanceRecords || student.attendance || [];
+        const batchAttendanceRecords = currentBatchIdVal
+          ? rawAttendance.filter((a) => !a.batchId || String(a.batchId) === String(currentBatchIdVal))
+          : rawAttendance;
+
+        const totalFees = Number(student.totalFees || 0);
+        const paidAmount = (student.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        const pendingAmount = Math.max(0, totalFees - paidAmount);
+
+        classes.push({
+          studentId: student._id,
+          student: {
+            id: student._id,
+            name: student.name,
+            email: student.email,
+            phone: student.phone,
+            parentName: student.parentName || "",
+            parentPhone: student.parentPhone || "",
+            address: student.address || "",
+            profilePicture: student.profilePicture || "",
+            enrollmentNumber: student.enrollmentNumber,
+            batch: batch || student.batch,
+            paidAmount: paidAmount,
+            pendingAmount: pendingAmount,
+            totalFees: totalFees,
+            feePlanType: student.feePlanType,
+            paymentHistory: student.paymentHistory || [],
+            dueDate: student.dueDate,
+          },
+          teacherName,
+          instituteName: institute.name,
+          batchName: batch ? batch.name : "Unassigned",
+          timetable: batch
+            ? {
+                batchName: batch.name,
+                scheduleDays: batch.scheduleDays || [],
+                startTime: batch.startTime,
+                endTime: batch.endTime,
+              }
+            : null,
+          feesHistory: student.paymentHistory || [],
+          attendance: batchAttendanceRecords,
+          notes: notes || [],
+          testResults: [],
+          studentCustomFields: institute.studentCustomFields || [],
+          notices: (notices || []).map((n) => ({
+            _id: n._id,
+            title: n.title,
+            content: n.content,
+            noticeType: n.noticeType || "general",
+            targetType: n.targetType,
+            createdAt: n.createdAt,
+            holidayDate: n.holidayDate,
+            originalTime: n.originalTime,
+            rescheduledDate: n.rescheduledDate,
+            rescheduledTime: n.rescheduledTime,
+          })),
+          quizzes: [],
+          quizFeatureEnabled: institute.quizFeatureEnabled !== false,
+          recordedLectures: [],
+          recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled !== false,
+          brandingEnabled: institute.brandingEnabled !== false,
+          logoUrl: (institute.brandingEnabled !== false) ? (institute.logoUrl || null) : null,
+          themeColor: (institute.brandingEnabled !== false) ? (institute.themeColor || "#4C3FBE") : "#4C3FBE",
+          allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+        });
+      }
+    }
+
+    let siblingProfiles = [];
+    try {
+      const siblingProfilesQuery = [];
+      const phonesSet = new Set();
+      const emailsSet = new Set();
+      const enrollmentsSet = new Set();
+
+      const allRecords = [...(req.students || []), ...(req.student ? [req.student] : [])];
+      allRecords.forEach((s) => {
+        if (s && s.email && String(s.email).trim()) emailsSet.add(String(s.email).toLowerCase().trim());
+        if (s && s.phone && String(s.phone).trim()) phonesSet.add(String(s.phone).trim());
+        if (s && s.parentPhone && String(s.parentPhone).trim()) phonesSet.add(String(s.parentPhone).trim());
+        if (s && s.enrollmentNumber) enrollmentsSet.add(String(s.enrollmentNumber).trim());
+      });
+
+      emailsSet.forEach((e) => siblingProfilesQuery.push({ email: e }));
+      phonesSet.forEach((p) => {
+        siblingProfilesQuery.push({ phone: p });
+        siblingProfilesQuery.push({ parentPhone: p });
+        const clean = String(p).replace(/\D/g, "");
+        if (clean.length >= 7) {
+          const last10 = clean.slice(-10);
+          siblingProfilesQuery.push({ phone: { $regex: last10 + "$", $options: "i" } });
+          siblingProfilesQuery.push({ parentPhone: { $regex: last10 + "$", $options: "i" } });
+        }
+      });
+      enrollmentsSet.forEach((enr) => siblingProfilesQuery.push({ enrollmentNumber: enr }));
+
+      if (siblingProfilesQuery.length > 0) {
+        const allSiblingStudents = await Student.find({
+          $or: siblingProfilesQuery
+        }).select("name enrollmentNumber email phone parentPhone user");
+
+        const profilesMap = new Map();
+        allSiblingStudents.forEach((s) => {
+          if (s && s.enrollmentNumber && !profilesMap.has(s.enrollmentNumber)) {
+            profilesMap.set(s.enrollmentNumber, {
+              name: s.name,
+              enrollmentNumber: s.enrollmentNumber,
+              email: s.email || "",
+              phone: s.phone || s.parentPhone || "",
+            });
+          }
+        });
+        siblingProfiles = Array.from(profilesMap.values());
+      }
+    } catch (siblingErr) {
+      console.error("Error fetching sibling profiles in getStudentSyncData:", siblingErr);
+    }
+
+    if (classes.length === 0 && students.length > 0) {
+      const s = students[0];
+      let inst = await Institute.findById(s.user).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+      if (!inst) {
+        inst = await Institute.findOne({ adminUser: s.user }).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+      }
+      if (!inst) {
+        const uDoc = await User.findById(s.user).select("institute");
+        if (uDoc && uDoc.institute) {
+          inst = await Institute.findById(uDoc.institute).select("name brandingEnabled logoUrl themeColor studentCustomFields");
+        }
+      }
+      classes.push({
+        studentId: s._id,
+        student: {
+          id: s._id,
+          name: s.name,
+          email: s.email,
+          phone: s.phone,
+          parentName: s.parentName || "",
+          parentPhone: s.parentPhone || "",
+          address: s.address || "",
+          profilePicture: s.profilePicture || "",
+          enrollmentNumber: s.enrollmentNumber,
+          batch: s.batch,
+          paidAmount: s.paidAmount || 0,
+          pendingAmount: s.pendingAmount || 0,
+          totalFees: s.totalFees || 0,
+          paymentHistory: s.paymentHistory || [],
+        },
+        teacherName: inst ? inst.name : "Tuition Teacher",
+        instituteName: inst ? inst.name : "Classtech",
+        studentCustomFields: inst?.studentCustomFields || [],
+        batchName: s.batch ? s.batch.name : "General Batch",
+        attendance: s.attendanceRecords || [],
+        notes: [],
+        testResults: [],
+        brandingEnabled: inst ? inst.brandingEnabled !== false : false,
+        logoUrl: (inst && inst.brandingEnabled !== false) ? (inst.logoUrl || null) : null,
+        themeColor: (inst && inst.brandingEnabled !== false) ? (inst.themeColor || "#4C3FBE") : "#4C3FBE",
+      });
+    }
+
+    const responsePayload = { classes, siblingProfiles };
+    await setCache(cacheKey, responsePayload, 300);
+
+    return res.json(responsePayload);
+  } catch (error) {
+    console.error("getStudentSyncData error:", error);
+    return res.status(500).json({ message: "Server error fetching student sync data" });
+  }
+};
+
 export const getStudentPortalData = async (req, res) => {
   try {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");

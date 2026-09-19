@@ -3,6 +3,7 @@ import multer from "multer";
 import {
   downloadStudentNote,
   getStudentPortalData,
+  getStudentSyncData,
   getQuizLeaderboard,
   getStudentNotifications,
   markNotificationRead,
@@ -29,6 +30,7 @@ router.use((req, res, next) => {
   next();
 });
 
+router.get("/sync", getStudentSyncData);
 router.get("/dashboard", getStudentPortalData);
 router.get("/notes/:id/download", downloadStudentNote);
 router.get("/notifications", getStudentNotifications);
