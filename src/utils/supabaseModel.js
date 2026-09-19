@@ -1657,6 +1657,36 @@ class SupabaseModel {
       delete payload.video;
     }
 
+    if (this.tableName === "notes") {
+      if (payload.pdf_url && !payload.file_url) payload.file_url = payload.pdf_url;
+      if (payload.pdfUrl && !payload.file_url) payload.file_url = payload.pdfUrl;
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+      }
+      if (payload.batch || payload.batch_id) {
+        const b = payload.batch_id || payload.batch;
+        payload.batch_id = b ? toValidUUID(b) : null;
+      }
+      if (Array.isArray(payload.student_ids || payload.students)) {
+        const stList = payload.student_ids || payload.students;
+        payload.student_ids = stList.map((s) => toValidUUID(typeof s === "object" ? s._id || s.id || s : s));
+      }
+      if (Array.isArray(payload.batch_ids || payload.batches)) {
+        const bList = payload.batch_ids || payload.batches;
+        payload.batch_ids = bList.map((b) => toValidUUID(typeof b === "object" ? b._id || b.id || b : b));
+      }
+      delete payload.pdf_url;
+      delete payload.pdfUrl;
+      delete payload.institute;
+      delete payload.batch;
+      delete payload.batches;
+      delete payload.students;
+      delete payload.created_by;
+      delete payload.createdBy;
+      delete payload.category;
+      delete payload.type;
+    }
+
     let attempt = 0;
     let data = null;
 

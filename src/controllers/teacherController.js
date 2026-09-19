@@ -15,6 +15,7 @@ import {
   streamRemoteFileInline,
 } from "../utils/noteDownload.js";
 import { supabase, supabaseBucket } from "../utils/supabase.js";
+import { toValidUUID } from "../utils/supabaseModel.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 
 import {
@@ -556,7 +557,8 @@ export const getNotes = async (req, res) => {
     let query = sb.from("notes").select("*");
 
     if (req.user.role !== "super_admin") {
-      const validIds = Array.from(new Set([instId, ownerId])).filter((id) => id && id.length > 5 && id !== "[object Object]");
+      const rawValidIds = Array.from(new Set([instId, ownerId])).filter((id) => id && id.length > 5 && id !== "[object Object]");
+      const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
       if (validIds.length > 0) {
         query = query.in("institute_id", validIds);
       }
@@ -1081,18 +1083,20 @@ export const uploadNote = async (req, res) => {
       }
     }
 
+    const validInstUuid = toValidUUID(instituteId);
+    const validBatchUuid = primaryBatchId ? toValidUUID(primaryBatchId) : null;
+    const validStudentUuids = (resolvedStudentIds || []).map((s) => toValidUUID(s));
+    const validBatchUuids = (resolvedBatchIds || []).map((b) => toValidUUID(b));
+
     const notePayload = {
-      institute_id: String(instituteId),
-      created_by: String(req.user._id),
+      institute_id: validInstUuid,
       title: title.trim(),
       file_url: secure_url,
       pdf_public_id: public_id,
       target_type: targetType || "batch",
-      batch_id: targetType === "student" ? null : primaryBatchId,
-      batch_ids: targetType === "student" ? [] : resolvedBatchIds,
-      student_ids: targetType === "student" ? resolvedStudentIds : [],
-      category: noteCategory,
-      type: noteCategory,
+      batch_id: targetType === "student" ? null : validBatchUuid,
+      batch_ids: targetType === "student" ? [] : validBatchUuids,
+      student_ids: targetType === "student" ? validStudentUuids : [],
       file_size_bytes: fileSizeVal,
     };
 
