@@ -1083,18 +1083,43 @@ export const uploadNote = async (req, res) => {
       }
     }
 
-    const validInstUuid = toValidUUID(instituteId);
-    const validBatchUuid = primaryBatchId ? toValidUUID(primaryBatchId) : null;
+    let targetInstUuid = toValidUUID(instituteId);
+    try {
+      const { data: instRow } = await sb
+        .from("institutes")
+        .select("id")
+        .or(`id.eq.${instituteId},admin_user.eq.${instituteId},id.eq.${targetInstUuid}`)
+        .maybeSingle();
+      if (instRow?.id) {
+        targetInstUuid = instRow.id;
+      }
+    } catch (_) {}
+
+    let targetBatchUuid = null;
+    if (targetType !== "student" && primaryBatchId) {
+      const candidateBatchUuid = toValidUUID(primaryBatchId);
+      try {
+        const { data: batchRow } = await sb
+          .from("batches")
+          .select("id")
+          .or(`id.eq.${primaryBatchId},id.eq.${candidateBatchUuid}`)
+          .maybeSingle();
+        if (batchRow?.id) {
+          targetBatchUuid = batchRow.id;
+        }
+      } catch (_) {}
+    }
+
     const validStudentUuids = (resolvedStudentIds || []).map((s) => toValidUUID(s));
     const validBatchUuids = (resolvedBatchIds || []).map((b) => toValidUUID(b));
 
     const notePayload = {
-      institute_id: validInstUuid,
+      institute_id: targetInstUuid,
       title: title.trim(),
       file_url: secure_url,
       pdf_public_id: public_id,
       target_type: targetType || "batch",
-      batch_id: targetType === "student" ? null : validBatchUuid,
+      batch_id: targetBatchUuid,
       batch_ids: targetType === "student" ? [] : validBatchUuids,
       student_ids: targetType === "student" ? validStudentUuids : [],
       file_size_bytes: fileSizeVal,
@@ -1110,19 +1135,16 @@ export const uploadNote = async (req, res) => {
 
       if (noteError) {
         console.error("Supabase notes insert error:", noteError.message);
-        // If unknown column error (e.g., batch_ids missing in Supabase schema),
-        // delete batch_ids and retry ONCE with full batch_id and file_size_bytes intact!
-        const sanitizedPayload = { ...notePayload };
-        delete sanitizedPayload.batch_ids;
-
+        // If batch_id FK failed, retry with batch_id = null while keeping batch_ids jsonb intact!
+        const fallbackPayload = { ...notePayload, batch_id: null };
         const { data: retryData, error: retryErr } = await sb
           .from("notes")
-          .insert(sanitizedPayload)
+          .insert(fallbackPayload)
           .select()
           .maybeSingle();
 
         if (retryErr) {
-          console.error("Supabase notes sanitized insert error:", retryErr.message);
+          console.error("Supabase notes fallback insert error:", retryErr.message);
         } else {
           noteData = retryData;
         }
@@ -1133,24 +1155,26 @@ export const uploadNote = async (req, res) => {
       console.error("Supabase insert exception:", e.message);
     }
 
-    // Sync to MongoDB Note model
-    try {
-      await Note.create({
-        institute: instituteId,
-        createdBy: req.user._id,
-        title: title.trim(),
-        pdfUrl: secure_url,
-        pdfPublicId: public_id,
-        targetType: targetType || "batch",
-        batch: primaryBatchId,
-        batches: resolvedBatchIds,
-        students: resolvedStudentIds,
-        category: noteCategory,
-        type: noteCategory,
-        fileSizeBytes: fileSizeVal,
-      });
-    } catch (mErr) {
-      console.error("MongoDB note sync error:", mErr.message);
+    // Only fallback to Note.create if direct Supabase insert did not complete
+    if (!noteData) {
+      try {
+        await Note.create({
+          institute: instituteId,
+          createdBy: req.user._id,
+          title: title.trim(),
+          pdfUrl: secure_url,
+          pdfPublicId: public_id,
+          targetType: targetType || "batch",
+          batch: primaryBatchId,
+          batches: resolvedBatchIds,
+          students: resolvedStudentIds,
+          category: noteCategory,
+          type: noteCategory,
+          fileSizeBytes: fileSizeVal,
+        });
+      } catch (mErr) {
+        console.error("MongoDB note sync error:", mErr.message);
+      }
     }
 
     // Update institute used storage directly in DB for uploaded note
