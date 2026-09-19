@@ -4,6 +4,11 @@ import {
   downloadStudentNote,
   getStudentPortalData,
   getStudentSyncData,
+  getStudentAttendance,
+  getStudentNotes,
+  getStudentTestMarks,
+  getStudentVideos,
+  getStudentFeePayment,
   getQuizLeaderboard,
   getStudentNotifications,
   markNotificationRead,
@@ -31,6 +36,11 @@ router.use((req, res, next) => {
 });
 
 router.get("/sync", getStudentSyncData);
+router.get("/attendance", getStudentAttendance);
+router.get("/notes", getStudentNotes);
+router.get("/test-marks", getStudentTestMarks);
+router.get("/videos", getStudentVideos);
+router.get("/fee-payment", getStudentFeePayment);
 router.get("/dashboard", getStudentPortalData);
 router.get("/notes/:id/download", downloadStudentNote);
 router.get("/notifications", getStudentNotifications);

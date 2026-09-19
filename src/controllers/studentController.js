@@ -1818,12 +1818,6 @@ export const getStudentSyncData = async (req, res) => {
             classSchedule: timetable,
           },
 
-          // Homepage Lightweight Previews:
-          attendance: batchAttendanceRecords,
-          paidAmount: paidFees,
-          pendingAmount: pendingFees,
-          totalFees: totalFees,
-          notes: notes || [],
           notices: notices || [],
           timetable: timetable,
         });
@@ -1893,6 +1887,151 @@ export const getStudentSyncData = async (req, res) => {
   } catch (error) {
     console.error("getStudentSyncData error:", error);
     return res.status(500).json({ message: "Server error fetching student sync summary data" });
+  }
+};
+
+export const getStudentAttendance = async (req, res) => {
+  try {
+    const students = req.students || (req.student ? [req.student] : []);
+    const attendanceMap = {};
+
+    for (const student of students) {
+      const rawAttendance = student.attendanceRecords || student.attendance || [];
+      attendanceMap[String(student._id)] = rawAttendance;
+    }
+
+    return res.json({ success: true, attendanceMap });
+  } catch (error) {
+    console.error("getStudentAttendance error:", error);
+    return res.status(500).json({ message: "Error fetching attendance" });
+  }
+};
+
+export const getStudentNotes = async (req, res) => {
+  try {
+    const students = req.students || (req.student ? [req.student] : []);
+    const notesList = [];
+
+    for (const student of students) {
+      const currentBatchIdVal = student.batch?._id || student.batch;
+      const studentNotes = await Note.find({
+        institute: student.user,
+        $or: [
+          { targetType: "batch", batch: currentBatchIdVal },
+          { targetType: "batch", batch: null },
+          { targetType: "student", students: student._id },
+          { targetType: null, batch: currentBatchIdVal },
+          { targetType: null, batch: null }
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .populate("batch", "name");
+
+      notesList.push(...studentNotes);
+    }
+
+    const notesMap = new Map();
+    notesList.forEach((n) => notesMap.set(String(n._id), n));
+
+    return res.json({ success: true, notes: Array.from(notesMap.values()) });
+  } catch (error) {
+    console.error("getStudentNotes error:", error);
+    return res.status(500).json({ message: "Error fetching notes" });
+  }
+};
+
+export const getStudentTestMarks = async (req, res) => {
+  try {
+    const students = req.students || (req.student ? [req.student] : []);
+    const studentIds = students.map((s) => s._id);
+
+    const testResults = await TestResult.find({
+      student: { $in: studentIds }
+    }).sort({ createdAt: -1 });
+
+    return res.json({ success: true, testResults });
+  } catch (error) {
+    console.error("getStudentTestMarks error:", error);
+    return res.status(500).json({ message: "Error fetching test marks" });
+  }
+};
+
+export const getStudentVideos = async (req, res) => {
+  try {
+    const students = req.students || (req.student ? [req.student] : []);
+    const videosList = [];
+
+    for (const student of students) {
+      const currentBatchIdVal = student.batch?._id || student.batch;
+      const rawVideos = await VideoLecture.find({
+        institute: student.user,
+        status: "active",
+        $or: [
+          { targetType: "all" },
+          { targetType: "batch", batches: currentBatchIdVal },
+          { targetType: "batch", batches: { $size: 0 } },
+          { targetType: "student", students: student._id },
+          { targetType: null },
+        ],
+      }).sort({ createdAt: -1 });
+
+      videosList.push(...rawVideos);
+    }
+
+    const now = new Date();
+    const recordedLecturesMap = new Map();
+    videosList
+      .filter((v) => !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime())
+      .forEach((v) => {
+        recordedLecturesMap.set(String(v._id), {
+          _id: v._id,
+          title: v.title,
+          description: v.description,
+          bunnyVideoId: v.bunnyVideoId,
+          videoUrl: v.videoUrl,
+          hlsUrl: v.hlsUrl,
+          thumbnailUrl: v.thumbnailUrl,
+          durationSeconds: v.durationSeconds,
+          fileSizeBytes: v.fileSizeBytes,
+          createdAt: v.createdAt,
+          expiryDate: v.expiryDate,
+        });
+      });
+
+    return res.json({ success: true, recordedLectures: Array.from(recordedLecturesMap.values()) });
+  } catch (error) {
+    console.error("getStudentVideos error:", error);
+    return res.status(500).json({ message: "Error fetching video lectures" });
+  }
+};
+
+export const getStudentFeePayment = async (req, res) => {
+  try {
+    const students = req.students || (req.student ? [req.student] : []);
+    const feesMap = {};
+
+    for (const student of students) {
+      const totalFees = Number(student.totalFees || 0);
+      const paymentHistory = student.paymentHistory || [];
+      const paidAmount = paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const pendingAmount = Math.max(0, totalFees - paidAmount);
+
+      feesMap[String(student._id)] = {
+        studentId: student._id,
+        enrollmentNumber: student.enrollmentNumber,
+        totalFees,
+        paidAmount,
+        pendingAmount,
+        paymentHistory,
+        feePlanType: student.feePlanType,
+        dueDate: student.dueDate,
+      };
+    }
+
+    return res.json({ success: true, fees: feesMap });
+  } catch (error) {
+    console.error("getStudentFeePayment error:", error);
+    return res.status(500).json({ message: "Error fetching fee payment details" });
   }
 };
 
