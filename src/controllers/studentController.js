@@ -1876,50 +1876,54 @@ export const getStudentPortalData = async (req, res) => {
     }
 
     // Query all sibling profiles sharing same email, phone, parentPhone, or enrollmentNumber
-    const siblingProfilesQuery = [];
-    const phonesSet = new Set();
-    const emailsSet = new Set();
-    const enrollmentsSet = new Set();
-
-    const allRecords = [...(req.students || []), ...(req.student ? [req.student] : [])];
-    allRecords.forEach((s) => {
-      if (s.email && s.email.trim()) emailsSet.add(s.email.toLowerCase().trim());
-      if (s.phone && s.phone.trim()) phonesSet.add(s.phone.trim());
-      if (s.parentPhone && s.parentPhone.trim()) phonesSet.add(s.parentPhone.trim());
-      if (s.enrollmentNumber) enrollmentsSet.add(s.enrollmentNumber);
-    });
-
-    emailsSet.forEach((e) => siblingProfilesQuery.push({ email: e }));
-    phonesSet.forEach((p) => {
-      siblingProfilesQuery.push({ phone: p });
-      siblingProfilesQuery.push({ parentPhone: p });
-      const clean = p.replace(/\D/g, "");
-      if (clean.length >= 7) {
-        const last10 = clean.slice(-10);
-        siblingProfilesQuery.push({ phone: new RegExp(last10 + "$") });
-        siblingProfilesQuery.push({ parentPhone: new RegExp(last10 + "$") });
-      }
-    });
-    enrollmentsSet.forEach((enr) => siblingProfilesQuery.push({ enrollmentNumber: enr }));
-
     let siblingProfiles = [];
-    if (siblingProfilesQuery.length > 0) {
-      const allSiblingStudents = await Student.find({
-        $or: siblingProfilesQuery
-      }).select("name enrollmentNumber email phone parentPhone user");
+    try {
+      const siblingProfilesQuery = [];
+      const phonesSet = new Set();
+      const emailsSet = new Set();
+      const enrollmentsSet = new Set();
 
-      const profilesMap = new Map();
-      allSiblingStudents.forEach((s) => {
-        if (!profilesMap.has(s.enrollmentNumber)) {
-          profilesMap.set(s.enrollmentNumber, {
-            name: s.name,
-            enrollmentNumber: s.enrollmentNumber,
-            email: s.email || "",
-            phone: s.phone || s.parentPhone || "",
-          });
+      const allRecords = [...(req.students || []), ...(req.student ? [req.student] : [])];
+      allRecords.forEach((s) => {
+        if (s && s.email && String(s.email).trim()) emailsSet.add(String(s.email).toLowerCase().trim());
+        if (s && s.phone && String(s.phone).trim()) phonesSet.add(String(s.phone).trim());
+        if (s && s.parentPhone && String(s.parentPhone).trim()) phonesSet.add(String(s.parentPhone).trim());
+        if (s && s.enrollmentNumber) enrollmentsSet.add(String(s.enrollmentNumber).trim());
+      });
+
+      emailsSet.forEach((e) => siblingProfilesQuery.push({ email: e }));
+      phonesSet.forEach((p) => {
+        siblingProfilesQuery.push({ phone: p });
+        siblingProfilesQuery.push({ parentPhone: p });
+        const clean = String(p).replace(/\D/g, "");
+        if (clean.length >= 7) {
+          const last10 = clean.slice(-10);
+          siblingProfilesQuery.push({ phone: { $regex: last10 + "$", $options: "i" } });
+          siblingProfilesQuery.push({ parentPhone: { $regex: last10 + "$", $options: "i" } });
         }
       });
-      siblingProfiles = Array.from(profilesMap.values());
+      enrollmentsSet.forEach((enr) => siblingProfilesQuery.push({ enrollmentNumber: enr }));
+
+      if (siblingProfilesQuery.length > 0) {
+        const allSiblingStudents = await Student.find({
+          $or: siblingProfilesQuery
+        }).select("name enrollmentNumber email phone parentPhone user");
+
+        const profilesMap = new Map();
+        allSiblingStudents.forEach((s) => {
+          if (s && s.enrollmentNumber && !profilesMap.has(s.enrollmentNumber)) {
+            profilesMap.set(s.enrollmentNumber, {
+              name: s.name,
+              enrollmentNumber: s.enrollmentNumber,
+              email: s.email || "",
+              phone: s.phone || s.parentPhone || "",
+            });
+          }
+        });
+        siblingProfiles = Array.from(profilesMap.values());
+      }
+    } catch (siblingErr) {
+      console.error("Error fetching sibling profiles in getStudentPortalData:", siblingErr);
     }
 
         if (classes.length === 0 && students.length > 0) {

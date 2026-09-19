@@ -21,34 +21,36 @@ const protectStudent = async (req, res, next) => {
 
     // Fetch all sibling student records for this identity so portal contains all enrolled profiles
     const siblingQueries = [];
-    if (decoded.email && decoded.email.trim() !== "") {
-      siblingQueries.push({ email: decoded.email.toLowerCase().trim() });
+    if (decoded.email && String(decoded.email).trim() !== "") {
+      siblingQueries.push({ email: String(decoded.email).toLowerCase().trim() });
     }
-    const cleanPhone = decoded.phone ? decoded.phone.replace(/\D/g, "") : "";
-    const cleanParentPhone = decoded.parentPhone ? decoded.parentPhone.replace(/\D/g, "") : "";
+    const phoneStr = decoded.phone ? String(decoded.phone).trim() : "";
+    const parentPhoneStr = decoded.parentPhone ? String(decoded.parentPhone).trim() : "";
+    const cleanPhone = phoneStr.replace(/\D/g, "");
+    const cleanParentPhone = parentPhoneStr.replace(/\D/g, "");
 
-    if (decoded.phone && decoded.phone.trim() !== "") {
-      siblingQueries.push({ phone: decoded.phone.trim() });
-      siblingQueries.push({ parentPhone: decoded.phone.trim() });
+    if (phoneStr !== "") {
+      siblingQueries.push({ phone: phoneStr });
+      siblingQueries.push({ parentPhone: phoneStr });
     }
     if (cleanPhone.length >= 7) {
       const last10 = cleanPhone.slice(-10);
-      siblingQueries.push({ phone: new RegExp(last10 + "$") });
-      siblingQueries.push({ parentPhone: new RegExp(last10 + "$") });
+      siblingQueries.push({ phone: { $regex: last10 + "$", $options: "i" } });
+      siblingQueries.push({ parentPhone: { $regex: last10 + "$", $options: "i" } });
     }
 
-    if (decoded.parentPhone && decoded.parentPhone.trim() !== "") {
-      siblingQueries.push({ phone: decoded.parentPhone.trim() });
-      siblingQueries.push({ parentPhone: decoded.parentPhone.trim() });
+    if (parentPhoneStr !== "") {
+      siblingQueries.push({ phone: parentPhoneStr });
+      siblingQueries.push({ parentPhone: parentPhoneStr });
     }
     if (cleanParentPhone.length >= 7) {
       const last10P = cleanParentPhone.slice(-10);
-      siblingQueries.push({ phone: new RegExp(last10P + "$") });
-      siblingQueries.push({ parentPhone: new RegExp(last10P + "$") });
+      siblingQueries.push({ phone: { $regex: last10P + "$", $options: "i" } });
+      siblingQueries.push({ parentPhone: { $regex: last10P + "$", $options: "i" } });
     }
 
     if (decoded.enrollmentNumber) {
-      siblingQueries.push({ enrollmentNumber: decoded.enrollmentNumber });
+      siblingQueries.push({ enrollmentNumber: String(decoded.enrollmentNumber).trim() });
     }
 
     const query = siblingQueries.length > 0 ? { $or: siblingQueries } : {};
