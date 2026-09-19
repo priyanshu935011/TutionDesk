@@ -1830,7 +1830,7 @@ export const updateBrandingSettings = async (req, res) => {
         {
           brandingEnabled: brandingEnabled !== false,
           name: name ? name.trim() : "Classtech",
-          themeColor: themeColor || "#6366f1",
+          themeColor: themeColor || "#4C3FBE",
           logoUrl: logoUrl || null,
         },
         { new: true }
@@ -1847,7 +1847,7 @@ export const updateBrandingSettings = async (req, res) => {
         name: institute ? institute.name : (name ? name.trim() : "Classtech"),
         brandingEnabled: institute ? (institute.brandingEnabled !== false) : (brandingEnabled !== false),
         logoUrl: institute ? (institute.logoUrl || null) : (logoUrl || null),
-        themeColor: institute ? (institute.themeColor || "#6366f1") : (themeColor || "#6366f1"),
+        themeColor: institute ? (institute.themeColor || "#4C3FBE") : (themeColor || "#4C3FBE"),
       }
     });
   } catch (error) {

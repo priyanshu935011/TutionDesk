@@ -40,7 +40,7 @@ const buildInstituteState = async (user) => {
     quizFeatureEnabled: institute.quizFeatureEnabled !== false,
     brandingEnabled: institute.brandingEnabled !== false,
     logoUrl: institute.logoUrl || null,
-    themeColor: institute.themeColor || "#6366f1",
+    themeColor: institute.themeColor || "#4C3FBE",
     allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
     whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
     studentCustomFields: institute.studentCustomFields || [],
