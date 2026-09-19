@@ -3,14 +3,18 @@ import mongoose from "../utils/supabaseModel.js";
 const videoReleaseStudentSchema = new mongoose.Schema(
   {
     release: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "VideoRelease",
-      required: true,
+    },
+    release_id: {
+      type: String,
     },
     student: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "Student",
-      required: true,
+    },
+    student_id: {
+      type: String,
     },
   },
   {

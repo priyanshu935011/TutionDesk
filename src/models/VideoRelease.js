@@ -3,19 +3,25 @@ import mongoose from "../utils/supabaseModel.js";
 const videoReleaseSchema = new mongoose.Schema(
   {
     institute: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "Institute",
-      required: true,
+    },
+    institute_id: {
+      type: String,
     },
     teacher: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "User",
-      required: true,
+    },
+    teacher_id: {
+      type: String,
     },
     video: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "VideoLecture",
-      required: true,
+    },
+    video_id: {
+      type: String,
     },
     startsAt: {
       type: Date,

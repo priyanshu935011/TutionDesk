@@ -10,6 +10,8 @@ import QuizAttempt from "../models/QuizAttempt.js";
 import SystemSetting from "../models/SystemSetting.js";
 import Notice from "../models/Notice.js";
 import VideoLecture from "../models/VideoLecture.js";
+import VideoRelease from "../models/VideoRelease.js";
+import VideoReleaseStudent from "../models/VideoReleaseStudent.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
@@ -1960,28 +1962,64 @@ export const getStudentVideos = async (req, res) => {
   try {
     const students = req.students || (req.student ? [req.student] : []);
     const videosList = [];
+    const now = new Date();
 
     for (const student of students) {
       const currentBatchIdVal = student.batch?._id || student.batch;
+      const studentId = student._id;
+
+      // 1. Direct target audience videos
       const rawVideos = await VideoLecture.find({
         institute: student.user,
-        status: "active",
+        isArchived: { $ne: true },
         $or: [
           { targetType: "all" },
           { targetType: "batch", batches: currentBatchIdVal },
           { targetType: "batch", batches: { $size: 0 } },
-          { targetType: "student", students: student._id },
+          { targetType: "student", students: studentId },
           { targetType: null },
         ],
       }).sort({ createdAt: -1 });
 
       videosList.push(...rawVideos);
+
+      // 2. Educator released videos for student
+      try {
+        const releaseMappings = await VideoReleaseStudent.find({
+          $or: [
+            { student: studentId },
+            { student_id: String(studentId) },
+            { student: String(studentId) },
+          ],
+        }).select("release release_id");
+        const releaseIds = releaseMappings.map((m) => m.release || m.release_id).filter(Boolean);
+
+        if (releaseIds.length > 0) {
+          const activeReleases = await VideoRelease.find({
+            $or: [
+              { _id: { $in: releaseIds } },
+              { id: { $in: releaseIds } },
+            ],
+            status: "ACTIVE",
+            revokedAt: null,
+            startsAt: { $lte: now },
+            $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+          }).populate("video");
+
+          activeReleases.forEach((r) => {
+            if (r.video && (r.video.status === "READY" || r.video.status === "active") && !r.video.isArchived) {
+              videosList.push(r.video);
+            }
+          });
+        }
+      } catch (relErr) {
+        console.error("Error fetching release videos in getStudentVideos:", relErr);
+      }
     }
 
-    const now = new Date();
     const recordedLecturesMap = new Map();
     videosList
-      .filter((v) => !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime())
+      .filter((v) => (v.status === "active" || v.status === "READY") && (!v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime()))
       .forEach((v) => {
         recordedLecturesMap.set(String(v._id), {
           _id: v._id,

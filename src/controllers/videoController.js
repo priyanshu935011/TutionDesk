@@ -1577,33 +1577,39 @@ export const createVideoRelease = async (req, res) => {
       }
 
       for (const sId of studentIds) {
-        try {
-          const relIdStr = String(release._id || release.id || release).trim();
-          const sIdStr = String(sId).trim();
+        const relIdStr = String(release._id || release.id || release).trim();
+        const sIdStr = String(typeof sId === "object" ? sId._id || sId.id || sId : sId).trim();
 
+        try {
           await VideoReleaseStudent.create({
             release: relIdStr,
+            release_id: relIdStr,
             student: sIdStr,
+            student_id: sIdStr,
           });
+        } catch (vrsErr) {
+          console.error("VideoReleaseStudent.create error:", vrsErr);
+        }
 
-          try {
+        try {
+          if (supabase) {
             await supabase.from("video_release_students").insert({
               release_id: relIdStr,
               student_id: sIdStr,
             });
-          } catch (_) {}
+          }
+        } catch (_) {}
 
-          try {
-            const fallbackRelStudents = readFallbackData("video_release_students");
-            fallbackRelStudents.push({
-              _id: `vrs_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-              release: relIdStr,
-              release_id: relIdStr,
-              student: sIdStr,
-              student_id: sIdStr,
-            });
-            writeFallbackData("video_release_students", fallbackRelStudents);
-          } catch (_) {}
+        try {
+          const fallbackRelStudents = readFallbackData("video_release_students");
+          fallbackRelStudents.push({
+            _id: `vrs_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+            release: relIdStr,
+            release_id: relIdStr,
+            student: sIdStr,
+            student_id: sIdStr,
+          });
+          writeFallbackData("video_release_students", fallbackRelStudents);
         } catch (_) {}
       }
 
