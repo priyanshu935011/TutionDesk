@@ -31,7 +31,7 @@ import {
   buildNoteDownloadFilename,
   streamRemoteFileAsAttachment,
 } from "../utils/noteDownload.js";
-import { supabase, supabaseBucket } from "../utils/supabase.js";
+import { supabaseBucket } from "../utils/supabase.js";
 
 import { getLiveStateForStudent } from "../services/quizRuntime.js";
 
