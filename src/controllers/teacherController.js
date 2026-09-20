@@ -135,8 +135,6 @@ export const getTeacherDashboard = async (req, res) => {
     let batchQuery = { user: { $in: userIds } };
     if (req.query.status) {
       batchQuery.status = req.query.status;
-    } else if (req.query.includeArchived !== "true") {
-      batchQuery.status = { $ne: "archived" };
     }
     let quizQuery = { institute: instituteId };
     let noteQuery = { institute: instituteId };

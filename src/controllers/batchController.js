@@ -40,8 +40,6 @@ export const getBatches = async (req, res) => {
 
     if (req.query.status) {
       query.status = req.query.status;
-    } else if (req.query.includeArchived !== "true") {
-      query.status = { $ne: "archived" };
     }
 
     const [batches, students] = await Promise.all([
