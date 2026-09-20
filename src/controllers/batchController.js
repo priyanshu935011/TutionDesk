@@ -22,12 +22,15 @@ export const getBatches = async (req, res) => {
       req.user.institute?.adminUser,
     ].filter(Boolean);
 
+    const isRefresh = req.query.nocache === "true" || req.query.refresh === "true" || req.query.skipCache === "true";
     const cacheKey = `teacher:batches:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.status}`;
-    if (req.query.nocache !== "true" && req.query.refresh !== "true") {
+    if (!isRefresh) {
       const cached = await getCache(cacheKey);
       if (cached) {
         return res.json(cached);
       }
+    } else {
+      await clearCachePattern("teacher:batches:*");
     }
 
     const query = { user: { $in: userIds } };

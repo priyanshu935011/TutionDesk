@@ -70,15 +70,26 @@ export const clearCachePattern = async (pattern) => {
     }
 
     if (redisClient.isReady) {
-      const keysToDelete = [];
-      for await (const key of redisClient.scanIterator({ MATCH: pattern, COUNT: 100 })) {
-        keysToDelete.push(key);
-      }
-      if (keysToDelete.length > 0) {
-        await redisClient.del(keysToDelete);
+      try {
+        const keysToDelete = [];
+        for await (const key of redisClient.scanIterator({ MATCH: pattern, COUNT: 100 })) {
+          keysToDelete.push(key);
+        }
+        if (keysToDelete.length > 0) {
+          await redisClient.del(keysToDelete);
+        }
+      } catch (scanErr) {
+        try {
+          const keys = await redisClient.keys(pattern);
+          if (keys && keys.length > 0) {
+            await redisClient.del(keys);
+          }
+        } catch (_) {}
       }
     }
-  } catch (err) {}
+  } catch (err) {
+    console.error("clearCachePattern error:", err);
+  }
 };
 
 export const flushMemoryCache = () => {
