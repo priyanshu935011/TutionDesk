@@ -271,6 +271,7 @@ export const invalidateStudentCache = async (studentId) => {
 export const getStudentPersonalInfoById = async (req, res) => {
   try {
     const studentId = req.params.id;
+    const cacheKey = `student:personal:${studentId}`;
     const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
     if (!isRefresh) {
       const cachedData = await getCache(cacheKey);
@@ -292,6 +293,8 @@ export const getStudentPersonalInfoById = async (req, res) => {
 
     const payload = {
       _id: student._id,
+      name: student.name || "",
+      enrollmentNumber: student.enrollmentNumber || "",
       phone: student.phone || "",
       email: student.email || "",
       parentName: student.parentName || "",
