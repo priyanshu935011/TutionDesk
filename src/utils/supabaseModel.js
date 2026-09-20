@@ -1323,12 +1323,44 @@ class SupabaseQuery {
       }
       const dbPayments = paymentsByStudent[doc.id] || [];
       const metaPayments = meta.paymentHistory || [];
-      const combinedPayments = [...dbPayments];
-      for (const mp of metaPayments) {
-        const mpId = String(mp._id || mp.id || "");
-        if (mpId && !combinedPayments.some(p => String(p._id || p.id || "") === mpId)) {
-          combinedPayments.push(mp);
+      let combinedPayments = [];
+      if (dbPayments.length > 0) {
+        combinedPayments = [...dbPayments];
+        for (const mp of metaPayments) {
+          const mpId = String(mp._id || mp.id || "").trim();
+          const mpDateStr = mp.paymentDate || mp.payment_date || "";
+          let mpDay = "";
+          try {
+            if (mpDateStr) mpDay = new Date(mpDateStr).toISOString().substring(0, 10);
+          } catch (_) {}
+
+          const isDuplicate = combinedPayments.some((p) => {
+            const pId = String(p._id || p.id || "").trim();
+            if (mpId && pId && mpId === pId) return true;
+
+            const pDateStr = p.paymentDate || p.payment_date || "";
+            let pDay = "";
+            try {
+              if (pDateStr) pDay = new Date(pDateStr).toISOString().substring(0, 10);
+            } catch (_) {}
+
+            if (
+              Number(p.amount || 0) === Number(mp.amount || 0) &&
+              (p.paymentType || "monthly") === (mp.paymentType || "monthly") &&
+              pDay &&
+              pDay === mpDay
+            ) {
+              return true;
+            }
+            return false;
+          });
+
+          if (!isDuplicate) {
+            combinedPayments.push(mp);
+          }
         }
+      } else {
+        combinedPayments = [...metaPayments];
       }
       doc.paymentHistory = combinedPayments;
       doc.payment_history = combinedPayments;
