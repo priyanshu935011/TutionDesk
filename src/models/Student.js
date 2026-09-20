@@ -160,17 +160,19 @@ const studentSchema = new mongoose.Schema(
       virtuals: true,
       transform: (_, ret) => {
         const paidAmount = (ret.paymentHistory || []).reduce(
-          (sum, payment) => sum + payment.amount,
+          (sum, payment) => sum + Number(payment?.amount || 0),
           0
         );
-        const totalFees = Number(ret.totalFees || 0);
+        const totalFees = Number(ret.totalFees ?? ret.total_fees ?? ret.fees ?? 0);
         const attendanceRecords = ret.attendanceRecords || [];
         const presentCount = attendanceRecords.filter(
           (record) => record.status === "present"
         ).length;
 
+        ret.totalFees = totalFees;
+        ret.total_fees = totalFees;
         ret.paidAmount = paidAmount;
-        ret.pendingAmount = totalFees - paidAmount;
+        ret.pendingAmount = Math.max(0, totalFees - paidAmount);
         ret.attendanceSummary = {
           total: attendanceRecords.length,
           present: presentCount,
@@ -184,11 +186,12 @@ const studentSchema = new mongoose.Schema(
 );
 
 studentSchema.virtual("paidAmount").get(function getPaidAmount() {
-  return (this.paymentHistory || []).reduce((sum, payment) => sum + payment.amount, 0);
+  return (this.paymentHistory || []).reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
 });
 
 studentSchema.virtual("pendingAmount").get(function getPendingAmount() {
-  return Number(this.totalFees || 0) - this.paidAmount;
+  const total = Number(this.totalFees ?? this.total_fees ?? this.fees ?? 0);
+  return Math.max(0, total - this.paidAmount);
 });
 
 const Student = mongoose.model("Student", studentSchema);

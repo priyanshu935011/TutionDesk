@@ -41,8 +41,9 @@ router.post("/fee-reminders", async (req, res) => {
       today.setHours(0, 0, 0, 0);
 
       for (const student of instStudents) {
-        const paid = (student.paymentHistory || []).reduce((sum, p) => sum + p.amount, 0);
-        const pending = student.totalFees - paid;
+        const paid = (student.paymentHistory || []).reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+        const total = Number(student.totalFees ?? student.total_fees ?? student.fees ?? 0);
+        const pending = Math.max(0, total - paid);
 
         const targetPhone = (student.parentPhone && student.parentPhone.trim()) ? student.parentPhone.trim() : student.phone;
 

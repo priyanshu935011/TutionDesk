@@ -53,7 +53,7 @@ export const getDashboard = async (req, res) => {
         const currentMonthPaid = (student.paymentHistory || []).reduce((sum, p) => {
           const pDate = new Date(p.paymentDate || p.payment_date);
           if (pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
-            return sum + p.amount;
+            return sum + Number(p?.amount || 0);
           }
           return sum;
         }, 0);
