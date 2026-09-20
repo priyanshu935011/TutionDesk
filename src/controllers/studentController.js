@@ -37,12 +37,12 @@ import { getLiveStateForStudent } from "../services/quizRuntime.js";
 
 const allowedFeeTypes = ["monthly", "full_course", "partial"];
 
-const addOneMonth = (dateInput) => {
-  if (!dateInput) return null;
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return null;
-  d.setMonth(d.getMonth() + 1);
-  return d.toISOString().split("T")[0];
+const addOneMonth = (dateValue) => {
+  if (!dateValue) return null;
+  const date = new Date(dateValue);
+  if (isNaN(date.getTime())) return null;
+  date.setMonth(date.getMonth() + 1);
+  return date;
 };
 
 const getISTDateStr = (dateInput) => {
@@ -99,12 +99,6 @@ const validateAttendance = (attendanceRecords = []) => {
 const populateStudent = (query) =>
   query.populate("batch", "name scheduleDays startTime endTime")
        .populate("batches", "name scheduleDays startTime endTime");
-
-const addOneMonth = (dateValue) => {
-  const date = new Date(dateValue);
-  date.setMonth(date.getMonth() + 1);
-  return date;
-};
 
 const resolveDueDate = ({ feePlanType, joinedOn, dueDate, feeStatus = "paid" }) => {
   if (feePlanType === "monthly") {
