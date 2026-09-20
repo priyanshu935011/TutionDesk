@@ -210,21 +210,22 @@ export const getTeacherDashboard = async (req, res) => {
     let totalCollectedFees = 0;
     let totalPendingFees = 0;
     if (req.user.role === "institute_admin") {
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth();
-
       for (const student of students) {
-        let collectedThisMonth = 0;
-        for (const payment of student.paymentHistory || []) {
-          const pDate = new Date(payment.paymentDate);
-          if (pDate.getFullYear() === currentYear && pDate.getMonth() === currentMonth) {
-            collectedThisMonth += Number(payment.amount || 0);
-          }
+        const sObj = student.toJSON ? student.toJSON() : student;
+        const total = Number(sObj.totalFees ?? sObj.total_fees ?? sObj.fees ?? 0);
+        const history = sObj.paymentHistory || [];
+        const paidFromHistory = history.reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+        const paid = (sObj.paidAmount !== undefined && sObj.paidAmount !== null && !isNaN(Number(sObj.paidAmount)))
+          ? Math.max(Number(sObj.paidAmount), paidFromHistory)
+          : paidFromHistory;
+        const pending = (sObj.pendingAmount !== undefined && sObj.pendingAmount !== null && !isNaN(Number(sObj.pendingAmount)))
+          ? Number(sObj.pendingAmount)
+          : Math.max(0, total > 0 ? (total - paid) : 0);
+
+        totalCollectedFees += paid;
+        if (pending > 0) {
+          totalPendingFees += pending;
         }
-        totalCollectedFees += collectedThisMonth;
-        const pending = Number(student.pendingAmount ?? (Number(student.totalFees || 0) - Number(student.paidAmount || 0)));
-        totalPendingFees += pending > 0 ? pending : 0;
       }
     }
 

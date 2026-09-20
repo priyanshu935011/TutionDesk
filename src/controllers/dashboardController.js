@@ -47,36 +47,29 @@ export const getDashboard = async (req, res) => {
 
     const summary = students.reduce(
       (totals, student) => {
+        const sObj = student.toJSON ? student.toJSON() : student;
         totals.totalStudents += 1;
-        
-        // Sum payments for the current month only
-        const currentMonthPaid = (student.paymentHistory || []).reduce((sum, p) => {
-          const pDate = new Date(p.paymentDate || p.payment_date);
-          if (pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
-            return sum + Number(p?.amount || 0);
-          }
-          return sum;
-        }, 0);
-        totals.totalFeesCollected += currentMonthPaid;
 
-        // Pending fees: if the student has a pending balance
-        // AND either their due date falls in the current month or earlier, or no due date is set
-        let isDueThisMonthOrEarlier = false;
-        const rawDueDate = student.dueDate || student.due_date;
-        if (rawDueDate) {
-          const dDate = new Date(rawDueDate);
-          isDueThisMonthOrEarlier = (dDate.getFullYear() < currentYear) || 
-                                    (dDate.getFullYear() === currentYear && dDate.getMonth() <= currentMonth);
-        } else {
-          isDueThisMonthOrEarlier = (student.pendingAmount || 0) > 0;
-        }
+        const total = Number(sObj.totalFees ?? sObj.total_fees ?? sObj.fees ?? 0);
+        const history = sObj.paymentHistory || [];
+        const paidFromHistory = history.reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+        const paid = (sObj.paidAmount !== undefined && sObj.paidAmount !== null && !isNaN(Number(sObj.paidAmount)))
+          ? Math.max(Number(sObj.paidAmount), paidFromHistory)
+          : paidFromHistory;
 
-        if (isDueThisMonthOrEarlier && (student.pendingAmount || 0) > 0) {
-          totals.totalPendingFees += (student.pendingAmount || 0);
+        const pending = (sObj.pendingAmount !== undefined && sObj.pendingAmount !== null && !isNaN(Number(sObj.pendingAmount)))
+          ? Number(sObj.pendingAmount)
+          : Math.max(0, total > 0 ? (total - paid) : 0);
+
+        totals.totalFeesCollected += paid;
+        totals.totalCollectedFees += paid;
+
+        if (pending > 0) {
+          totals.totalPendingFees += pending;
           totals.pendingStudents += 1;
         }
 
-        const attendance = student.attendanceRecords || [];
+        const attendance = sObj.attendanceRecords || [];
         totals.totalAttendanceMarked += attendance.length;
         totals.totalPresent += attendance.filter(
           (record) => record.status === "present"
@@ -86,6 +79,7 @@ export const getDashboard = async (req, res) => {
       {
         totalStudents: 0,
         totalFeesCollected: 0,
+        totalCollectedFees: 0,
         totalPendingFees: 0,
         pendingStudents: 0,
         totalAttendanceMarked: 0,
