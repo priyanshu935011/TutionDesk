@@ -558,25 +558,17 @@ export const createStudent = async (req, res) => {
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
     // Verify all target batches exist by _id, id, or name
-    const validObjectIds = targetBatches.filter(tb => mongoose.Types.ObjectId.isValid(tb));
-    const nameOrCustomIds = targetBatches.filter(tb => !mongoose.Types.ObjectId.isValid(tb));
-    const orConditions = [];
-    if (validObjectIds.length > 0) orConditions.push({ _id: { $in: validObjectIds } });
-    if (targetBatches.length > 0) orConditions.push({ id: { $in: targetBatches } });
-    if (nameOrCustomIds.length > 0) orConditions.push({ name: { $in: nameOrCustomIds } });
+    const queryConditions = [
+      { _id: { $in: targetBatches } },
+      { id: { $in: targetBatches } },
+      { name: { $in: targetBatches } }
+    ];
 
     let verifiedBatches = [];
-    if (orConditions.length > 0) {
-      try {
-        verifiedBatches = await Batch.find({
-          $or: [
-            { user: ownerId, $or: orConditions },
-            { $or: orConditions }
-          ]
-        });
-      } catch (err) {
-        console.error("Error verifying batches:", err);
-      }
+    try {
+      verifiedBatches = await Batch.find({ $or: queryConditions });
+    } catch (err) {
+      console.error("Error verifying batches:", err);
     }
 
     const batchMap = new Map();
@@ -584,6 +576,7 @@ export const createStudent = async (req, res) => {
       const bId = String(b._id || b.id);
       batchMap.set(bId, bId);
       if (b.id) batchMap.set(String(b.id), bId);
+      if (b._id) batchMap.set(String(b._id), bId);
       if (b.name) {
         batchMap.set(b.name, bId);
         batchMap.set(b.name.trim().toLowerCase(), bId);
@@ -592,12 +585,13 @@ export const createStudent = async (req, res) => {
 
     const resolvedIds = [];
     for (const tb of targetBatches) {
-      if (batchMap.has(tb)) {
-        resolvedIds.push(batchMap.get(tb));
-      } else if (typeof tb === "string" && batchMap.has(tb.trim().toLowerCase())) {
-        resolvedIds.push(batchMap.get(tb.trim().toLowerCase()));
-      } else if (mongoose.Types.ObjectId.isValid(tb)) {
-        resolvedIds.push(String(tb));
+      const tbStr = String(tb).trim();
+      if (batchMap.has(tbStr)) {
+        resolvedIds.push(batchMap.get(tbStr));
+      } else if (batchMap.has(tbStr.toLowerCase())) {
+        resolvedIds.push(batchMap.get(tbStr.toLowerCase()));
+      } else {
+        resolvedIds.push(tbStr);
       }
     }
 
@@ -606,7 +600,7 @@ export const createStudent = async (req, res) => {
     if (finalBatchIds.length === 0) {
       const fallbackBatch = await Batch.findOne({ user: ownerId }) || await Batch.findOne({});
       if (fallbackBatch) {
-        finalBatchIds.push(String(fallbackBatch._id));
+        finalBatchIds.push(String(fallbackBatch._id || fallbackBatch.id));
       }
     }
 
@@ -888,25 +882,18 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "Invalid fee plan type" });
     }
 
-    const validObjectIds = targetBatches.filter(tb => mongoose.Types.ObjectId.isValid(tb));
-    const nameOrCustomIds = targetBatches.filter(tb => !mongoose.Types.ObjectId.isValid(tb));
-    
-    const queryConditions = [];
-    if (validObjectIds.length > 0) {
-      queryConditions.push({ _id: { $in: validObjectIds } });
-      queryConditions.push({ id: { $in: validObjectIds } });
-    }
-    if (nameOrCustomIds.length > 0) {
-      queryConditions.push({ name: { $in: nameOrCustomIds } });
-    }
+    // Verify target batches exist by _id, id, or name
+    const queryConditions = [
+      { _id: { $in: targetBatches } },
+      { id: { $in: targetBatches } },
+      { name: { $in: targetBatches } }
+    ];
 
     let verifiedBatches = [];
-    if (queryConditions.length > 0) {
-      try {
-        verifiedBatches = await Batch.find({ $or: queryConditions });
-      } catch (err) {
-        console.error("Error verifying batches in updateStudent:", err);
-      }
+    try {
+      verifiedBatches = await Batch.find({ $or: queryConditions });
+    } catch (err) {
+      console.error("Error verifying batches in updateStudent:", err);
     }
 
     const batchMap = new Map();
@@ -914,6 +901,7 @@ export const updateStudent = async (req, res) => {
       const bId = String(b._id || b.id);
       batchMap.set(bId, bId);
       if (b.id) batchMap.set(String(b.id), bId);
+      if (b._id) batchMap.set(String(b._id), bId);
       if (b.name) {
         batchMap.set(b.name, bId);
         batchMap.set(b.name.trim().toLowerCase(), bId);
@@ -922,23 +910,24 @@ export const updateStudent = async (req, res) => {
 
     const resolvedIds = [];
     for (const tb of targetBatches) {
-      if (batchMap.has(tb)) {
-        resolvedIds.push(batchMap.get(tb));
-      } else if (typeof tb === "string" && batchMap.has(tb.trim().toLowerCase())) {
-        resolvedIds.push(batchMap.get(tb.trim().toLowerCase()));
-      } else if (mongoose.Types.ObjectId.isValid(tb)) {
-        resolvedIds.push(String(tb));
+      const tbStr = String(tb).trim();
+      if (batchMap.has(tbStr)) {
+        resolvedIds.push(batchMap.get(tbStr));
+      } else if (batchMap.has(tbStr.toLowerCase())) {
+        resolvedIds.push(batchMap.get(tbStr.toLowerCase()));
+      } else {
+        resolvedIds.push(tbStr);
       }
     }
 
     let finalBatchIds = Array.from(new Set(resolvedIds));
     if (finalBatchIds.length === 0) {
-      if (student.batch && mongoose.Types.ObjectId.isValid(String(student.batch))) {
-        finalBatchIds.push(String(student.batch._id || student.batch));
+      if (student.batch) {
+        finalBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
       } else {
         const fallbackBatch = await Batch.findOne({ user: ownerId }) || await Batch.findOne({});
         if (fallbackBatch) {
-          finalBatchIds.push(String(fallbackBatch._id));
+          finalBatchIds.push(String(fallbackBatch._id || fallbackBatch.id));
         }
       }
     }
@@ -952,14 +941,9 @@ export const updateStudent = async (req, res) => {
     student.email = email ? email.toLowerCase().trim() : "";
     student.address = address || "";
 
-    if (mongoose.Types.ObjectId.isValid(primaryBatchId)) {
-      student.batch = new mongoose.Types.ObjectId(primaryBatchId);
-      student.batch_id = primaryBatchId;
-    } else {
-      student.batch = primaryBatchId;
-    }
-
-    student.batches = finalBatchIds.map(id => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id);
+    student.batch = primaryBatchId;
+    student.batch_id = primaryBatchId;
+    student.batches = finalBatchIds;
     student.batch_ids = finalBatchIds;
 
     const resolvedJoinedOn = safeParseDate(joinedOn) || student.joinedOn || student.createdAt || new Date();
