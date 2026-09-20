@@ -1020,7 +1020,10 @@ export const getTeacherVideos = async (req, res) => {
     const archivedVideos = [];
 
     (videos || []).forEach((v) => {
-      const vObj = typeof v.toObject === "function" ? v.toObject() : v;
+      const vObj = typeof v.toObject === "function" ? v.toObject() : { ...v };
+      const vid = String(vObj.id || vObj._id || vObj.bunnyVideoId || vObj.bunny_video_id || vObj.video_id || "").trim();
+      vObj.id = vid || vObj.id || vObj._id;
+      vObj._id = vid || vObj._id || vObj.id;
       if (v.isArchived || v.status === "ARCHIVED") {
         archivedVideos.push(vObj);
       } else {
