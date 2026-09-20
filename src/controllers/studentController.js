@@ -101,6 +101,11 @@ const populateStudent = (query) =>
        .populate("batches", "name scheduleDays startTime endTime");
 
 const resolveDueDate = ({ feePlanType, joinedOn, dueDate, feeStatus = "paid" }) => {
+  if (dueDate) {
+    const parsed = new Date(dueDate);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+
   if (feePlanType === "monthly") {
     if (feeStatus === "unpaid") {
       return new Date(joinedOn);
@@ -523,7 +528,18 @@ export const createStudent = async (req, res) => {
       feeStatus = "unpaid",
     } = req.body;
 
-    const paymentHistory = feeStatus === "unpaid" ? [] : initialPaymentHistory;
+    let paymentHistory = Array.isArray(initialPaymentHistory) ? [...initialPaymentHistory] : [];
+    const paidFeesInput = Number(req.body.paidFees || req.body.paid_fees || 0);
+    if (paymentHistory.length === 0 && paidFeesInput > 0) {
+      paymentHistory.push({
+        _id: crypto.randomUUID(),
+        amount: paidFeesInput,
+        paymentDate: joinedOn ? new Date(joinedOn) : new Date(),
+        paymentType: (feePlanType && allowedFeeTypes.includes(feePlanType)) ? feePlanType : "monthly",
+        note: "Initial paid fees"
+      });
+    }
+
     const rawTarget = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
     const extractBatchId = (b) => {
       if (!b) return null;
