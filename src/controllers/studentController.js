@@ -792,7 +792,9 @@ export const createStudent = async (req, res) => {
 
 export const updateStudent = async (req, res) => {
   try {
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
+    const ownerId = req.user.role === "teacher" 
+      ? (req.user.institute?.adminUser || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || req.user._id);
 
     const student = await Student.findById(req.params.id);
     if (!student) {
@@ -830,6 +832,7 @@ export const updateStudent = async (req, res) => {
       address = student.address || "",
       batch,
       batches,
+      enrolledBatchIds,
       joinedOn = student.joinedOn || student.createdAt,
       totalFees = student.totalFees,
       feePlanType = student.feePlanType || "monthly",
@@ -839,19 +842,24 @@ export const updateStudent = async (req, res) => {
       customFields,
     } = req.body;
 
-    // Safe date parser to prevent Invalid Date casting errors
     const safeParseDate = (val) => {
       if (!val) return null;
       const d = new Date(val);
       return isNaN(d.getTime()) ? null : d;
     };
 
-    const rawBatches = Array.isArray(batches) && batches.length > 0 
-      ? batches 
-      : (batch ? [batch] : (student.batches?.length ? student.batches : [student.batch]));
-    
-    const targetBatches = rawBatches.map(extractBatchId).filter(Boolean);
+    let rawBatches = [];
+    if (batches !== undefined && Array.isArray(batches) && batches.length > 0) {
+      rawBatches = batches;
+    } else if (enrolledBatchIds !== undefined && Array.isArray(enrolledBatchIds) && enrolledBatchIds.length > 0) {
+      rawBatches = enrolledBatchIds;
+    } else if (batch !== undefined && batch !== null && batch !== "") {
+      rawBatches = [batch];
+    } else {
+      rawBatches = student.batches?.length ? student.batches : (student.batch ? [student.batch] : []);
+    }
 
+    const targetBatches = rawBatches.map(extractBatchId).filter(Boolean);
     if (targetBatches.length === 0) {
       return res.status(400).json({ message: "At least one batch must be assigned" });
     }
@@ -880,23 +888,22 @@ export const updateStudent = async (req, res) => {
       return res.status(400).json({ message: "Invalid fee plan type" });
     }
 
-    // Verify target batches exist by _id, id, or name for this owner
     const validObjectIds = targetBatches.filter(tb => mongoose.Types.ObjectId.isValid(tb));
     const nameOrCustomIds = targetBatches.filter(tb => !mongoose.Types.ObjectId.isValid(tb));
-    const orConditions = [];
-    if (validObjectIds.length > 0) orConditions.push({ _id: { $in: validObjectIds } });
-    if (targetBatches.length > 0) orConditions.push({ id: { $in: targetBatches } });
-    if (nameOrCustomIds.length > 0) orConditions.push({ name: { $in: nameOrCustomIds } });
+    
+    const queryConditions = [];
+    if (validObjectIds.length > 0) {
+      queryConditions.push({ _id: { $in: validObjectIds } });
+      queryConditions.push({ id: { $in: validObjectIds } });
+    }
+    if (nameOrCustomIds.length > 0) {
+      queryConditions.push({ name: { $in: nameOrCustomIds } });
+    }
 
     let verifiedBatches = [];
-    if (orConditions.length > 0) {
+    if (queryConditions.length > 0) {
       try {
-        verifiedBatches = await Batch.find({
-          $or: [
-            { user: ownerId, $or: orConditions },
-            { $or: orConditions }
-          ]
-        });
+        verifiedBatches = await Batch.find({ $or: queryConditions });
       } catch (err) {
         console.error("Error verifying batches in updateStudent:", err);
       }
@@ -925,9 +932,8 @@ export const updateStudent = async (req, res) => {
     }
 
     let finalBatchIds = Array.from(new Set(resolvedIds));
-
     if (finalBatchIds.length === 0) {
-      if (student.batch && mongoose.Types.ObjectId.isValid(student.batch)) {
+      if (student.batch && mongoose.Types.ObjectId.isValid(String(student.batch))) {
         finalBatchIds.push(String(student.batch._id || student.batch));
       } else {
         const fallbackBatch = await Batch.findOne({ user: ownerId }) || await Batch.findOne({});
@@ -937,30 +943,26 @@ export const updateStudent = async (req, res) => {
       }
     }
 
-    const primaryBatch = finalBatchIds[0];
-    const newEmail = email ? email.toLowerCase().trim() : "";
-
-    const inst = await Institute.findById(student.user) || await Institute.findById(ownerId);
-    const customFieldsObj = customFields || student.customFields || {};
-    const customFieldConfigs = inst?.studentCustomFields || [];
-    for (const field of customFieldConfigs) {
-      if (req.body[field.name] !== undefined) {
-        customFieldsObj[field.name] = req.body[field.name];
-      }
-    }
-
-    const resolvedJoinedOn = safeParseDate(joinedOn) || student.joinedOn || student.createdAt || new Date();
+    const primaryBatchId = finalBatchIds[0];
 
     student.name = name;
     student.phone = phone;
     student.parentName = parentName;
     student.parentPhone = parentPhone || "";
-    student.email = newEmail;
+    student.email = email ? email.toLowerCase().trim() : "";
     student.address = address || "";
-    student.batch = primaryBatch;
-    student.batch_id = primaryBatch;
-    student.batches = finalBatchIds;
+
+    if (mongoose.Types.ObjectId.isValid(primaryBatchId)) {
+      student.batch = new mongoose.Types.ObjectId(primaryBatchId);
+      student.batch_id = primaryBatchId;
+    } else {
+      student.batch = primaryBatchId;
+    }
+
+    student.batches = finalBatchIds.map(id => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id);
     student.batch_ids = finalBatchIds;
+
+    const resolvedJoinedOn = safeParseDate(joinedOn) || student.joinedOn || student.createdAt || new Date();
     student.joinedOn = resolvedJoinedOn;
     student.feePlanType = feePlanType;
     student.totalFees = total;
@@ -972,21 +974,32 @@ export const updateStudent = async (req, res) => {
       note: p.note || ""
     }));
     
-    // Recalculate paid & pending amount
     student.paidAmount = student.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     student.pendingAmount = Math.max(0, student.totalFees - student.paidAmount);
 
     const calculatedDueDate = resolveDueDate({ feePlanType, joinedOn: resolvedJoinedOn, dueDate: safeParseDate(dueDate) });
     student.dueDate = safeParseDate(calculatedDueDate) || calculatedDueDate;
+
+    const inst = await Institute.findById(student.user) || await Institute.findById(ownerId);
+    const customFieldsObj = customFields || student.customFields || {};
+    const customFieldConfigs = inst?.studentCustomFields || [];
+    for (const field of customFieldConfigs) {
+      if (req.body[field.name] !== undefined) {
+        customFieldsObj[field.name] = req.body[field.name];
+      }
+    }
     student.customFields = customFieldsObj;
+
     if (typeof student.markModified === "function") {
-      student.markModified("customFields");
+      student.markModified("batch");
       student.markModified("batches");
+      student.markModified("customFields");
       student.markModified("paymentHistory");
     }
 
     await student.save();
 
+    // Invalidate Redis and L1 RAM caches
     try {
       if (student.enrollmentNumber) {
         await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
@@ -994,23 +1007,36 @@ export const updateStudent = async (req, res) => {
       await invalidateStudentCache(student._id);
     } catch (_) {}
 
-    const populatedStudent = await populateStudent(Student.findById(student._id));
-    const obj = populatedStudent ? (populatedStudent.toJSON ? populatedStudent.toJSON() : populatedStudent) : student;
-    const enrolledBatchIds = (obj.batches && obj.batches.length > 0)
+    // Fetch updated populated student from DB
+    const populatedStudent = await Student.findById(student._id)
+      .populate("batch", "name scheduleDays startTime endTime")
+      .populate("batches", "name scheduleDays startTime endTime");
+
+    const obj = populatedStudent ? (populatedStudent.toJSON ? populatedStudent.toJSON() : populatedStudent) : student.toJSON();
+    const respEnrolledBatchIds = (obj.batches && obj.batches.length > 0)
       ? obj.batches.map((b) => (b?._id || b?.id || b).toString())
       : (obj.batch ? [(obj.batch?._id || obj.batch?.id || obj.batch).toString()] : []);
-    obj.enrolledBatchIds = enrolledBatchIds;
+    obj.enrolledBatchIds = respEnrolledBatchIds;
+
+    let batchName = "Unassigned";
+    if (obj.batch) {
+      if (typeof obj.batch === "object" && obj.batch.name) {
+        batchName = obj.batch.name;
+      } else {
+        const found = verifiedBatches.find(b => String(b._id || b.id) === String(obj.batch));
+        if (found) batchName = found.name;
+      }
+    }
+    obj.batchName = batchName;
 
     return res.json(obj);
   } catch (error) {
     console.error("updateStudent error:", error);
     if (error?.code === 11000 && error?.keyPattern?.enrollmentNumber) {
       return res.status(409).json({
-        message:
-          "Enrollment number already exists. Please try again once to generate the next sequence.",
+        message: "Enrollment number already exists. Please try again once to generate the next sequence.",
       });
     }
-
     return res.status(500).json({ message: error?.message || "Could not update student" });
   }
 };
