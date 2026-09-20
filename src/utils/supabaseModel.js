@@ -662,6 +662,16 @@ class SupabaseDocument {
       // batch_ids column does not exist in Supabase; store batches in metadata instead
       delete payload.batch_ids;
       delete payload.batches;
+      delete payload.paid_amount;
+      delete payload.paidAmount;
+      delete payload.pending_amount;
+      delete payload.pendingAmount;
+      delete payload.payment_history;
+      delete payload.paymentHistory;
+      delete payload.attendance_records;
+      delete payload.attendanceRecords;
+      delete payload.attendance_summary;
+      delete payload.attendanceSummary;
     }
 
     if (this._tableName === "batches") {
@@ -1307,8 +1317,21 @@ class SupabaseQuery {
         doc.customFields = meta.customFields;
         doc.custom_fields = meta.customFields;
       }
-      doc.paymentHistory = paymentsByStudent[doc.id] || [];
-      doc.payment_history = doc.paymentHistory;
+      if (meta.dueDate) {
+        doc.dueDate = meta.dueDate;
+        doc.due_date = meta.dueDate;
+      }
+      const dbPayments = paymentsByStudent[doc.id] || [];
+      const metaPayments = meta.paymentHistory || [];
+      const combinedPayments = [...dbPayments];
+      for (const mp of metaPayments) {
+        const mpId = String(mp._id || mp.id || "");
+        if (mpId && !combinedPayments.some(p => String(p._id || p.id || "") === mpId)) {
+          combinedPayments.push(mp);
+        }
+      }
+      doc.paymentHistory = combinedPayments;
+      doc.payment_history = combinedPayments;
       doc.attendanceRecords = attendanceByStudent[doc.id] || [];
       doc.attendance_records = doc.attendanceRecords;
       

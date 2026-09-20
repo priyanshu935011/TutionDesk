@@ -1166,22 +1166,15 @@ export const addPayment = async (req, res) => {
     try {
       await supabase.from("payments").insert({
         id: paymentId,
-        student_id: student._id,
+        student_id: String(student._id || student.id),
         amount: numAmount,
-        payment_date: paymentDate,
+        payment_date: paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString(),
         payment_type: effectivePaymentType,
         note: paymentNote
       });
-    } catch (payErr) {}
-
-    // Direct update into Supabase students table
-    try {
-      await supabase.from("students").update({
-        paid_amount: student.paidAmount,
-        pending_amount: student.pendingAmount,
-        payment_history: student.paymentHistory
-      }).eq("id", student._id);
-    } catch (sErr) {}
+    } catch (payErr) {
+      console.error("Supabase payments insert error:", payErr);
+    }
 
     await student.save();
 
