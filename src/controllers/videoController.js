@@ -1190,30 +1190,46 @@ export const updateVideoLecture = async (req, res) => {
 
 export const archiveVideoLecture = async (req, res) => {
   try {
-    const video = await findVideoLectureById(req.params.id, req);
+    const cleanId = String(req.params.id).trim();
+    let video = await findVideoLectureById(cleanId, req);
     if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
+      video = { id: cleanId, _id: cleanId, bunnyVideoId: cleanId };
     }
 
-    video.isArchived = true;
-    video.archivedAt = new Date();
-    video.archivedBy = req.user?._id || req.user?.id;
+    const targetId = String(video._id || video.id || video.bunnyVideoId || cleanId).trim();
+    const bVid = String(video.bunnyVideoId || video.bunny_video_id || "").trim();
+
     if (typeof video.save === "function") {
+      video.isArchived = true;
+      video.status = "ARCHIVED";
+      video.archivedAt = new Date();
+      video.archivedBy = req.user?._id || req.user?.id;
       await video.save();
     }
 
     try {
-      const targetId = String(video._id || video.id || video.bunnyVideoId || req.params.id).trim();
-      if (targetId) {
-        await supabase
-          .from("video_lectures")
-          .update({ is_archived: true, archived_at: new Date() })
-          .or(`id.eq.${targetId},bunny_video_id.eq.${targetId}`);
-      }
+      const orParts = [];
+      if (targetId) orParts.push(`id.eq.${targetId}`);
+      if (bVid) orParts.push(`bunny_video_id.eq.${bVid}`);
+      if (cleanId) orParts.push(`id.eq.${cleanId}`);
+
+      await supabase
+        .from("video_lectures")
+        .update({ is_archived: true, status: "ARCHIVED", archived_at: new Date() })
+        .or(orParts.join(","));
     } catch (_) {}
 
-    video._tableName = "video_lectures";
-    syncVideoFallback(video);
+    try {
+      await VideoLecture.updateMany(
+        { $or: [{ _id: targetId }, { id: targetId }, { bunnyVideoId: bVid }, { _id: cleanId }] },
+        { $set: { isArchived: true, status: "ARCHIVED", archivedAt: new Date() } }
+      );
+    } catch (_) {}
+
+    if (typeof video === "object") {
+      video._tableName = "video_lectures";
+      syncVideoFallback(video);
+    }
 
     await clearCachePattern("*");
 
@@ -1226,30 +1242,46 @@ export const archiveVideoLecture = async (req, res) => {
 
 export const restoreVideoLecture = async (req, res) => {
   try {
-    const video = await findVideoLectureById(req.params.id, req);
+    const cleanId = String(req.params.id).trim();
+    let video = await findVideoLectureById(cleanId, req);
     if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
+      video = { id: cleanId, _id: cleanId, bunnyVideoId: cleanId };
     }
 
-    video.isArchived = false;
-    video.archivedAt = null;
-    video.archivedBy = null;
+    const targetId = String(video._id || video.id || video.bunnyVideoId || cleanId).trim();
+    const bVid = String(video.bunnyVideoId || video.bunny_video_id || "").trim();
+
     if (typeof video.save === "function") {
+      video.isArchived = false;
+      video.status = "READY";
+      video.archivedAt = null;
+      video.archivedBy = null;
       await video.save();
     }
 
     try {
-      const targetId = String(video._id || video.id || video.bunnyVideoId || req.params.id).trim();
-      if (targetId) {
-        await supabase
-          .from("video_lectures")
-          .update({ is_archived: false, archived_at: null })
-          .or(`id.eq.${targetId},bunny_video_id.eq.${targetId}`);
-      }
+      const orParts = [];
+      if (targetId) orParts.push(`id.eq.${targetId}`);
+      if (bVid) orParts.push(`bunny_video_id.eq.${bVid}`);
+      if (cleanId) orParts.push(`id.eq.${cleanId}`);
+
+      await supabase
+        .from("video_lectures")
+        .update({ is_archived: false, status: "READY", archived_at: null })
+        .or(orParts.join(","));
     } catch (_) {}
 
-    video._tableName = "video_lectures";
-    syncVideoFallback(video);
+    try {
+      await VideoLecture.updateMany(
+        { $or: [{ _id: targetId }, { id: targetId }, { bunnyVideoId: bVid }, { _id: cleanId }] },
+        { $set: { isArchived: false, status: "READY", archivedAt: null } }
+      );
+    } catch (_) {}
+
+    if (typeof video === "object") {
+      video._tableName = "video_lectures";
+      syncVideoFallback(video);
+    }
 
     await clearCachePattern("*");
 
@@ -1263,12 +1295,12 @@ export const restoreVideoLecture = async (req, res) => {
 export const deleteVideoLecture = async (req, res) => {
   try {
     const cleanId = String(req.params.id).trim();
-    const video = await findVideoLectureById(cleanId, req);
+    let video = await findVideoLectureById(cleanId, req);
     if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
+      video = { id: cleanId, _id: cleanId, bunnyVideoId: cleanId };
     }
 
-    const freedBytes = Number(video.fileSizeBytes || video.storageSizeBytes || 0);
+    const freedBytes = Number(video.fileSizeBytes || video.storageSizeBytes || video.file_size_bytes || 0);
     const vId = String(video._id || video.id || cleanId).trim();
     const bVid = String(video.bunnyVideoId || video.bunny_video_id || "").trim();
 
@@ -1285,12 +1317,30 @@ export const deleteVideoLecture = async (req, res) => {
       console.warn("Bunny API delete failed (soft ignored):", bErr.message);
     }
 
+    // Delete from Supabase DB tables
     try {
-      if (vId) {
-        await VideoLecture.deleteMany({ $or: [{ _id: vId }, { id: vId }, { bunnyVideoId: bVid }] });
-        await VideoPlaylistItem.deleteMany({ $or: [{ video: vId }, { video_id: vId }] });
-        await VideoRelease.deleteMany({ $or: [{ video: vId }, { video_id: vId }] });
-        await VideoWatchLog.deleteMany({ $or: [{ video: vId }, { video_id: vId }] });
+      const orParts = [];
+      if (vId) orParts.push(`id.eq.${vId}`);
+      if (bVid) orParts.push(`bunny_video_id.eq.${bVid}`);
+      if (cleanId) orParts.push(`id.eq.${cleanId}`);
+
+      if (orParts.length > 0) {
+        await supabase.from("video_lectures").delete().or(orParts.join(","));
+      }
+      if (vId || cleanId) {
+        await supabase.from("video_releases").delete().or(`video_id.eq.${vId},video_id.eq.${cleanId}`);
+        await supabase.from("video_watch_logs").delete().or(`video_id.eq.${vId},video_id.eq.${cleanId}`);
+      }
+    } catch (sbDelErr) {
+      console.warn("Supabase video delete warning:", sbDelErr.message);
+    }
+
+    try {
+      if (vId || cleanId) {
+        await VideoLecture.deleteMany({ $or: [{ _id: vId }, { id: vId }, { bunnyVideoId: bVid }, { _id: cleanId }] });
+        await VideoPlaylistItem.deleteMany({ $or: [{ video: vId }, { video_id: vId }, { video: cleanId }, { video_id: cleanId }] });
+        await VideoRelease.deleteMany({ $or: [{ video: vId }, { video_id: vId }, { video: cleanId }, { video_id: cleanId }] });
+        await VideoWatchLog.deleteMany({ $or: [{ video: vId }, { video_id: vId }, { video: cleanId }, { video_id: cleanId }] });
       }
     } catch (delErr) {
       console.warn("Video records delete warning:", delErr.message);
