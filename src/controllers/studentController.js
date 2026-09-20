@@ -106,18 +106,10 @@ const resolveDueDate = ({ feePlanType, joinedOn, dueDate, feeStatus = "paid" }) 
     if (!isNaN(parsed.getTime())) return parsed;
   }
 
-  if (feePlanType === "monthly") {
-    if (feeStatus === "unpaid") {
-      return new Date(joinedOn);
-    }
-    return addOneMonth(joinedOn);
-  }
+  const baseDate = joinedOn ? new Date(joinedOn) : new Date();
+  const validBase = isNaN(baseDate.getTime()) ? new Date() : baseDate;
 
-  if (feePlanType === "full_course") {
-    return null;
-  }
-
-  return dueDate ? new Date(dueDate) : null;
+  return new Date(validBase.getFullYear(), validBase.getMonth() + 1, 1);
 };
 
 const generateEnrollmentNumber = async (userId) => {
@@ -529,15 +521,19 @@ export const createStudent = async (req, res) => {
     } = req.body;
 
     let paymentHistory = Array.isArray(initialPaymentHistory) ? [...initialPaymentHistory] : [];
-    const paidFeesInput = Number(req.body.paidFees || req.body.paid_fees || 0);
-    if (paymentHistory.length === 0 && paidFeesInput > 0) {
-      paymentHistory.push({
-        _id: crypto.randomUUID(),
-        amount: paidFeesInput,
-        paymentDate: joinedOn ? new Date(joinedOn) : new Date(),
-        paymentType: (feePlanType && allowedFeeTypes.includes(feePlanType)) ? feePlanType : "monthly",
-        note: "Initial paid fees"
-      });
+    const paidFeesInput = Number(req.body.paidFees || req.body.paid_fees || req.body.paidAmount || 0);
+    const resolvedTotalFees = (totalFees !== undefined && totalFees !== null && totalFees !== "") ? Number(totalFees) : 0;
+    if (paymentHistory.length === 0 && (paidFeesInput > 0 || feeStatus === "paid")) {
+      const amountToRecord = paidFeesInput > 0 ? paidFeesInput : resolvedTotalFees;
+      if (amountToRecord > 0) {
+        paymentHistory.push({
+          _id: crypto.randomUUID(),
+          amount: amountToRecord,
+          paymentDate: joinedOn ? new Date(joinedOn) : new Date(),
+          paymentType: (feePlanType && allowedFeeTypes.includes(feePlanType)) ? feePlanType : "monthly",
+          note: "Initial paid fees"
+        });
+      }
     }
 
     const rawTarget = Array.isArray(batches) && batches.length > 0 ? batches : (batch ? [batch] : []);
@@ -2724,10 +2720,6 @@ export const bulkCreateStudents = async (req, res) => {
           throw new Error("Fee Plan Type must be 'monthly', 'full_course', or 'partial'");
         }
 
-        if (feePlanType === "partial" && !dueDate) {
-          throw new Error("Due Date is required for partial fee plan");
-        }
-
         const cleanEmail = email ? email.toLowerCase().trim() : "";
         const cleanPhone = phone ? phone.trim() : "";
         const cleanName = name.trim().toLowerCase();
@@ -2783,9 +2775,18 @@ export const bulkCreateStudents = async (req, res) => {
         // Determine if fees are paid or unpaid (defaults to unpaid)
         const rawFeeStatus = row.feeStatus ? String(row.feeStatus).toLowerCase().trim() : "unpaid";
         const cleanFeeStatus = (rawFeeStatus === "paid" || rawFeeStatus === "yes" || rawFeeStatus === "true" || rawFeeStatus === "1") ? "paid" : "unpaid";
+        const paidFeesInput = Number(row.paidFees || row.paid_fees || row.paidAmount || 0);
 
         const paymentHistory = [];
-        if (cleanFeeStatus === "paid" && totalFees > 0) {
+        if (paidFeesInput > 0) {
+          paymentHistory.push({
+            _id: crypto.randomUUID(),
+            amount: paidFeesInput,
+            paymentDate: new Date(joinedOn),
+            paymentType: feePlanType,
+            note: "Auto-collected on bulk import"
+          });
+        } else if (cleanFeeStatus === "paid" && totalFees > 0) {
           paymentHistory.push({
             _id: crypto.randomUUID(),
             amount: totalFees,
