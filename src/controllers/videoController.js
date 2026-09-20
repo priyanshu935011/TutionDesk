@@ -1019,11 +1019,31 @@ export const getTeacherVideos = async (req, res) => {
     const activeVideos = [];
     const archivedVideos = [];
 
+    const getCleanStrId = (val) => {
+      if (!val) return "";
+      if (typeof val === "string") {
+        const s = val.trim();
+        return (s && s !== "[object Object]" && s !== "null" && s !== "undefined") ? s : "";
+      }
+      if (typeof val === "object") {
+        if (val._id) return getCleanStrId(val._id);
+        if (val.id) return getCleanStrId(val.id);
+        if (typeof val.toString === "function") {
+          const s = val.toString().trim();
+          if (s && s !== "[object Object]" && s !== "null" && s !== "undefined") return s;
+        }
+      }
+      const s = String(val).trim();
+      return (s && s !== "[object Object]" && s !== "null" && s !== "undefined") ? s : "";
+    };
+
     (videos || []).forEach((v) => {
       const vObj = typeof v.toObject === "function" ? v.toObject() : { ...v };
-      const vid = String(vObj.id || vObj._id || vObj.bunnyVideoId || vObj.bunny_video_id || vObj.video_id || "").trim();
-      vObj.id = vid || vObj.id || vObj._id;
-      vObj._id = vid || vObj._id || vObj.id;
+      const vid = getCleanStrId(vObj.id) || getCleanStrId(vObj._id) || getCleanStrId(vObj.bunnyVideoId) || getCleanStrId(vObj.bunny_video_id) || getCleanStrId(vObj.video_id);
+      if (vid) {
+        vObj.id = vid;
+        vObj._id = vid;
+      }
       if (v.isArchived || v.status === "ARCHIVED") {
         archivedVideos.push(vObj);
       } else {
