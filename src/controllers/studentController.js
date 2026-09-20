@@ -37,6 +37,14 @@ import { getLiveStateForStudent } from "../services/quizRuntime.js";
 
 const allowedFeeTypes = ["monthly", "full_course", "partial"];
 
+const addOneMonth = (dateInput) => {
+  if (!dateInput) return null;
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+  d.setMonth(d.getMonth() + 1);
+  return d.toISOString().split("T")[0];
+};
+
 const getISTDateStr = (dateInput) => {
   if (!dateInput) {
     const nowIST = new Date(Date.now() + 5.5 * 3600 * 1000);
@@ -1099,7 +1107,10 @@ export const addPayment = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const { amount, paymentDate, paymentType, note } = req.body;
+    const { amount, paymentDate, paymentType, note, remarks } = req.body;
+    const paymentNote = note || remarks || "";
+    const effectivePaymentType = (paymentType && allowedFeeTypes.includes(paymentType)) ? paymentType : "monthly";
+
     const student = await Student.findOne({
       _id: req.params.id,
       user: ownerId,
@@ -1109,39 +1120,49 @@ export const addPayment = async (req, res) => {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    if (
-      amount === undefined ||
-      !paymentDate ||
-      !allowedFeeTypes.includes(paymentType)
-    ) {
-      return res.status(400).json({ message: "Payment details are required" });
+    const numAmount = Number(amount);
+    if (amount === undefined || isNaN(numAmount) || numAmount <= 0 || !paymentDate) {
+      return res.status(400).json({ message: "Valid payment amount and payment date are required" });
     }
 
-    const nextPaidAmount = student.paidAmount + Number(amount);
+    const currentPaid = Number(student.paidAmount || 0);
+    const totalFees = Number(student.totalFees || 0);
+    const nextPaidAmount = currentPaid + numAmount;
 
-    if (nextPaidAmount > student.totalFees) {
+    if (totalFees > 0 && nextPaidAmount > totalFees) {
       return res.status(400).json({ message: "Paid amount cannot be more than total fees" });
     }
 
+    student.paidAmount = nextPaidAmount;
+    student.pendingAmount = Math.max(0, totalFees - nextPaidAmount);
+
     const paymentId = crypto.randomUUID();
-    student.paymentHistory.unshift({
+    const newPaymentRecord = {
       _id: paymentId,
-      amount: Number(amount),
+      id: paymentId,
+      amount: numAmount,
       paymentDate,
-      paymentType,
-      note: note || "",
-    });
+      paymentType: effectivePaymentType,
+      note: paymentNote,
+    };
+
+    if (!Array.isArray(student.paymentHistory)) {
+      student.paymentHistory = [];
+    }
+    student.paymentHistory.unshift(newPaymentRecord);
 
     if (student.feePlanType === "monthly") {
-      const instId = req.user.institute?._id || req.user.institute || student.user;
-      const institute = await Institute.findById(instId).select("flexibleDueDate");
-      const isFlexible = institute?.flexibleDueDate === true;
+      try {
+        const instId = req.user.institute?._id || req.user.institute || student.user;
+        const institute = await Institute.findById(instId).select("flexibleDueDate");
+        const isFlexible = institute?.flexibleDueDate === true;
 
-      if (isFlexible) {
-        student.dueDate = addOneMonth(paymentDate);
-      } else {
-        student.dueDate = addOneMonth(student.dueDate || paymentDate);
-      }
+        if (isFlexible) {
+          student.dueDate = addOneMonth(paymentDate);
+        } else {
+          student.dueDate = addOneMonth(student.dueDate || paymentDate);
+        }
+      } catch (dErr) {}
     }
 
     // Direct insert into Supabase payments table
@@ -1149,28 +1170,35 @@ export const addPayment = async (req, res) => {
       await supabase.from("payments").insert({
         id: paymentId,
         student_id: student._id,
-        amount: Number(amount),
+        amount: numAmount,
         payment_date: paymentDate,
-        payment_type: paymentType,
-        note: note || ""
+        payment_type: effectivePaymentType,
+        note: paymentNote
       });
     } catch (payErr) {}
+
+    // Direct update into Supabase students table
+    try {
+      await supabase.from("students").update({
+        paid_amount: student.paidAmount,
+        pending_amount: student.pendingAmount,
+        payment_history: student.paymentHistory
+      }).eq("id", student._id);
+    } catch (sErr) {}
 
     await student.save();
 
     try {
-      const remaining = Math.max(0, Number(student.totalFees || 0) - (student.paidAmount || 0));
+      const remaining = student.pendingAmount;
       sendStudentNotification({
         studentIds: [student._id],
         instituteId: req.user.institute?._id || req.user.institute,
         title: "Fee Payment Received",
-        message: `Payment of ₹${amount} received. Remaining balance: ₹${remaining}.`,
+        message: `Payment of ₹${numAmount} received. Remaining balance: ₹${remaining}.`,
         type: "fee_paid",
-        data: { amount, remaining },
+        data: { amount: numAmount, remaining },
       });
     } catch (nErr) {}
-
-    const populatedStudent = await populateStudent(Student.findById(student._id));
 
     try {
       if (student.enrollmentNumber) {
@@ -1179,7 +1207,15 @@ export const addPayment = async (req, res) => {
       await invalidateStudentCache(student._id);
     } catch (cErr) {}
 
-    return res.json(populatedStudent);
+    return res.json({
+      success: true,
+      message: "Payment recorded successfully",
+      payment: newPaymentRecord,
+      studentId: student._id,
+      paidAmount: student.paidAmount,
+      pendingAmount: student.pendingAmount,
+      totalFees: student.totalFees
+    });
   } catch (error) {
     console.error("addPayment error:", error);
     return res.status(500).json({ message: "Could not add payment" });
