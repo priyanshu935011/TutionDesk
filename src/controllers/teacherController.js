@@ -1740,29 +1740,29 @@ export const createHiredTeacher = async (req, res) => {
 
     const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
 
+    // Fetch active teachers in this institute to do exact duplicate checks
+    const existingTeachers = await User.find({
+      institute: instituteId,
+      role: "teacher",
+    });
+
     if (cleanEmail) {
-      const existingEmailUser = await User.findOne({
-        institute: instituteId,
-        role: "teacher",
-        email: cleanEmail,
-      });
-      if (existingEmailUser) {
+      const duplicateEmail = existingTeachers.find(
+        (t) => (t.email || "").toLowerCase().trim() === cleanEmail
+      );
+      if (duplicateEmail) {
         return res.status(400).json({ message: "A teacher with this email already exists." });
       }
     }
 
-    if (cleanPhone) {
-      const existingPhoneUser = await User.findOne({
-        institute: instituteId,
-        role: "teacher",
-        $or: [
-          { phone: cleanPhone },
-          { phone: last10 },
-          { phone: `+91${last10}` },
-          { phone: `91${last10}` }
-        ]
+    if (cleanPhone && last10.length >= 10) {
+      const duplicatePhone = existingTeachers.find((t) => {
+        const rawP = (t.phone || "").replace(/\D/g, "");
+        if (!rawP) return false;
+        const tLast10 = rawP.length >= 10 ? rawP.slice(-10) : rawP;
+        return tLast10.length >= 10 && tLast10 === last10;
       });
-      if (existingPhoneUser) {
+      if (duplicatePhone) {
         return res.status(400).json({ message: "A teacher with this phone number already exists in your institute." });
       }
     }
@@ -1782,7 +1782,8 @@ export const createHiredTeacher = async (req, res) => {
     await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json({
-      _id: newTeacher._id,
+      _id: newTeacher._id || newTeacher.id,
+      id: newTeacher._id || newTeacher.id,
       name: newTeacher.name,
       email: newTeacher.email,
       phone: newTeacher.phone,
@@ -1819,15 +1820,26 @@ export const deleteHiredTeacher = async (req, res) => {
     }
 
     const instituteId = req.user.institute?._id || req.user.institute;
-    const teacher = await User.findOneAndDelete({
-      _id: req.params.id,
+    const teacherId = req.params.id;
+
+    let teacher = await User.findOneAndDelete({
+      _id: teacherId,
       institute: instituteId,
       role: "teacher",
     });
 
     if (!teacher) {
-      return res.status(404).json({ message: "Teacher not found" });
+      teacher = await User.findOneAndDelete({
+        id: teacherId,
+        institute: instituteId,
+        role: "teacher",
+      });
     }
+
+    try {
+      const { supabase: sb } = await import("../utils/supabase.js");
+      await sb.from("users").delete().or(`id.eq.${teacherId},_id.eq.${teacherId}`);
+    } catch (_) {}
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
