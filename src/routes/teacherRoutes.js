@@ -15,6 +15,7 @@ import {
   downloadNote,
   viewNote,
   uploadNote,
+  updateNote,
   deleteNote,
   createHiredTeacher,
   getHiredTeachers,
@@ -66,6 +67,7 @@ router.get("/quizzes/:id/leaderboard", checkQuizFeature, getQuizLeaderboard);
 router.get("/notes", getNotes);
 router.get("/notes/:id/download", downloadNote);
 router.post("/notes", upload.single("pdf"), uploadNote);
+router.put("/notes/:id", updateNote);
 router.post("/notes/:id/send-whatsapp", sendNoteWhatsApp);
 router.delete("/notes/:id", deleteNote);
 

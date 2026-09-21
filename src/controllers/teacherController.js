@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import { Readable } from "stream";
 import Batch from "../models/Batch.js";
@@ -1312,6 +1313,123 @@ export const deleteNote = async (req, res) => {
     return res.json({ message: "Note deleted successfully" });
   } catch (error) {
     return res.status(500).json({ message: error.message || error });
+  }
+};
+
+export const updateNote = async (req, res) => {
+  try {
+    const instituteId = req.user.institute?._id || req.user.institute;
+    const { id } = req.params;
+    const { title, category, shareType, targetType, batchIds, studentIds } = req.body;
+
+    const resolvedTargetType = targetType || (shareType === "Student-wise" ? "student" : "batch");
+
+    let resolvedBatchIds = [];
+    if (batchIds) {
+      if (Array.isArray(batchIds)) {
+        resolvedBatchIds = batchIds;
+      } else if (typeof batchIds === "string") {
+        try {
+          resolvedBatchIds = JSON.parse(batchIds);
+        } catch (_) {
+          resolvedBatchIds = batchIds.split(",").map((b) => b.trim()).filter(Boolean);
+        }
+      }
+    }
+
+    let resolvedStudentIds = [];
+    if (studentIds) {
+      if (Array.isArray(studentIds)) {
+        resolvedStudentIds = studentIds;
+      } else if (typeof studentIds === "string") {
+        try {
+          resolvedStudentIds = JSON.parse(studentIds);
+        } catch (_) {
+          resolvedStudentIds = studentIds.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+      }
+    }
+
+    const { supabase: sb } = await import("../utils/supabase.js");
+
+    let batchMap = {};
+    if (resolvedBatchIds.length > 0) {
+      try {
+        const { data: batches } = await sb
+          .from("batches")
+          .select("id, name")
+          .in("id", resolvedBatchIds);
+        if (batches) {
+          batches.forEach((b) => {
+            batchMap[String(b.id)] = b.name;
+          });
+        }
+      } catch (_) {}
+    }
+
+    const resolvedBatchNames = resolvedBatchIds
+      .map((bId) => batchMap[bId] || "")
+      .filter((n) => n && n !== "null");
+    const formattedBatchName = resolvedTargetType === "student"
+      ? "Student-wise"
+      : (resolvedBatchNames.length > 0 ? resolvedBatchNames.join(", ") : "All Batches");
+
+    const validStudentUuids = resolvedStudentIds.map((s) => toValidUUID(s));
+    const validBatchUuids = resolvedBatchIds.map((b) => toValidUUID(b));
+    const primaryBatchId = resolvedBatchIds.length > 0 ? resolvedBatchIds[0] : null;
+    const targetBatchUuid = primaryBatchId ? toValidUUID(primaryBatchId) : null;
+
+    const updatePayload = {};
+    if (title) updatePayload.title = title.trim();
+    updatePayload.target_type = resolvedTargetType;
+    updatePayload.batch_id = resolvedTargetType === "student" ? null : targetBatchUuid;
+    updatePayload.batch_ids = resolvedTargetType === "student" ? [] : validBatchUuids;
+    updatePayload.student_ids = resolvedTargetType === "student" ? validStudentUuids : [];
+
+    const { data: updatedData, error: updateError } = await sb
+      .from("notes")
+      .update(updatePayload)
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (updateError) {
+      console.error("Supabase updateNote error:", updateError.message);
+    }
+
+    // Mongoose fallback
+    try {
+      const note = await Note.findOne({ _id: id, institute: instituteId });
+      if (note) {
+        if (title) note.title = title.trim();
+        if (category) note.category = category;
+        note.targetType = resolvedTargetType;
+        note.batchIds = resolvedBatchIds;
+        note.studentIds = resolvedStudentIds;
+        note.batchName = formattedBatchName;
+        await note.save();
+      }
+    } catch (_) {}
+
+    await invalidateUserDashboard(req);
+    await clearCachePattern("student:dashboard:*");
+
+    return res.json({
+      message: "Note updated successfully",
+      note: {
+        _id: id,
+        id,
+        title: title ? title.trim() : (updatedData?.title || "Note"),
+        category: category || "Chapter Notes",
+        targetType: resolvedTargetType,
+        batchIds: resolvedBatchIds,
+        studentIds: resolvedStudentIds,
+        batchName: formattedBatchName,
+      },
+    });
+  } catch (error) {
+    console.error("updateNote error:", error);
+    return res.status(500).json({ message: error.message || "Failed to update note" });
   }
 };
 
