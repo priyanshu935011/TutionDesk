@@ -2151,16 +2151,83 @@ export const getVideoWatchAnalytics = async (req, res) => {
       if (video.bunnyVideoId) videoIdKeys.add(String(video.bunnyVideoId));
     }
 
-    // 2. Fetch all students for the institute
-    let students = [];
-    try {
-      students = await Student.find({ institute: instituteId }).populate("batch", "name");
-    } catch (_) {
-      try { students = await Student.find({ institute: instituteId }); } catch (_) {}
+    // 2. Resolve Target Audience for this video
+    let targetAudienceType = (video?.targetAudienceType || video?.targetType || "").toLowerCase().trim();
+    let targetAudienceMetadata = video?.targetAudienceMetadata || video?.metadata || {};
+    if (typeof targetAudienceMetadata === "string") {
+      try { targetAudienceMetadata = JSON.parse(targetAudienceMetadata); } catch (_) { targetAudienceMetadata = {}; }
     }
 
-    if (!students || students.length === 0) {
-      try { students = await Student.find({}); } catch (_) {}
+    // Check for active VideoRelease records for this video
+    let releaseStudentIds = [];
+    try {
+      const releases = await VideoRelease.find({
+        video: { $in: Array.from(videoIdKeys) },
+        status: "ACTIVE",
+      });
+      if (releases && releases.length > 0) {
+        const releaseIds = releases.map((r) => String(r._id || r.id));
+        const relStudents = await VideoReleaseStudent.find({
+          $or: [{ release: { $in: releaseIds } }, { release_id: { $in: releaseIds } }],
+        });
+        releaseStudentIds = relStudents
+          .map((rs) => String(rs.student?._id || rs.student?.id || rs.student || rs.student_id || ""))
+          .filter(Boolean);
+      }
+    } catch (_) {}
+
+    // Fetch all students for the institute
+    let allStudents = [];
+    try {
+      allStudents = await Student.find({ institute: instituteId }).populate("batch", "name");
+    } catch (_) {
+      try { allStudents = await Student.find({ institute: instituteId }); } catch (_) {}
+    }
+
+    if (!allStudents || allStudents.length === 0) {
+      try { allStudents = await Student.find({}); } catch (_) {}
+    }
+
+    // Filter target students based on targetAudienceType & releaseStudentIds
+    let filteredStudents = [];
+
+    if (releaseStudentIds.length > 0) {
+      const relSet = new Set(releaseStudentIds);
+      filteredStudents = allStudents.filter((s) => relSet.has(String(s._id || s.id || "")));
+      if (!targetAudienceType || targetAudienceType === "none") {
+        targetAudienceType = "student";
+      }
+    } else if (targetAudienceType === "all") {
+      filteredStudents = allStudents;
+    } else if (targetAudienceType === "batch") {
+      const selectedBatchIds = new Set(
+        [
+          targetAudienceMetadata.batchId,
+          ...(targetAudienceMetadata.batchIds || []),
+          targetAudienceMetadata.selectedBatchId,
+        ]
+          .filter(Boolean)
+          .map(String)
+      );
+      const selectedBatchName = (targetAudienceMetadata.batchName || "").toString().toLowerCase().trim();
+
+      filteredStudents = allStudents.filter((s) => {
+        const bId = String(s.batch?._id || s.batch?.id || s.batch || s.batch_id || "");
+        const bName = (typeof s.batch === "object" && s.batch?.name ? s.batch.name : String(s.batch || ""))
+          .toLowerCase()
+          .trim();
+        if (selectedBatchIds.size > 0 && selectedBatchIds.has(bId)) return true;
+        if (selectedBatchName && bName === selectedBatchName) return true;
+        return false;
+      });
+    } else if (targetAudienceType === "student") {
+      const selectedStudentIds = new Set(
+        (targetAudienceMetadata.studentIds || targetAudienceMetadata.selectedStudentIds || []).map(String)
+      );
+      filteredStudents = allStudents.filter((s) => selectedStudentIds.has(String(s._id || s.id || "")));
+    } else {
+      targetAudienceType = "none";
+      filteredStudents = [];
     }
 
     // 3. Fetch VideoWatchLog entries for video ID keys
@@ -2176,7 +2243,6 @@ export const getVideoWatchAnalytics = async (req, res) => {
       console.warn("getVideoWatchAnalytics watchLogs find warning:", logErr.message);
     }
 
-    // Also check fallback JSON data for watch logs if empty
     try {
       const fallbackLogs = readFallbackData("video_watch_logs");
       (fallbackLogs || []).forEach(log => {
@@ -2204,7 +2270,7 @@ export const getVideoWatchAnalytics = async (req, res) => {
       }
     });
 
-    const studentAnalytics = (students || []).map(s => {
+    const studentAnalytics = (filteredStudents || []).map(s => {
       const sId = String(s._id || s.id || "");
       const log = watchLogByStudent.get(sId);
       const watchSec = log?.watchTimeSeconds || 0;
@@ -2231,6 +2297,7 @@ export const getVideoWatchAnalytics = async (req, res) => {
     const watchedCount = studentAnalytics.filter(s => s.watchTimeSeconds > 0).length;
 
     return res.json({
+      targetAudienceType,
       totalAssignedStudents: totalAssigned,
       watchedStudentsCount: watchedCount,
       studentAnalytics,
