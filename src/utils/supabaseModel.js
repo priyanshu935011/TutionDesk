@@ -1217,10 +1217,16 @@ class SupabaseQuery {
       }
 
       if (allRefIds.size > 0) {
+        const isUUIDStr = (s) => typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+        const cleanRefIds = Array.from(allRefIds).map((id) => {
+          const str = String(id);
+          return isUUIDStr(str) ? str : toValidUUID(str);
+        });
+
         const { data, error } = await this.model.supabase
           .from(refTable)
           .select(selectStr)
-          .in("id", Array.from(allRefIds));
+          .in("id", cleanRefIds);
 
         if (!error && data) {
           const mapById = new Map();
@@ -1235,14 +1241,14 @@ class SupabaseQuery {
               doc[path] = rawRef
                 .map(item => {
                   const idStr = item?._id || item?.id || (typeof item === "string" ? item : null);
-                  return idStr ? mapById.get(String(idStr)) : null;
+                  const uuidKey = idStr ? (isUUIDStr(idStr) ? idStr : toValidUUID(idStr)) : null;
+                  return uuidKey ? mapById.get(uuidKey) : null;
                 })
                 .filter(Boolean);
             } else {
               const idStr = rawRef?._id || rawRef?.id || (typeof rawRef === "string" ? rawRef : null);
-              if (idStr && mapById.has(String(idStr))) {
-                doc[path] = mapById.get(String(idStr));
-              }
+              const uuidKey = idStr ? (isUUIDStr(idStr) ? idStr : toValidUUID(idStr)) : null;
+              doc[path] = uuidKey ? mapById.get(uuidKey) : null;
             }
           }
         }

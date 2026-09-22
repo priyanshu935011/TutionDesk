@@ -87,24 +87,29 @@ export const getInstituteFeatures = async (req, res) => {
 };
 
 export const getTeacherDashboard = async (req, res) => {
+  const steps = {};
   try {
     const rawInst = req.user.institute;
     const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
     const instituteId = instIdStr;
 
     let institute = null;
-    if (instIdStr) {
-      institute = await Institute.findById(instIdStr)
-        .select(
-          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields"
-        );
-    }
-
-    if (institute && instIdStr) {
-      const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
-      if (savedSettings && Object.keys(savedSettings).length > 0) {
-        institute.whatsappSettings = savedSettings;
+    try {
+      if (instIdStr) {
+        institute = await Institute.findById(instIdStr)
+          .select(
+            "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields"
+          );
       }
+      if (institute && instIdStr) {
+        const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
+        if (savedSettings && Object.keys(savedSettings).length > 0) {
+          institute.whatsappSettings = savedSettings;
+        }
+      }
+      steps["step1_institute"] = "ok";
+    } catch (e1) {
+      steps["step1_institute"] = { error: e1.message };
     }
 
     const cacheKey = `teacher:dashboard:${req.user._id}`;
@@ -115,13 +120,15 @@ export const getTeacherDashboard = async (req, res) => {
       req.query.skipCache === true;
 
     if (!forceRefresh) {
-      const cachedData = await getCache(cacheKey);
-      if (cachedData) {
-        // ALWAYS attach fresh live institute from MongoDB so allowedFeatures & branding are never stale
-        cachedData.institute = institute;
-        return res.json(cachedData);
-      }
+      try {
+        const cachedData = await getCache(cacheKey);
+        if (cachedData) {
+          cachedData.institute = institute;
+          return res.json(cachedData);
+        }
+      } catch (_) {}
     }
+
     const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
     const userIds = [
       ownerId,
@@ -141,35 +148,42 @@ export const getTeacherDashboard = async (req, res) => {
     let noteQuery = { institute: instituteId };
     let testQuery = { institute: instituteId };
 
-    const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
+    let allInstBatches = [];
+    try {
+      allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher name");
+      steps["step2_batches"] = `found ${allInstBatches.length} batches`;
+    } catch (e2) {
+      steps["step2_batches"] = { error: e2.message };
+    }
+
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
 
-const isTeacherOfBatch = (b, user) => {
-  if (!b || !b.teacher || !user) return false;
-  const t = b.teacher;
-  const uId = String(user._id || user.id || "").trim();
-  const uUuid = toValidUUID(user._id || user.id);
-  const uPhone = String(user.phone || "").trim();
-  const uEmail = String(user.email || "").trim().toLowerCase();
+    const isTeacherOfBatch = (b, user) => {
+      if (!b || !b.teacher || !user) return false;
+      const t = b.teacher;
+      const uId = String(user._id || user.id || "").trim();
+      const uUuid = toValidUUID(user._id || user.id);
+      const uPhone = String(user.phone || "").trim();
+      const uEmail = String(user.email || "").trim().toLowerCase();
 
-  if (typeof t === "object" && t !== null) {
-    const tId = String(t._id || t.id || "").trim();
-    const tPhone = String(t.phone || "").trim();
-    const tEmail = String(t.email || "").trim().toLowerCase();
-    return (
-      (tId && (tId === uId || tId === uUuid)) ||
-      (tPhone && uPhone && tPhone === uPhone) ||
-      (tEmail && uEmail && tEmail === uEmail)
-    );
-  } else {
-    const tStr = String(t).trim();
-    return (
-      (tStr && (tStr === uId || tStr === uUuid)) ||
-      (uPhone && tStr === uPhone) ||
-      (uEmail && tStr.toLowerCase() === uEmail)
-    );
-  }
-};
+      if (typeof t === "object" && t !== null) {
+        const tId = String(t._id || t.id || "").trim();
+        const tPhone = String(t.phone || "").trim();
+        const tEmail = String(t.email || "").trim().toLowerCase();
+        return (
+          (tId && (tId === uId || tId === uUuid)) ||
+          (tPhone && uPhone && tPhone === uPhone) ||
+          (tEmail && uEmail && tEmail === uEmail)
+        );
+      } else {
+        const tStr = String(t).trim();
+        return (
+          (tStr && (tStr === uId || tStr === uUuid)) ||
+          (uPhone && tStr === uPhone) ||
+          (uEmail && tStr.toLowerCase() === uEmail)
+        );
+      }
+    };
 
     if (req.user.role === "teacher") {
       const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
@@ -211,8 +225,8 @@ const isTeacherOfBatch = (b, user) => {
     }
 
     let totalNotesCount = 0;
-    if (req.user.role === "teacher") {
-      try {
+    try {
+      if (req.user.role === "teacher") {
         const { supabase: sb } = await import("../utils/supabase.js");
         const isUUID = (str) => typeof str === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
         const rawValidIds = Array.from(new Set([instituteId, ownerId, String(req.user._id || "")])).filter((id) => id && id.length > 5 && id !== "[object Object]");
@@ -226,28 +240,54 @@ const isTeacherOfBatch = (b, user) => {
         } else {
           totalNotesCount = await Note.countDocuments(noteQuery);
         }
-      } catch (e) {
+      } else {
         totalNotesCount = await Note.countDocuments(noteQuery);
       }
-    } else {
-      totalNotesCount = await Note.countDocuments(noteQuery);
+      steps["step3_notes_count"] = totalNotesCount;
+    } catch (e3) {
+      steps["step3_notes_count"] = { error: e3.message };
     }
 
-    const [rawStudents, batches, quizzes, totalTestResultsCount] = await Promise.all([
-      Student.find(studentQuery)
+    let rawStudents = [];
+    let batches = [];
+    let quizzes = [];
+    let totalTestResultsCount = 0;
+
+    try {
+      rawStudents = await Student.find(studentQuery)
         .select("_id name enrollmentNumber phone parentPhone batch batches enrolledBatchIds pendingAmount totalFees paidAmount paymentHistory isArchived attendanceRecords")
         .populate("batch", "name scheduleDays startTime endTime")
-        .populate("batches", "name scheduleDays startTime endTime"),
-      Batch.find(batchQuery)
+        .populate("batches", "name scheduleDays startTime endTime");
+      steps["step4_students"] = `found ${rawStudents.length} raw students`;
+    } catch (e4) {
+      steps["step4_students"] = { error: e4.message };
+    }
+
+    try {
+      batches = await Batch.find(batchQuery)
         .select("_id name className scheduleDays startTime endTime teacher status")
         .sort({ createdAt: -1 })
-        .populate("teacher", "name email"),
-      Quiz.find(quizQuery).select("_id title batches institute createdAt").sort({ createdAt: -1 }),
-      TestResult.countDocuments(testQuery),
-    ]);
+        .populate("teacher", "name email");
+      steps["step5_batches_query"] = `found ${batches.length} batches`;
+    } catch (e5) {
+      steps["step5_batches_query"] = { error: e5.message };
+    }
 
-    // Exclude students who are marked archived or belong exclusively to archived batches
-    const students = rawStudents.filter((student) => {
+    try {
+      quizzes = await Quiz.find(quizQuery).select("_id title batches institute createdAt").sort({ createdAt: -1 });
+      steps["step6_quizzes"] = `found ${quizzes.length} quizzes`;
+    } catch (e6) {
+      steps["step6_quizzes"] = { error: e6.message };
+    }
+
+    try {
+      totalTestResultsCount = await TestResult.countDocuments(testQuery);
+      steps["step7_test_results"] = totalTestResultsCount;
+    } catch (e7) {
+      steps["step7_test_results"] = { error: e7.message };
+    }
+
+    const students = (rawStudents || []).filter((student) => {
       if (student.isArchived) return false;
       const studentBatchIds = [];
       if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
@@ -281,8 +321,8 @@ const isTeacherOfBatch = (b, user) => {
 
     const summary = {
       totalStudents: students.length,
-      totalBatches: batches.filter((b) => b.status !== "archived").length,
-      totalQuizzes: quizzes.length,
+      totalBatches: (batches || []).filter((b) => b.status !== "archived").length,
+      totalQuizzes: (quizzes || []).length,
       totalNotes: totalNotesCount,
       totalTestResults: totalTestResultsCount,
       liveQuiz: getActiveSessionForTeacher(instituteId),
@@ -290,22 +330,7 @@ const isTeacherOfBatch = (b, user) => {
       totalPendingFees: req.user.role === "institute_admin" ? totalPendingFees : undefined,
     };
 
-
-    let processedStudents = students;
-    if (req.user.role === "teacher") {
-      processedStudents = students.map((s) => {
-        const obj = typeof s?.toJSON === "function" ? s.toJSON() : (typeof s?.toObject === "function" ? s.toObject() : { ...s });
-        delete obj.totalFees;
-        delete obj.feePlanType;
-        delete obj.paymentHistory;
-        delete obj.paidAmount;
-        delete obj.pendingAmount;
-        delete obj.dueDate;
-        return obj;
-      });
-    }
-
-    const processedBatches = batches.map((batch) => {
+    const processedBatches = (batches || []).map((batch) => {
       const bIdStr = String(batch._id || batch.id);
       const bNameStr = String(batch.name || "").trim().toLowerCase();
 
@@ -339,7 +364,7 @@ const isTeacherOfBatch = (b, user) => {
       summary,
       students: [],
       batches: processedBatches,
-      quizzes: quizzes,
+      quizzes: quizzes || [],
       notes: [],
       testResults: [],
       institute,
@@ -349,16 +374,31 @@ const isTeacherOfBatch = (b, user) => {
         name: req.user.name,
         email: req.user.email,
       },
+      diagnostics: req.query.debug === "true" ? steps : undefined,
     };
 
-    await setCache(cacheKey, responsePayload, 86400);
+    await setCache(cacheKey, responsePayload, 86400).catch(() => {});
 
     return res.json(responsePayload);
   } catch (error) {
     console.error("getTeacherDashboard error stack:", error);
-    return res
-      .status(500)
-      .json({ message: error.message || "Could not load teacher dashboard" });
+    if (req.query.debug === "true") {
+      return res.status(200).json({
+        diagnostics: steps,
+        error: error.message,
+      });
+    }
+    return res.json({
+      summary: { totalStudents: 0, totalBatches: 0, totalQuizzes: 0, totalNotes: 0, totalTestResults: 0, liveQuiz: null },
+      students: [],
+      batches: [],
+      quizzes: [],
+      notes: [],
+      testResults: [],
+      institute: null,
+      user: { id: req.user._id, role: req.user.role, name: req.user.name, email: req.user.email },
+      diagnostics: steps,
+    });
   }
 };
 
