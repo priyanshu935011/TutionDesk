@@ -608,25 +608,25 @@ class SupabaseDocument {
     if (this.batch !== undefined) {
       const bVal = (this.batch?._id || this.batch?.id || (typeof this.batch === "string" ? this.batch : null));
       if (bVal) {
-        this.batch_id = String(bVal);
+        this.batch_id = toValidUUID(bVal);
       }
     }
     if (this.teacher !== undefined) {
       const tVal = (this.teacher?._id || this.teacher?.id || (typeof this.teacher === "string" ? this.teacher : null));
       if (tVal) {
-        this.teacher_id = String(tVal);
+        this.teacher_id = toValidUUID(tVal);
       }
     }
     if (this.user !== undefined) {
       const uVal = (this.user?._id || this.user?.id || (typeof this.user === "string" ? this.user : null));
       if (uVal) {
-        this.institute_id = String(uVal);
+        this.institute_id = toValidUUID(uVal);
       }
     }
     if (this.institute !== undefined) {
       const iVal = (this.institute?._id || this.institute?.id || (typeof this.institute === "string" ? this.institute : null));
       if (iVal) {
-        this.institute_id = String(iVal);
+        this.institute_id = toValidUUID(iVal);
       }
     }
 
@@ -1754,6 +1754,16 @@ class SupabaseModel {
       delete payload.type;
     }
 
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+    for (const key of uuidPayloadKeys) {
+      if (payload[key] && typeof payload[key] === "string") {
+        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(payload[key]);
+        if (!isUuid) {
+          payload[key] = toValidUUID(payload[key]);
+        }
+      }
+    }
+
     let attempt = 0;
     let data = null;
 
@@ -1908,10 +1918,16 @@ class SupabaseModel {
 
     const payload = update.$set ? update.$set : update;
     const dbPayload = {};
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
     for (const [key, val] of Object.entries(payload)) {
       if (key.startsWith("$")) continue;
       const dbKey = camelToSnake(key);
-      dbPayload[dbKey] = val;
+      if (uuidPayloadKeys.includes(dbKey) && typeof val === "string") {
+        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val);
+        dbPayload[dbKey] = isUuid ? val : toValidUUID(val);
+      } else {
+        dbPayload[dbKey] = val;
+      }
     }
 
     let query = this.supabase.from(this.tableName).update(dbPayload);
