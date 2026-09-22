@@ -150,40 +150,55 @@ export const getTeacherDashboard = async (req, res) => {
 
       batchQuery.teacher = req.user._id;
 
+      const teacherUuid = toValidUUID(req.user._id);
+      const teacherIdStr = String(req.user._id || req.user.id || "");
+
+      testQuery = {
+        institute: instituteId,
+        createdBy: req.user._id,
+      };
+
+      noteQuery = {
+        institute: instituteId,
+        $or: [
+          { createdBy: req.user._id },
+          { created_by: teacherUuid },
+          { created_by: teacherIdStr },
+        ],
+      };
+
       if (batchIds.length > 0) {
         studentQuery.$or = [
           { batch: { $in: batchIds } },
           { batches: { $in: batchIds } },
           { enrolledBatchIds: { $in: batchIds } },
         ];
-        const myStudents = await Student.find({
-          user: ownerId,
-          isArchived: { $ne: true },
-          $or: [
-            { batch: { $in: batchIds } },
-            { batches: { $in: batchIds } },
-            { enrolledBatchIds: { $in: batchIds } },
-          ],
-        }).select("_id");
-        const studentIds = myStudents.map((s) => String(s._id || s.id || s)).filter(Boolean);
-
-        testQuery.student = studentIds.length > 0 ? { $in: studentIds } : null;
-
-        noteQuery.$or = [
-          { batch: { $in: batchIds } },
-          { batch: null },
-          ...(studentIds.length > 0 ? [{ students: { $in: studentIds } }] : [])
-        ];
         quizQuery.batches = { $in: batchIds };
       } else {
         studentQuery.batch = null;
-        testQuery.student = null;
-        noteQuery.batch = null;
         quizQuery.batches = null;
       }
     }
 
-    const [rawStudents, batches, quizzes, totalNotesCount, totalTestResultsCount] = await Promise.all([
+    let totalNotesCount = 0;
+    if (req.user.role === "teacher") {
+      try {
+        const { supabase: sb } = await import("../utils/supabase.js");
+        const teacherUuid = toValidUUID(req.user._id);
+        const teacherIdStr = String(req.user._id || req.user.id || "");
+        const { count } = await sb
+          .from("notes")
+          .select("id", { count: "exact", head: true })
+          .or(`created_by.eq.${teacherUuid},created_by.eq.${teacherIdStr}`);
+        totalNotesCount = count || 0;
+      } catch (e) {
+        totalNotesCount = await Note.countDocuments(noteQuery);
+      }
+    } else {
+      totalNotesCount = await Note.countDocuments(noteQuery);
+    }
+
+    const [rawStudents, batches, quizzes, totalTestResultsCount] = await Promise.all([
       Student.find(studentQuery)
         .select("_id name enrollmentNumber phone parentPhone batch batches enrolledBatchIds pendingAmount totalFees paidAmount paymentHistory isArchived attendanceRecords")
         .populate("batch", "name scheduleDays startTime endTime")
@@ -193,7 +208,6 @@ export const getTeacherDashboard = async (req, res) => {
         .sort({ createdAt: -1 })
         .populate("teacher", "name email"),
       Quiz.find(quizQuery).select("_id title batches institute createdAt").sort({ createdAt: -1 }),
-      Note.countDocuments(noteQuery),
       TestResult.countDocuments(testQuery),
     ]);
 
@@ -556,7 +570,11 @@ export const getNotes = async (req, res) => {
 
     let query = sb.from("notes").select("*");
 
-    if (req.user.role !== "super_admin") {
+    if (req.user.role === "teacher") {
+      const teacherUuid = toValidUUID(req.user._id);
+      const teacherIdStr = String(req.user._id || req.user.id || "");
+      query = query.or(`created_by.eq.${teacherUuid},created_by.eq.${teacherIdStr}`);
+    } else if (req.user.role !== "super_admin") {
       const rawValidIds = Array.from(new Set([instId, ownerId])).filter((id) => id && id.length > 5 && id !== "[object Object]");
       const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
       if (validIds.length > 0) {
@@ -1438,6 +1456,9 @@ export const getTestResults = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
     const query = { institute: instituteId };
+    if (req.user.role === "teacher") {
+      query.createdBy = req.user._id;
+    }
     if (req.query.studentId) {
       query.student = req.query.studentId;
       const studentObj = await Student.findById(req.query.studentId).select("joinedOn");
