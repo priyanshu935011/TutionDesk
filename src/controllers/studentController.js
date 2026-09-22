@@ -155,10 +155,27 @@ export const getStudents = async (req, res) => {
     const activeBatchIds = new Set(allBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
     const archivedBatchIds = new Set(allBatches.filter((b) => b.status === "archived").map((b) => String(b._id)));
 
+const isTeacherOfBatch = (b, user) => {
+  if (!b || !b.teacher || !user) return false;
+  const t = b.teacher;
+  const tStr = typeof t === "object" ? String(t._id || t.id || "") : String(t);
+  const uId = String(user._id || user.id || "");
+  const uUuid = toValidUUID(user._id || user.id);
+  const uPhone = String(user.phone || "").trim();
+  const uEmail = String(user.email || "").trim().toLowerCase();
+
+  return (
+    (tStr && tStr === uId) ||
+    (tStr && tStr === uUuid) ||
+    (uPhone && tStr === uPhone) ||
+    (uEmail && tStr.toLowerCase() === uEmail)
+  );
+};
+
     if (req.user.role === "teacher") {
       const teacherBatchIds = Array.from(activeBatchIds).filter((bId) => {
         const b = allBatches.find((x) => String(x._id) === bId);
-        return b && String(b.teacher) === String(req.user._id);
+        return isTeacherOfBatch(b, req.user);
       });
       query.$or = [
         { batch: { $in: teacherBatchIds } },

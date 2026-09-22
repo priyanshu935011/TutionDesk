@@ -144,14 +144,34 @@ export const getTeacherDashboard = async (req, res) => {
     const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
 
+const isTeacherOfBatch = (b, user) => {
+  if (!b || !b.teacher || !user) return false;
+  const t = b.teacher;
+  const tStr = typeof t === "object" ? String(t._id || t.id || "") : String(t);
+  const uId = String(user._id || user.id || "");
+  const uUuid = toValidUUID(user._id || user.id);
+  const uPhone = String(user.phone || "").trim();
+  const uEmail = String(user.email || "").trim().toLowerCase();
+
+  return (
+    (tStr && tStr === uId) ||
+    (tStr && tStr === uUuid) ||
+    (uPhone && tStr === uPhone) ||
+    (uEmail && tStr.toLowerCase() === uEmail)
+  );
+};
+
     if (req.user.role === "teacher") {
-      const myActiveBatches = allInstBatches.filter((b) => String(b.teacher) === String(req.user._id));
+      const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
       const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
-      batchQuery.teacher = req.user._id;
+      batchQuery.$or = [
+        { teacher: req.user._id },
+        { teacher: toValidUUID(req.user._id) },
+        ...(req.user.phone ? [{ teacher: req.user.phone }] : []),
+      ];
 
       const teacherUuid = toValidUUID(req.user._id);
-      const teacherIdStr = String(req.user._id || req.user.id || "");
 
       testQuery = {
         institute: instituteId,
@@ -163,7 +183,6 @@ export const getTeacherDashboard = async (req, res) => {
         $or: [
           { createdBy: req.user._id },
           { created_by: teacherUuid },
-          { created_by: teacherIdStr },
         ],
       };
 
@@ -185,11 +204,10 @@ export const getTeacherDashboard = async (req, res) => {
       try {
         const { supabase: sb } = await import("../utils/supabase.js");
         const teacherUuid = toValidUUID(req.user._id);
-        const teacherIdStr = String(req.user._id || req.user.id || "");
         const { count } = await sb
           .from("notes")
           .select("id", { count: "exact", head: true })
-          .or(`created_by.eq.${teacherUuid},created_by.eq.${teacherIdStr}`);
+          .eq("created_by", teacherUuid);
         totalNotesCount = count || 0;
       } catch (e) {
         totalNotesCount = await Note.countDocuments(noteQuery);
@@ -572,8 +590,7 @@ export const getNotes = async (req, res) => {
 
     if (req.user.role === "teacher") {
       const teacherUuid = toValidUUID(req.user._id);
-      const teacherIdStr = String(req.user._id || req.user.id || "");
-      query = query.or(`created_by.eq.${teacherUuid},created_by.eq.${teacherIdStr}`);
+      query = query.eq("created_by", teacherUuid);
     } else if (req.user.role !== "super_admin") {
       const rawValidIds = Array.from(new Set([instId, ownerId])).filter((id) => id && id.length > 5 && id !== "[object Object]");
       const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
@@ -1818,6 +1835,9 @@ export const createHiredTeacher = async (req, res) => {
 
 export const getHiredTeachers = async (req, res) => {
   try {
+    if (req.user.role === "teacher") {
+      return res.json([]);
+    }
     if (req.user.role !== "institute_admin") {
       return res.status(403).json({ message: "Access denied. Only institute admins can view teachers." });
     }
