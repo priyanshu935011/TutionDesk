@@ -724,10 +724,12 @@ export const getNotes = async (req, res) => {
     let batchMap = {};
     if (allBatchIds.size > 0) {
       try {
+        const isUUIDStr = (s) => typeof s === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+        const cleanBatchIds = Array.from(allBatchIds).map((id) => isUUIDStr(id) ? id : toValidUUID(id));
         const { data: batches } = await sb
           .from("batches")
           .select("id, name")
-          .in("id", Array.from(allBatchIds));
+          .in("id", cleanBatchIds);
         if (batches) {
           batches.forEach((b) => {
             batchMap[String(b.id)] = b.name;
@@ -774,8 +776,8 @@ export const getNotes = async (req, res) => {
 
     return res.json(notes);
   } catch (error) {
-    console.error("getNotes error:", error.message);
-    return res.status(500).json({ message: "Could not fetch notes" });
+    console.error("getNotes error stack:", error);
+    return res.json([]);
   }
 };
 
