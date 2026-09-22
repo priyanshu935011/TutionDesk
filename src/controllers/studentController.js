@@ -2000,13 +2000,14 @@ export const getStudentSyncData = async (req, res) => {
 
 export const getStudentAttendance = async (req, res) => {
   try {
-    const students = req.students || (req.student ? [req.student] : []);
-    const attendanceMap = {};
-
-    for (const student of students) {
-      const rawAttendance = student.attendanceRecords || student.attendance || [];
-      attendanceMap[String(student._id)] = rawAttendance;
+    const targetStudent = req.student || (req.students ? req.students[0] : null);
+    if (!targetStudent) {
+      return res.json({ success: true, attendanceMap: {} });
     }
+    const rawAttendance = targetStudent.attendanceRecords || targetStudent.attendance || [];
+    const attendanceMap = {
+      [String(targetStudent._id || targetStudent.id)]: rawAttendance
+    };
 
     return res.json({ success: true, attendanceMap });
   } catch (error) {
@@ -2017,29 +2018,32 @@ export const getStudentAttendance = async (req, res) => {
 
 export const getStudentNotes = async (req, res) => {
   try {
-    const students = req.students || (req.student ? [req.student] : []);
-    const notesList = [];
-
-    for (const student of students) {
-      const currentBatchIdVal = student.batch?._id || student.batch;
-      const studentNotes = await Note.find({
-        institute: student.user,
-        $or: [
-          { targetType: "batch", batch: currentBatchIdVal },
-          { targetType: "batch", batch: null },
-          { targetType: "student", students: student._id },
-          { targetType: null, batch: currentBatchIdVal },
-          { targetType: null, batch: null }
-        ],
-      })
-        .sort({ createdAt: -1 })
-        .populate("batch", "name");
-
-      notesList.push(...studentNotes);
+    const student = req.student || (req.students ? req.students[0] : null);
+    if (!student) {
+      return res.json({ success: true, notes: [] });
     }
 
+    const studentBatchIds = [];
+    if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+    if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
+    if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+    const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
+
+    const studentNotes = await Note.find({
+      institute: student.user,
+      $or: [
+        { targetType: "batch", batch: { $in: activeStudentBatchIds } },
+        { targetType: "student", students: student._id },
+        { targetType: null, batch: { $in: activeStudentBatchIds } },
+        { targetType: null, batch: null },
+        { targetType: "all" },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .populate("batch", "name");
+
     const notesMap = new Map();
-    notesList.forEach((n) => notesMap.set(String(n._id), n));
+    (studentNotes || []).forEach((n) => notesMap.set(String(n._id || n.id), n));
 
     return res.json({ success: true, notes: Array.from(notesMap.values()) });
   } catch (error) {
@@ -2050,11 +2054,13 @@ export const getStudentNotes = async (req, res) => {
 
 export const getStudentTestMarks = async (req, res) => {
   try {
-    const students = req.students || (req.student ? [req.student] : []);
-    const studentIds = students.map((s) => s._id);
+    const student = req.student || (req.students ? req.students[0] : null);
+    if (!student) {
+      return res.json({ success: true, testResults: [] });
+    }
 
     const testResults = await TestResult.find({
-      student: { $in: studentIds }
+      student: student._id
     }).sort({ createdAt: -1 });
 
     return res.json({ success: true, testResults });
@@ -2066,12 +2072,21 @@ export const getStudentTestMarks = async (req, res) => {
 
 export const getStudentVideos = async (req, res) => {
   try {
-    const students = req.students || (req.student ? [req.student] : []);
+    const targetStudent = req.student || (req.students ? req.students[0] : null);
+    if (!targetStudent) {
+      return res.json({ success: true, videos: [], recordedLectures: [] });
+    }
     const videosList = [];
     const now = new Date();
+    const students = [targetStudent];
 
     for (const student of students) {
-      const currentBatchIdVal = student.batch?._id || student.batch;
+      const studentBatchIds = [];
+      if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+      if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
+      if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
+      const currentBatchIdVal = activeStudentBatchIds.length > 0 ? activeStudentBatchIds[0] : null;
       const studentId = student._id;
       const sIdStr = String(student._id || student.id || "").trim();
 
@@ -2081,8 +2096,8 @@ export const getStudentVideos = async (req, res) => {
         isArchived: { $ne: true },
         $or: [
           { targetType: "all" },
-          { targetType: "batch", batches: currentBatchIdVal },
-          { targetType: "batch", batches: { $size: 0 } },
+          { targetType: "batch", batches: { $in: activeStudentBatchIds } },
+          { targetType: "batch", batch: { $in: activeStudentBatchIds } },
           { targetType: "student", students: studentId },
           { targetType: null },
         ],
