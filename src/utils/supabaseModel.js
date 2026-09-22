@@ -974,7 +974,7 @@ class SupabaseQuery {
     }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {
-      if (currentFilter[key] && typeof currentFilter[key] === "string" && currentFilter[key].length === 36) {
+      if (currentFilter[key] && typeof currentFilter[key] === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(currentFilter[key])) {
         const { data: userData } = await this.model.supabase
           .from("users")
           .select("institute_id")
@@ -1495,8 +1495,17 @@ class SupabaseModel {
           } else {
             formattedVal = cleanValue(formattedVal);
           }
+          const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbKey);
           if (op === "$in") {
-            q = q.in(dbKey, formattedVal);
+            const cleanInVal = Array.isArray(formattedVal)
+              ? (isUuidCol
+                  ? formattedVal.map((v) => {
+                      const str = String(v);
+                      return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str) ? str : toValidUUID(str);
+                    })
+                  : formattedVal)
+              : formattedVal;
+            q = q.in(dbKey, cleanInVal);
           } else if (op === "$gte") {
             q = q.gte(dbKey, formattedVal);
           } else if (op === "$lte") {
@@ -1522,8 +1531,11 @@ class SupabaseModel {
         } else {
           const cleanItem = cleanValue(val);
           const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
+          const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbKey);
           if (dbKey === "id" && !isUuid) {
             // Non-UUID string passed for Postgres UUID 'id' column, skip eq to prevent 22P02
+          } else if (isUuidCol && !isUuid) {
+            q = q.eq(dbKey, toValidUUID(String(cleanItem)));
           } else {
             q = q.eq(dbKey, cleanItem);
           }
@@ -2143,7 +2155,7 @@ class SupabaseModel {
     }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {
-      if (currentFilter[key] && typeof currentFilter[key] === "string" && currentFilter[key].length === 36) {
+      if (currentFilter[key] && typeof currentFilter[key] === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(currentFilter[key])) {
         const { data: userData } = await this.supabase
           .from("users")
           .select("institute_id")
