@@ -214,8 +214,9 @@ const isTeacherOfBatch = (b, user) => {
     if (req.user.role === "teacher") {
       try {
         const { supabase: sb } = await import("../utils/supabase.js");
+        const isUUID = (str) => typeof str === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
         const rawValidIds = Array.from(new Set([instituteId, ownerId, String(req.user._id || "")])).filter((id) => id && id.length > 5 && id !== "[object Object]");
-        const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
+        const validIds = Array.from(new Set(rawValidIds.flatMap((id) => [toValidUUID(id), ...(isUUID(String(id)) ? [String(id)] : [])])));
         const { count, error } = await sb
           .from("notes")
           .select("id", { count: "exact", head: true })
@@ -602,8 +603,9 @@ export const getNotes = async (req, res) => {
 
     const { supabase: sb } = await import("../utils/supabase.js");
 
+    const isUUID = (str) => typeof str === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
     const rawValidIds = Array.from(new Set([instId, ownerId, String(req.user._id || "")])).filter((id) => id && id.length > 5 && id !== "[object Object]");
-    const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
+    const validIds = Array.from(new Set(rawValidIds.flatMap((id) => [toValidUUID(id), ...(isUUID(String(id)) ? [String(id)] : [])])));
 
     let query = sb.from("notes").select("*");
     if (validIds.length > 0 && req.user.role !== "super_admin") {
