@@ -182,11 +182,16 @@ const isTeacherOfBatch = (b, user) => {
   }
 };
 
+    let teacherBatchIds = [];
     if (req.user.role === "teacher") {
-      const teacherBatchIds = Array.from(activeBatchIds).filter((bId) => {
+      teacherBatchIds = Array.from(activeBatchIds).filter((bId) => {
         const b = allBatches.find((x) => String(x._id) === bId);
         return isTeacherOfBatch(b, req.user);
       });
+      if (teacherBatchIds.length === 0) {
+        await setCache(cacheKey, []);
+        return res.json([]);
+      }
       query.$or = [
         { batch: { $in: teacherBatchIds } },
         { batches: { $in: teacherBatchIds } },
@@ -199,7 +204,17 @@ const isTeacherOfBatch = (b, user) => {
     });
 
     let students = rawStudents;
-    if (req.query.archivedOnly === "true") {
+    if (req.user.role === "teacher") {
+      const teacherBatchSet = new Set(teacherBatchIds);
+      students = rawStudents.filter((student) => {
+        if (student.isArchived) return false;
+        const studentBatchIds = [];
+        if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+        if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
+        if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+        return studentBatchIds.some((bId) => teacherBatchSet.has(bId));
+      });
+    } else if (req.query.archivedOnly === "true") {
       students = rawStudents.filter((student) => {
         if (student.isArchived === true || String(student.isArchived) === "true") return true;
         // Check if student belongs exclusively to archived batches

@@ -1851,11 +1851,11 @@ export const createHiredTeacher = async (req, res) => {
       }
     }
 
-    const fallbackEmail = cleanEmail || `teacher_${last10 || Date.now()}@classtech.local`;
+    const finalEmail = cleanEmail || "";
     const hashedPassword = await bcrypt.hash(password, 10);
     const newTeacher = await User.create({
       name: name.trim(),
-      email: fallbackEmail,
+      email: finalEmail,
       phone: cleanPhone,
       password: hashedPassword,
       role: "teacher",

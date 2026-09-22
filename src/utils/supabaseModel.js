@@ -2201,11 +2201,19 @@ class SupabaseModel {
 
     if (filter.user && typeof filter.user === "string") {
       const matchId = filter.user;
-      const { data: userData } = await this.supabase.from("users").select("institute_id").eq("id", matchId).maybeSingle();
+      const isUuidStr = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(matchId);
+      const queryUuid = isUuidStr ? matchId : toValidUUID(matchId);
+
+      let userData = null;
+      try {
+        const { data } = await this.supabase.from("users").select("institute_id").eq("id", queryUuid).maybeSingle();
+        userData = data;
+      } catch (_) {}
+
       if (userData && userData.institute_id) {
         query = query.eq("institute_id", userData.institute_id);
       } else {
-        query = query.eq("institute_id", matchId);
+        query = query.eq("institute_id", queryUuid);
       }
     }
 
@@ -2228,11 +2236,19 @@ class SupabaseModel {
       let retryQuery = this.supabase.from("students").select("enrollment_number, institute_id");
       if (filter.user && typeof filter.user === "string") {
         const matchId = filter.user;
-        const { data: userData } = await this.supabase.from("users").select("institute_id").eq("id", matchId).maybeSingle();
+        const isUuidStr = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(matchId);
+        const queryUuid = isUuidStr ? matchId : toValidUUID(matchId);
+
+        let userData = null;
+        try {
+          const { data } = await this.supabase.from("users").select("institute_id").eq("id", queryUuid).maybeSingle();
+          userData = data;
+        } catch (_) {}
+
         if (userData && userData.institute_id) {
           retryQuery = retryQuery.eq("institute_id", userData.institute_id);
         } else {
-          retryQuery = retryQuery.eq("institute_id", matchId);
+          retryQuery = retryQuery.eq("institute_id", queryUuid);
         }
       }
       if (filter.isDemoAccount === false || filter.isDemoAccount?.$ne === true) {
