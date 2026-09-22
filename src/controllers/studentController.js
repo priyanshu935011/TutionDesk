@@ -227,10 +227,13 @@ const isTeacherOfBatch = (b, user) => {
       });
     } else if (req.query.includeArchived !== "true") {
       students = rawStudents.filter((student) => {
-        if (student.isArchived) return false;
+        if (student.isArchived === true || String(student.isArchived) === "true" || student.is_archived === true || String(student.is_archived) === "true") return false;
+        const isExplicitlyUnarchived = student.isArchived === false || student.is_archived === false || String(student.isArchived) === "false" || String(student.is_archived) === "false";
+        if (isExplicitlyUnarchived) return true;
+
         const studentBatchIds = [];
-        if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
-        if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
+        if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+        if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
         if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
         if (studentBatchIds.length === 0) return true;
         return studentBatchIds.some((bId) => activeBatchIds.has(bId));
@@ -1142,6 +1145,17 @@ export const archiveStudent = async (req, res) => {
     student.isArchived = targetArchivedState;
     student.is_archived = targetArchivedState;
     await student.save();
+
+    if (!targetArchivedState && student.batch) {
+      try {
+        const bId = String(student.batch._id || student.batch.id || student.batch);
+        const b = await Batch.findById(bId);
+        if (b && b.status === "archived") {
+          b.status = "active";
+          await b.save();
+        }
+      } catch (_) {}
+    }
 
     try {
       if (student.enrollmentNumber) {
