@@ -147,18 +147,28 @@ export const getTeacherDashboard = async (req, res) => {
 const isTeacherOfBatch = (b, user) => {
   if (!b || !b.teacher || !user) return false;
   const t = b.teacher;
-  const tStr = typeof t === "object" ? String(t._id || t.id || "") : String(t);
-  const uId = String(user._id || user.id || "");
+  const uId = String(user._id || user.id || "").trim();
   const uUuid = toValidUUID(user._id || user.id);
   const uPhone = String(user.phone || "").trim();
   const uEmail = String(user.email || "").trim().toLowerCase();
 
-  return (
-    (tStr && tStr === uId) ||
-    (tStr && tStr === uUuid) ||
-    (uPhone && tStr === uPhone) ||
-    (uEmail && tStr.toLowerCase() === uEmail)
-  );
+  if (typeof t === "object" && t !== null) {
+    const tId = String(t._id || t.id || "").trim();
+    const tPhone = String(t.phone || "").trim();
+    const tEmail = String(t.email || "").trim().toLowerCase();
+    return (
+      (tId && (tId === uId || tId === uUuid)) ||
+      (tPhone && uPhone && tPhone === uPhone) ||
+      (tEmail && uEmail && tEmail === uEmail)
+    );
+  } else {
+    const tStr = String(t).trim();
+    return (
+      (tStr && (tStr === uId || tStr === uUuid)) ||
+      (uPhone && tStr === uPhone) ||
+      (uEmail && tStr.toLowerCase() === uEmail)
+    );
+  }
 };
 
     if (req.user.role === "teacher") {
@@ -169,6 +179,7 @@ const isTeacherOfBatch = (b, user) => {
         { teacher: req.user._id },
         { teacher: toValidUUID(req.user._id) },
         ...(req.user.phone ? [{ teacher: req.user.phone }] : []),
+        ...(req.user.email ? [{ teacher: req.user.email }] : []),
       ];
 
       const teacherUuid = toValidUUID(req.user._id);
@@ -203,12 +214,17 @@ const isTeacherOfBatch = (b, user) => {
     if (req.user.role === "teacher") {
       try {
         const { supabase: sb } = await import("../utils/supabase.js");
-        const teacherUuid = toValidUUID(req.user._id);
-        const { count } = await sb
+        const rawValidIds = Array.from(new Set([instituteId, ownerId, String(req.user._id || "")])).filter((id) => id && id.length > 5 && id !== "[object Object]");
+        const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
+        const { count, error } = await sb
           .from("notes")
           .select("id", { count: "exact", head: true })
-          .eq("created_by", teacherUuid);
-        totalNotesCount = count || 0;
+          .in("institute_id", validIds);
+        if (!error && count !== null && count !== undefined) {
+          totalNotesCount = count;
+        } else {
+          totalNotesCount = await Note.countDocuments(noteQuery);
+        }
       } catch (e) {
         totalNotesCount = await Note.countDocuments(noteQuery);
       }
@@ -586,35 +602,63 @@ export const getNotes = async (req, res) => {
 
     const { supabase: sb } = await import("../utils/supabase.js");
 
-    let query = sb.from("notes").select("*");
+    const rawValidIds = Array.from(new Set([instId, ownerId, String(req.user._id || "")])).filter((id) => id && id.length > 5 && id !== "[object Object]");
+    const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
 
-    if (req.user.role === "teacher") {
-      const teacherUuid = toValidUUID(req.user._id);
-      query = query.eq("created_by", teacherUuid);
-    } else if (req.user.role !== "super_admin") {
-      const rawValidIds = Array.from(new Set([instId, ownerId])).filter((id) => id && id.length > 5 && id !== "[object Object]");
-      const validIds = rawValidIds.flatMap((id) => [String(id), toValidUUID(id)]);
-      if (validIds.length > 0) {
-        query = query.in("institute_id", validIds);
-      }
+    let query = sb.from("notes").select("*");
+    if (validIds.length > 0 && req.user.role !== "super_admin") {
+      query = query.in("institute_id", validIds);
     }
 
-    const { data: rawRows, error } = await query.order("created_at", { ascending: false });
+    let rawRows = [];
+    const { data, error } = await query.order("created_at", { ascending: false });
 
     if (error) {
       console.error("getNotes Supabase error:", error.message);
-      return res.status(500).json({ message: "Could not fetch notes" });
+    } else {
+      rawRows = data || [];
+    }
+
+    // Filter notes for hired teachers to only show notes for their assigned batches or uploaded by them
+    let rows = rawRows;
+    if (req.user.role === "teacher") {
+      const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instId].filter(Boolean);
+      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
+      const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+      const myBatchIds = new Set(myActiveBatches.map((b) => String(b._id || b.id)));
+      const teacherUuid = toValidUUID(req.user._id);
+      const teacherIdStr = String(req.user._id);
+
+      rows = rawRows.filter((r) => {
+        const rCreatedBy = String(r.created_by || r.createdBy || "");
+        if (rCreatedBy && (rCreatedBy === teacherUuid || rCreatedBy === teacherIdStr)) {
+          return true;
+        }
+
+        const noteBatchIds = [];
+        if (r.batch_id) noteBatchIds.push(String(r.batch_id));
+        if (Array.isArray(r.batch_ids)) {
+          r.batch_ids.forEach((id) => id && noteBatchIds.push(String(id)));
+        } else if (typeof r.batch_ids === "string" && r.batch_ids.startsWith("[")) {
+          try {
+            JSON.parse(r.batch_ids).forEach((id) => id && noteBatchIds.push(String(id)));
+          } catch (_) {}
+        }
+
+        if (noteBatchIds.length === 0) return true;
+        return noteBatchIds.some((bId) => myBatchIds.has(bId));
+      });
     }
 
     // Deduplicate notes by file_url: if a note with valid batch/file_size exists for a file_url, omit the 0-byte empty duplicate!
     const validFileUrls = new Set(
-      (rawRows || [])
+      rows
         .filter((r) => (Number(r.file_size_bytes || 0) > 0 || r.batch_id || (Array.isArray(r.batch_ids) && r.batch_ids.length > 0)))
         .map((r) => r.file_url)
         .filter(Boolean)
     );
 
-    const rows = (rawRows || []).filter((r) => {
+    const filteredRows = rows.filter((r) => {
       if (validFileUrls.has(r.file_url)) {
         const is0ByteEmpty = (!r.file_size_bytes || Number(r.file_size_bytes) === 0) && (!r.batch_id) && (!r.batch_ids || r.batch_ids.length === 0);
         if (is0ByteEmpty) return false;
@@ -624,7 +668,7 @@ export const getNotes = async (req, res) => {
 
     // Collect all unique batch IDs from both batch_id and batch_ids array
     const allBatchIds = new Set();
-    (rows || []).forEach((r) => {
+    filteredRows.forEach((r) => {
       if (r.batch_id) allBatchIds.add(String(r.batch_id));
       if (Array.isArray(r.batch_ids)) {
         r.batch_ids.forEach((id) => id && allBatchIds.add(String(id)));
@@ -637,18 +681,20 @@ export const getNotes = async (req, res) => {
 
     let batchMap = {};
     if (allBatchIds.size > 0) {
-      const { data: batches } = await sb
-        .from("batches")
-        .select("id, name")
-        .in("id", Array.from(allBatchIds));
-      if (batches) {
-        batches.forEach((b) => {
-          batchMap[String(b.id)] = b.name;
-        });
-      }
+      try {
+        const { data: batches } = await sb
+          .from("batches")
+          .select("id, name")
+          .in("id", Array.from(allBatchIds));
+        if (batches) {
+          batches.forEach((b) => {
+            batchMap[String(b.id)] = b.name;
+          });
+        }
+      } catch (_) {}
     }
 
-    const notes = (rows || []).map((row) => {
+    const notes = filteredRows.map((row) => {
       const rowBatchIds = [];
       if (Array.isArray(row.batch_ids)) {
         row.batch_ids.forEach((id) => id && rowBatchIds.push(String(id)));

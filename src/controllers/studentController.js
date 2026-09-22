@@ -134,7 +134,7 @@ export const getStudents = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const cacheKey = `teacher:students:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
+    const cacheKey = `teacher:students:${req.user._id}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
     if (req.query.refresh !== "true" && req.query.archivedOnly !== "true") {
       const cached = await getCache(cacheKey);
       if (cached) {
@@ -158,18 +158,28 @@ export const getStudents = async (req, res) => {
 const isTeacherOfBatch = (b, user) => {
   if (!b || !b.teacher || !user) return false;
   const t = b.teacher;
-  const tStr = typeof t === "object" ? String(t._id || t.id || "") : String(t);
-  const uId = String(user._id || user.id || "");
+  const uId = String(user._id || user.id || "").trim();
   const uUuid = toValidUUID(user._id || user.id);
   const uPhone = String(user.phone || "").trim();
   const uEmail = String(user.email || "").trim().toLowerCase();
 
-  return (
-    (tStr && tStr === uId) ||
-    (tStr && tStr === uUuid) ||
-    (uPhone && tStr === uPhone) ||
-    (uEmail && tStr.toLowerCase() === uEmail)
-  );
+  if (typeof t === "object" && t !== null) {
+    const tId = String(t._id || t.id || "").trim();
+    const tPhone = String(t.phone || "").trim();
+    const tEmail = String(t.email || "").trim().toLowerCase();
+    return (
+      (tId && (tId === uId || tId === uUuid)) ||
+      (tPhone && uPhone && tPhone === uPhone) ||
+      (tEmail && uEmail && tEmail === uEmail)
+    );
+  } else {
+    const tStr = String(t).trim();
+    return (
+      (tStr && (tStr === uId || tStr === uUuid)) ||
+      (uPhone && tStr === uPhone) ||
+      (uEmail && tStr.toLowerCase() === uEmail)
+    );
+  }
 };
 
     if (req.user.role === "teacher") {
