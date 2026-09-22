@@ -1521,7 +1521,13 @@ class SupabaseModel {
           } else if (op === "$lt") {
             q = q.lt(dbKey, formattedVal);
           } else if (op === "$ne") {
-            q = q.neq(dbKey, formattedVal);
+            if (formattedVal === true) {
+              q = q.or(`${dbKey}.eq.false,${dbKey}.is.null`);
+            } else if (formattedVal === false) {
+              q = q.eq(dbKey, true);
+            } else {
+              q = q.neq(dbKey, formattedVal);
+            }
           } else if (op === "$nin") {
             q = q.not(dbKey, "in", `(${formattedVal.map(v => String(v)).join(",")})`);
           }

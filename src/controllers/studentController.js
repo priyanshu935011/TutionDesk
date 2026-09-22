@@ -1140,6 +1140,7 @@ export const archiveStudent = async (req, res) => {
 
     const targetArchivedState = req.body.isArchived !== undefined ? Boolean(req.body.isArchived) : !student.isArchived;
     student.isArchived = targetArchivedState;
+    student.is_archived = targetArchivedState;
     await student.save();
 
     try {
