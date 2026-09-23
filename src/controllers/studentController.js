@@ -3349,7 +3349,7 @@ export const getStudentNotifications = async (req, res) => {
   try {
     const students = req.students || (req.student ? [req.student] : []);
     if (!students || students.length === 0) {
-      return res.json({ success: true, notifications: [], unreadCount: 0, notificationsMap: {} });
+      return res.json({ success: true, notificationsMap: {} });
     }
 
     const { supabase: sb } = await import("../utils/supabase.js");
@@ -3414,15 +3414,9 @@ export const getStudentNotifications = async (req, res) => {
       notificationsMap[stIdStr] = studentNotifications;
     }
 
-    const primaryStudentId = String(students[0]._id || students[0].id || "").trim();
-    const primaryNotifications = notificationsMap[primaryStudentId] || [];
-    const unreadCount = primaryNotifications.filter((n) => !n.isRead).length;
-
     return res.json({
       success: true,
-      notifications: primaryNotifications,
       notificationsMap,
-      unreadCount,
     });
   } catch (error) {
     console.error("getStudentNotifications error:", error.message);
@@ -3432,23 +3426,25 @@ export const getStudentNotifications = async (req, res) => {
 
 export const markNotificationRead = async (req, res) => {
   try {
-    const studentId = req.student._id;
+    const students = req.students || (req.student ? [req.student] : []);
+    const studentIds = students.map((s) => String(s._id || s.id || "")).filter(Boolean);
     const notificationId = req.params.id;
     const { supabase: sb } = await import("../utils/supabase.js");
 
     if (notificationId === "read-all") {
-      await sb
-        .from("notifications")
-        .update({ is_read: true })
-        .eq("student_id", String(studentId));
-      await Notification.updateMany({ student: studentId }, { isRead: true });
+      if (studentIds.length > 0) {
+        await sb
+          .from("notifications")
+          .update({ is_read: true })
+          .in("student_id", studentIds);
+        await Notification.updateMany({ student: { $in: studentIds } }, { isRead: true });
+      }
     } else {
       await sb
         .from("notifications")
         .update({ is_read: true })
-        .eq("id", notificationId)
-        .eq("student_id", String(studentId));
-      await Notification.updateOne({ _id: notificationId, student: studentId }, { isRead: true });
+        .eq("id", notificationId);
+      await Notification.updateOne({ _id: notificationId }, { isRead: true });
     }
 
     return res.json({ success: true });
