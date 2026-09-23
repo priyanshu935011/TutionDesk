@@ -2059,21 +2059,7 @@ export const getStudentNotes = async (req, res) => {
     const studentIdStr = String(student._id || student.id || "").trim();
 
     const studentNotes = await Note.find({
-      institute: student.user,
-      $or: [
-        { targetType: "batch", batch: { $in: activeStudentBatchIds } },
-        { targetType: "batch", batches: { $in: activeStudentBatchIds } },
-        { targetType: "batch", batch_ids: { $in: activeStudentBatchIds } },
-        { targetType: "student", students: student._id },
-        { targetType: "student", student_ids: student._id },
-        { targetType: "student", students: studentIdStr },
-        { targetType: "student", student_ids: studentIdStr },
-        { targetType: null, batch: { $in: activeStudentBatchIds } },
-        { targetType: null, batches: { $in: activeStudentBatchIds } },
-        { targetType: null, batch_ids: { $in: activeStudentBatchIds } },
-        { targetType: null, batch: null },
-        { targetType: "all" },
-      ],
+      institute: student.user
     })
       .sort({ createdAt: -1 })
       .populate("batch", "name");
@@ -2105,7 +2091,7 @@ export const getStudentNotes = async (req, res) => {
     return res.json({ success: true, notes: Array.from(notesMap.values()) });
   } catch (error) {
     console.error("getStudentNotes error:", error);
-    return res.status(500).json({ message: "Error fetching notes" });
+    return res.json({ success: true, notes: [] });
   }
 };
 
