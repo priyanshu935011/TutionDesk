@@ -248,28 +248,38 @@ export const sendOTPEmail = async (email, name, otp) => {
   } catch (apiError) {
     console.warn("Brevo HTTP API failed or timed out. Falling back to SMTP connection...", apiError.message);
 
-    const transporter = nodemailer.createTransport({
-      host,
-      port: Number(port),
-      secure: Number(port) === 465,
-      auth: {
-        user,
-        pass,
-      },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 8000,
-    });
+    if (!host || !user || !pass) {
+      console.warn("SMTP configuration incomplete. Cannot send email via SMTP.");
+      throw new Error(`Email delivery failed: ${apiError.message}`);
+    }
 
-    const mailOptions = {
-      from,
-      to: email,
-      subject: `${otp} is your Classtech OTP`,
-      html: emailHtml,
-    };
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port: Number(port),
+        secure: Number(port) === 465,
+        auth: {
+          user,
+          pass,
+        },
+        connectionTimeout: 5000,
+        greetingTimeout: 5000,
+        socketTimeout: 5000,
+      });
 
-    await transporter.sendMail(mailOptions);
-    console.log("OTP Email sent successfully via SMTP fallback.");
+      const mailOptions = {
+        from,
+        to: email,
+        subject: `${otp} is your Classtech OTP`,
+        html: emailHtml,
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log("OTP Email sent successfully via SMTP fallback.");
+    } catch (smtpErr) {
+      console.error("SMTP fallback error:", smtpErr.message);
+      throw new Error(`Email delivery failed: ${smtpErr.message}`);
+    }
   }
 };
 
