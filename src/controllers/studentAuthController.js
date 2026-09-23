@@ -4,7 +4,8 @@ import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import { getInitialPassword } from "./studentController.js";
-import { sendResetEmail } from "../utils/mailer.js";
+import { sendResetEmail, sendOTPEmail } from "../utils/mailer.js";
+import { sendSMSOTP } from "../utils/smsHelper.js";
 import redisClient from "../config/redis.js";
 import cloudinary from "../utils/cloudinary.js";
 import { deleteCache } from "../utils/cache.js";
@@ -224,6 +225,7 @@ export const forgotStudentPassword = async (req, res) => {
 
     const isEmail = rawIdentifier.includes("@");
     const cleanPhone = rawIdentifier.replace(/\D/g, "");
+    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
 
     let student = null;
     if (isEmail) {
@@ -233,6 +235,8 @@ export const forgotStudentPassword = async (req, res) => {
         $or: [
           { phone: cleanPhone },
           { parentPhone: cleanPhone },
+          { phone: last10 },
+          { parentPhone: last10 },
           { enrollmentNumber: rawIdentifier },
         ],
       });
@@ -254,25 +258,35 @@ export const forgotStudentPassword = async (req, res) => {
       { expiresIn: "15m" }
     );
 
-    const recipientPhone = student.phone?.trim() || student.parentPhone?.trim();
-    const instId = student.user;
+    const recipientPhone = cleanPhone || student.phone?.trim() || student.parentPhone?.trim();
 
+    // 1. If user entered a Phone Number (or input is not email): send OTP via Hanu SMS API
     if (!isEmail && recipientPhone) {
-      // Send OTP via WhatsApp
       try {
-        await sendTemplateMessage(String(instId), recipientPhone, "student_forgot_password_otp", [otp]);
+        await sendSMSOTP(recipientPhone, otp);
         return res.json({
-          message: `A 6-digit verification OTP has been sent via WhatsApp to ${recipientPhone}.`,
+          message: `A 6-digit verification OTP code has been sent via SMS to ${recipientPhone}.`,
           otpToken,
           method: "phone",
           phone: recipientPhone,
         });
-      } catch (waErr) {
-        console.error("WhatsApp OTP error:", waErr.message);
+      } catch (smsErr) {
+        console.error("SMS OTP error:", smsErr.message);
+        // If SMS failed and student has a real email, attempt fallback to email
+        if (student.email && !student.email.endsWith("@classtech.local")) {
+          await sendOTPEmail(student.email, student.name, otp);
+          return res.json({
+            message: `SMS failed (${smsErr.message}). A 6-digit verification OTP code was sent to your email (${student.email}).`,
+            otpToken,
+            method: "email",
+            email: student.email,
+          });
+        }
+        throw smsErr;
       }
     }
 
-    // Default or Fallback: Send OTP via Email
+    // 2. If user entered an Email address: send OTP via Email
     if (student.email && !student.email.endsWith("@classtech.local")) {
       await sendOTPEmail(student.email, student.name, otp);
       return res.json({
@@ -283,23 +297,21 @@ export const forgotStudentPassword = async (req, res) => {
       });
     }
 
-    // If no email, fallback to WhatsApp
+    // Fallback if email input was provided but student has no real email
     if (recipientPhone) {
-      try {
-        await sendTemplateMessage(String(instId), recipientPhone, "student_forgot_password_otp", [otp]);
-        return res.json({
-          message: `A 6-digit verification OTP has been sent via WhatsApp to ${recipientPhone}.`,
-          otpToken,
-          method: "phone",
-          phone: recipientPhone,
-        });
-      } catch (_) {}
+      await sendSMSOTP(recipientPhone, otp);
+      return res.json({
+        message: `A 6-digit verification OTP code has been sent via SMS to ${recipientPhone}.`,
+        otpToken,
+        method: "phone",
+        phone: recipientPhone,
+      });
     }
 
-    return res.status(400).json({ message: "No valid email or WhatsApp phone number found for this student." });
+    return res.status(400).json({ message: "No valid email or mobile phone number found for this student account." });
   } catch (error) {
     console.error("Forgot student password error:", error);
-    return res.status(500).json({ message: "Could not send verification OTP. Please try again." });
+    return res.status(500).json({ message: error.message || "Could not send verification OTP. Please try again." });
   }
 };
 

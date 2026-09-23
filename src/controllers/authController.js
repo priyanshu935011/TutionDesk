@@ -5,6 +5,7 @@ import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import redisClient from "../config/redis.js";
 import { sendResetEmail, sendDemoRequestEmail, sendOTPEmail } from "../utils/mailer.js";
+import { sendSMSOTP } from "../utils/smsHelper.js";
 
 const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@classtech.com").toLowerCase();
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
@@ -284,45 +285,108 @@ export const bookDemo = async (req, res) => {
 
 export const appForgotUserPassword = async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ message: "Email is required." });
+    const rawIdentifier = (req.body.identifier || req.body.email || req.body.phone || "").toString().trim();
+    if (!rawIdentifier) {
+      return res.status(400).json({ message: "Email or Phone Number is required." });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const isEmail = rawIdentifier.includes("@");
+    const cleanPhone = rawIdentifier.replace(/\D/g, "");
+    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+
+    let user = null;
+    if (isEmail) {
+      user = await User.findOne({ email: rawIdentifier.toLowerCase() });
+    } else if (cleanPhone.length >= 7) {
+      user = await User.findOne({
+        $or: [
+          { phone: cleanPhone },
+          { phone: last10 },
+          { phone: `+91${last10}` },
+          { phone: `91${last10}` },
+          { email: `teacher_${last10}@classtech.local` },
+        ],
+      });
+    }
+
     if (!user) {
-      return res.status(404).json({ message: "User with this email not found." });
+      return res.status(404).json({ message: "Educator account not found for the provided email or phone number." });
     }
 
     // Generate random 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
 
-    // Sign a temporary reset token valid for 10 minutes containing the hash of the OTP
+    // Sign a temporary reset token valid for 10 minutes
     const otpToken = jwt.sign(
-      { email: user.email, otpHash },
+      { userId: user._id, email: user.email, phone: user.phone, otpHash },
       process.env.JWT_SECRET,
       { expiresIn: "10m" }
     );
 
-    // Send the OTP via email
-    await sendOTPEmail(user.email, user.name || "Educator", otp);
+    const recipientPhone = cleanPhone || user.phone?.trim();
 
-    return res.json({
-      message: "A 6-digit OTP verification code has been sent to your email address.",
-      otpToken
-    });
+    // 1. If user entered a Phone Number (or input is not email): send OTP via Hanu SMS API
+    if (!isEmail && recipientPhone) {
+      try {
+        await sendSMSOTP(recipientPhone, otp);
+        return res.json({
+          message: `A 6-digit verification OTP code has been sent via SMS to ${recipientPhone}.`,
+          otpToken,
+          method: "phone",
+          phone: recipientPhone,
+        });
+      } catch (smsErr) {
+        console.error("SMS OTP error:", smsErr.message);
+        if (user.email && !user.email.endsWith("@classtech.local")) {
+          await sendOTPEmail(user.email, user.name || "Educator", otp);
+          return res.json({
+            message: `SMS failed (${smsErr.message}). A 6-digit verification OTP code was sent to your email (${user.email}).`,
+            otpToken,
+            method: "email",
+            email: user.email,
+          });
+        }
+        throw smsErr;
+      }
+    }
+
+    // 2. If user entered an Email address: send OTP via Email
+    if (user.email && !user.email.endsWith("@classtech.local")) {
+      await sendOTPEmail(user.email, user.name || "Educator", otp);
+      return res.json({
+        message: "A 6-digit OTP verification code has been sent to your email address.",
+        otpToken,
+        method: "email",
+        email: user.email,
+      });
+    }
+
+    // Fallback if email input was provided but user has no real email
+    if (recipientPhone) {
+      await sendSMSOTP(recipientPhone, otp);
+      return res.json({
+        message: `A 6-digit verification OTP code has been sent via SMS to ${recipientPhone}.`,
+        otpToken,
+        method: "phone",
+        phone: recipientPhone,
+      });
+    }
+
+    return res.status(400).json({ message: "No valid email or mobile phone number found for this account." });
   } catch (error) {
     console.error("App forgot password error:", error);
-    return res.status(500).json({ message: "Could not send verification OTP. Please try again." });
+    return res.status(500).json({ message: error.message || "Could not send verification OTP. Please try again." });
   }
 };
 
 export const appResetUserPassword = async (req, res) => {
   try {
-    const { email, otp, otpToken, password } = req.body;
-    if (!email || !otp || !otpToken || !password) {
-      return res.status(400).json({ message: "Email, OTP code, otpToken, and new password are required." });
+    const { email, identifier, phone, otp, otpToken, password } = req.body;
+    const reqTarget = (email || identifier || phone || "").toString().trim().toLowerCase();
+
+    if (!otp || !otpToken || !password) {
+      return res.status(400).json({ message: "OTP code, otpToken, and new password are required." });
     }
 
     let decoded;
@@ -330,10 +394,6 @@ export const appResetUserPassword = async (req, res) => {
       decoded = jwt.verify(otpToken, process.env.JWT_SECRET);
     } catch (err) {
       return res.status(400).json({ message: "Verification session has expired or is invalid." });
-    }
-
-    if (decoded.email.toLowerCase() !== email.toLowerCase()) {
-      return res.status(400).json({ message: "Session email mismatch." });
     }
 
     const inputHash = crypto.createHash("sha256").update(String(otp).trim()).digest("hex");
@@ -345,9 +405,24 @@ export const appResetUserPassword = async (req, res) => {
       return res.status(400).json({ message: "Password must be at least 6 characters long." });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    let user = null;
+    if (decoded.userId) {
+      user = await User.findById(decoded.userId);
+    }
+    if (!user && reqTarget) {
+      const cleanPhone = reqTarget.replace(/\D/g, "");
+      const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+      user = await User.findOne({
+        $or: [
+          { email: reqTarget },
+          { phone: reqTarget },
+          ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }, { phone: last10 }] : [])
+        ]
+      });
+    }
+
     if (!user) {
-      return res.status(404).json({ message: "User not found." });
+      return res.status(404).json({ message: "User account not found." });
     }
 
     user.password = await bcrypt.hash(password, 10);
@@ -356,6 +431,6 @@ export const appResetUserPassword = async (req, res) => {
     return res.json({ message: "Your password has been reset successfully! You can now log in." });
   } catch (error) {
     console.error("App reset password error:", error);
-    return res.status(500).json({ message: "Could not reset password. Please try again." });
+    return res.status(500).json({ message: error.message || "Could not reset password. Please try again." });
   }
 };
