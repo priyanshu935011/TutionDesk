@@ -13,8 +13,10 @@ const router = express.Router();
 
 router.post("/login", loginUser);
 router.post("/change-password", protect, changeUserPassword);
-router.post("/forgot-password", forgotUserPassword);
-router.post("/reset-password", resetUserPassword);
+router.post("/forgot-password", appForgotUserPassword);
+router.post("/reset-password", appResetUserPassword);
+router.post("/web-forgot-password", forgotUserPassword);
+router.post("/web-reset-password", resetUserPassword);
 router.post("/book-demo", bookDemo);
 router.post("/app-forgot-password", appForgotUserPassword);
 router.post("/app-reset-password", appResetUserPassword);

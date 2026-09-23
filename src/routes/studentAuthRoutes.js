@@ -14,7 +14,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.post("/login", studentLogin);
 router.post("/forgot-password", forgotStudentPassword);
+router.post("/app-forgot-password", forgotStudentPassword);
 router.post("/reset-password", resetStudentPassword);
+router.post("/app-reset-password", resetStudentPassword);
 router.put("/profile", protectStudent, updateStudentProfile);
 router.post("/profile-picture", protectStudent, upload.single("image"), uploadStudentProfilePicture);
 

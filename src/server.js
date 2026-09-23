@@ -125,24 +125,26 @@ app.get("/ads.txt", async (req, res) => {
   }
 });
 
-app.use("/auth", authLimiter, authRoutes);
-app.use("/api/auth", authLimiter, authRoutes);
-app.use("/admin", adminRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/batches", batchRoutes);
-app.use("/api/batches", batchRoutes);
-app.use("/students", studentRoutes);
-app.use("/api/students", studentRoutes);
-app.use("/dashboard", dashboardRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/teacher", teacherRoutes);
-app.use("/api/teacher", teacherRoutes);
-app.use("/student-auth", authLimiter, studentAuthRoutes);
-app.use("/student", studentPortalRoutes);
-app.use("/student-portal", studentPortalRoutes);
-app.use("/api/student", studentPortalRoutes);
-app.use("/api/student-portal", studentPortalRoutes);
-app.use("/api/student-auth", authLimiter, studentAuthRoutes);
+app.use(["/auth", "/api/auth"], authLimiter, authRoutes);
+app.use(["/admin", "/api/admin"], adminRoutes);
+app.use(["/batches", "/api/batches"], batchRoutes);
+app.use(["/students", "/api/students"], studentRoutes);
+app.use(["/dashboard", "/api/dashboard"], dashboardRoutes);
+app.use(["/teacher", "/api/teacher"], teacherRoutes);
+app.use(["/student/auth", "/student-auth", "/api/student/auth", "/api/student-auth"], authLimiter, studentAuthRoutes);
+app.use(["/student-portal", "/api/student-portal"], studentPortalRoutes);
+app.use("/student", (req, res, next) => {
+  if (req.path.startsWith("/auth")) {
+    return studentAuthRoutes(req, res, next);
+  }
+  return studentPortalRoutes(req, res, next);
+});
+app.use("/api/student", (req, res, next) => {
+  if (req.path.startsWith("/auth")) {
+    return studentAuthRoutes(req, res, next);
+  }
+  return studentPortalRoutes(req, res, next);
+});
 app.use("/whatsapp", whatsappRoute);
 app.use("/api/whatsapp", whatsappRoute);
 app.use("/cron", cronRoute);
