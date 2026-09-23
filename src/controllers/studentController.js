@@ -2101,7 +2101,6 @@ export const getStudentNotes = async (req, res) => {
     return res.json({
       success: true,
       notesMap,
-      notes: Array.from(allNotesSet.values()),
     });
   } catch (error) {
     console.error("getStudentNotes error:", error);
@@ -2113,11 +2112,10 @@ export const getStudentTestMarks = async (req, res) => {
   try {
     const students = req.students || (req.student ? [req.student] : []);
     if (!students || students.length === 0) {
-      return res.json({ success: true, testResultsMap: {}, testResults: [] });
+      return res.json({ success: true, testResultsMap: {} });
     }
 
     const testResultsMap = {};
-    const allTestResults = [];
 
     for (const student of students) {
       const stIdStr = String(student._id || student.id || "").trim();
@@ -2126,15 +2124,11 @@ export const getStudentTestMarks = async (req, res) => {
       }).sort({ createdAt: -1 });
 
       testResultsMap[stIdStr] = testResults || [];
-      if (Array.isArray(testResults)) {
-        allTestResults.push(...testResults);
-      }
     }
 
     return res.json({
       success: true,
       testResultsMap,
-      testResults: allTestResults,
     });
   } catch (error) {
     console.error("getStudentTestMarks error:", error);
@@ -2146,11 +2140,10 @@ export const getStudentVideos = async (req, res) => {
   try {
     const students = req.students || (req.student ? [req.student] : []);
     if (!students || students.length === 0) {
-      return res.json({ success: true, videosMap: {}, videos: [], recordedLectures: [] });
+      return res.json({ success: true, videosMap: {} });
     }
 
     const videosMap = {};
-    const allRecordedLecturesMap = new Map();
     const now = new Date();
 
     for (const student of students) {
@@ -2324,19 +2317,15 @@ export const getStudentVideos = async (req, res) => {
               expiryDate: v.expiryDate,
             };
             recordedLecturesMap.set(vIdStr, videoObj);
-            allRecordedLecturesMap.set(vIdStr, videoObj);
           }
         });
 
       videosMap[stIdStr] = Array.from(recordedLecturesMap.values());
     }
 
-    const allRecordedLectures = Array.from(allRecordedLecturesMap.values());
     return res.json({
       success: true,
       videosMap,
-      videos: allRecordedLectures,
-      recordedLectures: allRecordedLectures
     });
   } catch (error) {
     console.error("getStudentVideos error:", error);
