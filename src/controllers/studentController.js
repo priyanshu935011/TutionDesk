@@ -2027,14 +2027,18 @@ export const getStudentSyncData = async (req, res) => {
 
 export const getStudentAttendance = async (req, res) => {
   try {
-    const targetStudent = req.student || (req.students ? req.students[0] : null);
-    if (!targetStudent) {
+    const students = req.students || (req.student ? [req.student] : []);
+    if (!students || students.length === 0) {
       return res.json({ success: true, attendanceMap: {} });
     }
-    const rawAttendance = targetStudent.attendanceRecords || targetStudent.attendance || [];
-    const attendanceMap = {
-      [String(targetStudent._id || targetStudent.id)]: rawAttendance
-    };
+
+    const attendanceMap = {};
+    for (const student of students) {
+      const stIdStr = String(student._id || student.id || "").trim();
+      if (!stIdStr) continue;
+      const rawAttendance = student.attendanceRecords || student.attendance || [];
+      attendanceMap[stIdStr] = Array.isArray(rawAttendance) ? rawAttendance : [];
+    }
 
     return res.json({ success: true, attendanceMap });
   } catch (error) {
@@ -2166,7 +2170,13 @@ export const getStudentTestMarks = async (req, res) => {
         ]
       }).sort({ createdAt: -1 });
 
-      testResultsMap[stIdStr] = rawTestResults || [];
+      const filteredTestResults = (rawTestResults || []).filter((t) => {
+        if (!t) return false;
+        const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim();
+        return tStId && stIdStr && tStId.toLowerCase() === stIdStr.toLowerCase();
+      });
+
+      testResultsMap[stIdStr] = filteredTestResults;
     }
 
     return res.json({
