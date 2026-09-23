@@ -2119,11 +2119,22 @@ export const getStudentTestMarks = async (req, res) => {
 
     for (const student of students) {
       const stIdStr = String(student._id || student.id || "").trim();
-      const testResults = await TestResult.find({
-        student: student._id
+      const rawTestResults = await TestResult.find({
+        $or: [
+          { student: student._id },
+          { student: stIdStr },
+          { student_id: stIdStr },
+          { studentId: stIdStr }
+        ]
       }).sort({ createdAt: -1 });
 
-      testResultsMap[stIdStr] = testResults || [];
+      const filteredTestResults = (rawTestResults || []).filter((t) => {
+        if (!t) return false;
+        const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim();
+        return tStId === stIdStr;
+      });
+
+      testResultsMap[stIdStr] = filteredTestResults;
     }
 
     return res.json({
