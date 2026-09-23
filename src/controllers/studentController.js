@@ -2202,6 +2202,7 @@ export const getStudentVideos = async (req, res) => {
       if (Array.isArray(student.batchIds)) student.batchIds.forEach((b) => studentBatchIds.push(String(b)));
       if (Array.isArray(student.batch_ids)) student.batch_ids.forEach((b) => studentBatchIds.push(String(b)));
       const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
+      const activeBatchIdsSet = new Set(activeStudentBatchIds);
       const studentId = student._id;
 
       const instQueryIds = [student.user];
@@ -2242,7 +2243,6 @@ export const getStudentVideos = async (req, res) => {
         const relIds = [];
         const directVideoIds = [];
 
-        // 2a. Query VideoReleaseStudent Mongoose model
         const releaseMappings = await VideoReleaseStudent.find({
           $or: [
             { student: studentId },
@@ -2258,7 +2258,6 @@ export const getStudentVideos = async (req, res) => {
           if (m.video) directVideoIds.push(String(m.video));
         }
 
-        // 2b. Query Supabase table video_release_students directly
         try {
           if (supabase) {
             const { data: sbVrs } = await supabase
@@ -2275,19 +2274,6 @@ export const getStudentVideos = async (req, res) => {
           }
         } catch (_) {}
 
-        // 2c. Query fallback JSON storage for video_release_students
-        try {
-          const fallbackVrs = readFallbackData("video_release_students");
-          for (const item of fallbackVrs || []) {
-            const itemStudentId = String(item.student_id || item.student || "").trim();
-            if (itemStudentId === stIdStr) {
-              if (item.release_id || item.release) relIds.push(String(item.release_id || item.release));
-              if (item.video_id || item.video) directVideoIds.push(String(item.video_id || item.video));
-            }
-          }
-        } catch (_) {}
-
-        // 2d. Fetch active VideoRelease records
         const cleanRelIds = Array.from(new Set(relIds.filter(Boolean)));
         if (cleanRelIds.length > 0) {
           const activeReleases = await VideoRelease.find({
@@ -2316,7 +2302,6 @@ export const getStudentVideos = async (req, res) => {
           }
         }
 
-        // 2e. Fetch video lectures directly by collected video_ids
         const finalVideoIds = Array.from(new Set(directVideoIds.filter(Boolean)));
         if (finalVideoIds.length > 0) {
           const relVideos = await VideoLecture.find({
@@ -2326,13 +2311,22 @@ export const getStudentVideos = async (req, res) => {
           videosList.push(...relVideos);
         }
       } catch (relErr) {
+        console.error("Error fetching release videos:", relErr);
+      }
+
+      const isVideoForStudent = (v) => {
+        if (!v) return false;
+        const st = (v.status || "").toLowerCase();
+        const isActiveOrReady = st === "active" || st === "ready" || st === "";
+        const notExpired = !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime();
+        if (!isActiveOrReady || !notExpired || v.isArchived) return false;
 
         const targetType = (v.targetType || v.target_type || "").toLowerCase();
         if (targetType === "student") {
           const stList = [...(v.students || []), ...(v.student_ids || [])].map((s) => String(s._id || s.id || s));
           return stList.includes(stIdStr);
         }
-        if (targetType === "all") return true;
+        if (targetType === "all" || !targetType) return true;
 
         const videoBatchIds = [];
         if (v.batch_id) videoBatchIds.push(String(v.batch_id));
@@ -2342,6 +2336,7 @@ export const getStudentVideos = async (req, res) => {
 
         const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
         if (cleanVideoBatchIds.length === 0) return true;
+        if (activeBatchIdsSet.size === 0) return true;
 
         return cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
       };
@@ -2351,7 +2346,7 @@ export const getStudentVideos = async (req, res) => {
         .filter(isVideoForStudent)
         .forEach((v) => {
           const vIdStr = String(v._id || v.id || v.bunnyVideoId || "");
-          if (vIdStr) {
+          if (vIdStr && !recordedLecturesMap.has(vIdStr)) {
             const videoObj = {
               _id: v._id || v.id,
               title: v.title,
