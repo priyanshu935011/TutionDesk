@@ -2045,68 +2045,97 @@ export const getStudentAttendance = async (req, res) => {
 
 export const getStudentNotes = async (req, res) => {
   try {
-    const student = req.student || (req.students ? req.students[0] : null);
-    if (!student) {
-      return res.json({ success: true, notes: [] });
+    const students = req.students || (req.student ? [req.student] : []);
+    if (!students || students.length === 0) {
+      return res.json({ success: true, notesMap: {}, notes: [] });
     }
 
-    const studentBatchIds = [];
-    if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
-    if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
-    if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
-    const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
-    const activeBatchIdsSet = new Set(activeStudentBatchIds);
-    const studentIdStr = String(student._id || student.id || "").trim();
+    const notesMap = {};
+    const allNotesSet = new Map();
 
-    const studentNotes = await Note.find({
-      institute: student.user
-    })
-      .sort({ createdAt: -1 })
-      .populate("batch", "name");
+    for (const student of students) {
+      const stIdStr = String(student._id || student.id || "").trim();
+      const studentBatchIds = [];
+      if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+      if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
+      if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
+      const activeBatchIdsSet = new Set(activeStudentBatchIds);
 
-    const isNoteForStudent = (n) => {
-      if (!n) return false;
-      const targetType = (n.targetType || n.target_type || "").toLowerCase();
-      if (targetType === "student") {
-        const stList = [...(n.students || []), ...(n.student_ids || [])].map((s) => String(s._id || s.id || s));
-        return stList.includes(studentIdStr);
-      }
-      if (targetType === "all") return true;
+      const studentNotes = await Note.find({
+        institute: student.user
+      })
+        .sort({ createdAt: -1 })
+        .populate("batch", "name");
 
-      const noteBatchIds = [];
-      if (n.batch_id) noteBatchIds.push(String(n.batch_id));
-      if (n.batch) noteBatchIds.push(String(n.batch._id || n.batch.id || n.batch));
-      if (Array.isArray(n.batch_ids)) n.batch_ids.forEach((b) => noteBatchIds.push(String(b)));
-      if (Array.isArray(n.batches)) n.batches.forEach((b) => noteBatchIds.push(String(b._id || b.id || b)));
+      const isNoteForStudent = (n) => {
+        if (!n) return false;
+        const targetType = (n.targetType || n.target_type || "").toLowerCase();
+        if (targetType === "student") {
+          const stList = [...(n.students || []), ...(n.student_ids || [])].map((s) => String(s._id || s.id || s));
+          return stList.includes(stIdStr);
+        }
+        if (targetType === "all") return true;
 
-      const cleanNoteBatchIds = Array.from(new Set(noteBatchIds.filter(Boolean)));
-      if (cleanNoteBatchIds.length === 0) return true;
+        const noteBatchIds = [];
+        if (n.batch_id) noteBatchIds.push(String(n.batch_id));
+        if (n.batch) noteBatchIds.push(String(n.batch._id || n.batch.id || n.batch));
+        if (Array.isArray(n.batch_ids)) n.batch_ids.forEach((b) => noteBatchIds.push(String(b)));
+        if (Array.isArray(n.batches)) n.batches.forEach((b) => noteBatchIds.push(String(b._id || b.id || b)));
 
-      return cleanNoteBatchIds.some((bId) => activeBatchIdsSet.has(bId));
-    };
+        const cleanNoteBatchIds = Array.from(new Set(noteBatchIds.filter(Boolean)));
+        if (cleanNoteBatchIds.length === 0) return true;
 
-    const notesMap = new Map();
-    (studentNotes || []).filter(isNoteForStudent).forEach((n) => notesMap.set(String(n._id || n.id), n));
+        return cleanNoteBatchIds.some((bId) => activeBatchIdsSet.has(bId));
+      };
 
-    return res.json({ success: true, notes: Array.from(notesMap.values()) });
+      const filteredNotes = (studentNotes || []).filter(isNoteForStudent);
+      notesMap[stIdStr] = filteredNotes;
+
+      filteredNotes.forEach((n) => {
+        const nId = String(n._id || n.id);
+        if (nId) allNotesSet.set(nId, n);
+      });
+    }
+
+    return res.json({
+      success: true,
+      notesMap,
+      notes: Array.from(allNotesSet.values()),
+    });
   } catch (error) {
     console.error("getStudentNotes error:", error);
-    return res.json({ success: true, notes: [] });
+    return res.status(500).json({ message: "Error fetching notes" });
   }
 };
 
 export const getStudentTestMarks = async (req, res) => {
   try {
-    const student = req.student || (req.students ? req.students[0] : null);
-    if (!student) {
-      return res.json({ success: true, testResults: [] });
+    const students = req.students || (req.student ? [req.student] : []);
+    if (!students || students.length === 0) {
+      return res.json({ success: true, testResultsMap: {}, testResults: [] });
     }
 
-    const testResults = await TestResult.find({
-      student: student._id
-    }).sort({ createdAt: -1 });
+    const testResultsMap = {};
+    const allTestResults = [];
 
-    return res.json({ success: true, testResults });
+    for (const student of students) {
+      const stIdStr = String(student._id || student.id || "").trim();
+      const testResults = await TestResult.find({
+        student: student._id
+      }).sort({ createdAt: -1 });
+
+      testResultsMap[stIdStr] = testResults || [];
+      if (Array.isArray(testResults)) {
+        allTestResults.push(...testResults);
+      }
+    }
+
+    return res.json({
+      success: true,
+      testResultsMap,
+      testResults: allTestResults,
+    });
   } catch (error) {
     console.error("getStudentTestMarks error:", error);
     return res.status(500).json({ message: "Error fetching test marks" });
@@ -2115,23 +2144,26 @@ export const getStudentTestMarks = async (req, res) => {
 
 export const getStudentVideos = async (req, res) => {
   try {
-    const targetStudent = req.student || (req.students ? req.students[0] : null);
-    if (!targetStudent) {
-      return res.json({ success: true, videos: [], recordedLectures: [] });
+    const students = req.students || (req.student ? [req.student] : []);
+    if (!students || students.length === 0) {
+      return res.json({ success: true, videosMap: {}, videos: [], recordedLectures: [] });
     }
-    const videosList = [];
+
+    const videosMap = {};
+    const allRecordedLecturesMap = new Map();
     const now = new Date();
-    const students = [targetStudent];
 
     for (const student of students) {
+      const stIdStr = String(student._id || student.id || "").trim();
+      const videosList = [];
+
       const studentBatchIds = [];
       if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
       if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
       if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
       const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
-      const currentBatchIdVal = activeStudentBatchIds.length > 0 ? activeStudentBatchIds[0] : null;
+      const activeBatchIdsSet = new Set(activeStudentBatchIds);
       const studentId = student._id;
-      const sIdStr = String(student._id || student.id || "").trim();
 
       // 1. Direct target audience videos
       const rawVideos = await VideoLecture.find({
@@ -2157,8 +2189,8 @@ export const getStudentVideos = async (req, res) => {
         const releaseMappings = await VideoReleaseStudent.find({
           $or: [
             { student: studentId },
-            { student_id: sIdStr },
-            { student: sIdStr },
+            { student_id: stIdStr },
+            { student: stIdStr },
           ],
         });
 
@@ -2175,7 +2207,7 @@ export const getStudentVideos = async (req, res) => {
             const { data: sbVrs } = await supabase
               .from("video_release_students")
               .select("release_id, video_id, student_id")
-              .eq("student_id", sIdStr);
+              .eq("student_id", stIdStr);
 
             if (Array.isArray(sbVrs)) {
               for (const r of sbVrs) {
@@ -2191,7 +2223,7 @@ export const getStudentVideos = async (req, res) => {
           const fallbackVrs = readFallbackData("video_release_students");
           for (const item of fallbackVrs || []) {
             const itemStudentId = String(item.student_id || item.student || "").trim();
-            if (itemStudentId === sIdStr) {
+            if (itemStudentId === stIdStr) {
               if (item.release_id || item.release) relIds.push(String(item.release_id || item.release));
               if (item.video_id || item.video) directVideoIds.push(String(item.video_id || item.video));
             }
@@ -2244,65 +2276,68 @@ export const getStudentVideos = async (req, res) => {
       } catch (relErr) {
         console.error("Error fetching release videos in getStudentVideos:", relErr);
       }
+
+      const isVideoForStudent = (v) => {
+        if (!v) return false;
+        const st = (v.status || "").toLowerCase();
+        const isActiveOrReady = st === "active" || st === "ready" || st === "";
+        const notExpired = !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime();
+        if (!isActiveOrReady || !notExpired || v.isArchived) return false;
+
+        const targetType = (v.targetType || v.target_type || "").toLowerCase();
+        if (targetType === "student") {
+          const stList = [...(v.students || []), ...(v.student_ids || [])].map((s) => String(s._id || s.id || s));
+          return stList.includes(stIdStr);
+        }
+        if (targetType === "all") return true;
+
+        const videoBatchIds = [];
+        if (v.batch_id) videoBatchIds.push(String(v.batch_id));
+        if (v.batch) videoBatchIds.push(String(v.batch._id || v.batch.id || v.batch));
+        if (Array.isArray(v.batch_ids)) v.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
+        if (Array.isArray(v.batches)) v.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
+
+        const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
+        if (cleanVideoBatchIds.length === 0) return true;
+
+        return cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
+      };
+
+      const recordedLecturesMap = new Map();
+      videosList
+        .filter(isVideoForStudent)
+        .forEach((v) => {
+          const vIdStr = String(v._id || v.id || v.bunnyVideoId || "");
+          if (vIdStr) {
+            const videoObj = {
+              _id: v._id || v.id,
+              title: v.title,
+              description: v.description || "",
+              playlist: v.playlist || "",
+              bunnyVideoId: v.bunnyVideoId,
+              videoUrl: v.videoUrl,
+              hlsUrl: v.hlsUrl,
+              thumbnailUrl: v.thumbnailUrl,
+              durationSeconds: v.durationSeconds || 0,
+              fileSizeBytes: v.fileSizeBytes || 0,
+              createdAt: v.createdAt,
+              expiryDate: v.expiryDate,
+            };
+            recordedLecturesMap.set(vIdStr, videoObj);
+            allRecordedLecturesMap.set(vIdStr, videoObj);
+          }
+        });
+
+      videosMap[stIdStr] = Array.from(recordedLecturesMap.values());
     }
 
-    const allActiveStudentBatchIds = [];
-    if (targetStudent.batch) allActiveStudentBatchIds.push(String(targetStudent.batch._id || targetStudent.batch.id || targetStudent.batch));
-    if (Array.isArray(targetStudent.batches)) targetStudent.batches.forEach((b) => allActiveStudentBatchIds.push(String(b._id || b.id || b)));
-    if (Array.isArray(targetStudent.enrolledBatchIds)) targetStudent.enrolledBatchIds.forEach((b) => allActiveStudentBatchIds.push(String(b)));
-    const activeBatchIdsSet = new Set(allActiveStudentBatchIds.filter(Boolean));
-    const targetStudentIdStr = String(targetStudent._id || targetStudent.id || "").trim();
-
-    const isVideoForStudent = (v) => {
-      if (!v) return false;
-      const st = (v.status || "").toLowerCase();
-      const isActiveOrReady = st === "active" || st === "ready" || st === "";
-      const notExpired = !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime();
-      if (!isActiveOrReady || !notExpired || v.isArchived) return false;
-
-      const targetType = (v.targetType || v.target_type || "").toLowerCase();
-      if (targetType === "student") {
-        const stList = [...(v.students || []), ...(v.student_ids || [])].map((s) => String(s._id || s.id || s));
-        return stList.includes(targetStudentIdStr);
-      }
-      if (targetType === "all") return true;
-
-      const videoBatchIds = [];
-      if (v.batch_id) videoBatchIds.push(String(v.batch_id));
-      if (v.batch) videoBatchIds.push(String(v.batch._id || v.batch.id || v.batch));
-      if (Array.isArray(v.batch_ids)) v.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
-      if (Array.isArray(v.batches)) v.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
-
-      const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
-      if (cleanVideoBatchIds.length === 0) return true;
-
-      return cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
-    };
-
-    const recordedLecturesMap = new Map();
-    videosList
-      .filter(isVideoForStudent)
-      .forEach((v) => {
-        const vIdStr = String(v._id || v.id || v.bunnyVideoId || "");
-        if (vIdStr) {
-          recordedLecturesMap.set(vIdStr, {
-            _id: v._id || v.id,
-            title: v.title,
-            description: v.description || "",
-            playlist: v.playlist || "",
-            bunnyVideoId: v.bunnyVideoId,
-            videoUrl: v.videoUrl,
-            hlsUrl: v.hlsUrl,
-            thumbnailUrl: v.thumbnailUrl,
-            durationSeconds: v.durationSeconds || 0,
-            fileSizeBytes: v.fileSizeBytes || 0,
-            createdAt: v.createdAt,
-            expiryDate: v.expiryDate,
-          });
-        }
-      });
-
-    return res.json({ success: true, recordedLectures: Array.from(recordedLecturesMap.values()) });
+    const allRecordedLectures = Array.from(allRecordedLecturesMap.values());
+    return res.json({
+      success: true,
+      videosMap,
+      videos: allRecordedLectures,
+      recordedLectures: allRecordedLectures
+    });
   } catch (error) {
     console.error("getStudentVideos error:", error);
     return res.status(500).json({ message: "Error fetching video lectures" });
