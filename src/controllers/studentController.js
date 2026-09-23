@@ -3347,60 +3347,83 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
 
 export const getStudentNotifications = async (req, res) => {
   try {
-    const studentId = req.student._id;
-    const { supabase: sb } = await import("../utils/supabase.js");
-
-    const { data: rows, error } = await sb
-      .from("notifications")
-      .select("*")
-      .eq("student_id", String(studentId))
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    let notifications = [];
-    if (!error && rows) {
-      const seenKeys = new Set();
-      for (const r of rows) {
-        const key = `${(r.title || "").trim()}|${(r.message || "").trim()}|${r.type || ""}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          notifications.push({
-            id: r.id,
-            _id: r.id,
-            title: r.title,
-            message: r.message,
-            type: r.type || "general",
-            data: r.data ? (typeof r.data === "string" ? JSON.parse(r.data) : r.data) : {},
-            isRead: r.is_read || false,
-            createdAt: r.created_at,
-          });
-        }
-      }
-    } else {
-      const docs = await Notification.find({ student: studentId })
-        .sort({ createdAt: -1 })
-        .limit(50);
-      const seenKeys = new Set();
-      for (const d of docs) {
-        const key = `${(d.title || "").trim()}|${(d.message || "").trim()}|${d.type || ""}`;
-        if (!seenKeys.has(key)) {
-          seenKeys.add(key);
-          notifications.push({
-            id: d._id,
-            _id: d._id,
-            title: d.title,
-            message: d.message,
-            type: d.type,
-            data: d.data,
-            isRead: d.isRead,
-            createdAt: d.createdAt,
-          });
-        }
-      }
+    const students = req.students || (req.student ? [req.student] : []);
+    if (!students || students.length === 0) {
+      return res.json({ success: true, notifications: [], unreadCount: 0, notificationsMap: {} });
     }
 
-    const unreadCount = notifications.filter((n) => !n.isRead).length;
-    return res.json({ notifications, unreadCount });
+    const { supabase: sb } = await import("../utils/supabase.js");
+    const notificationsMap = {};
+
+    for (const student of students) {
+      const stIdStr = String(student._id || student.id || "").trim();
+      if (!stIdStr) continue;
+
+      let studentNotifications = [];
+
+      const { data: rows, error } = await sb
+        .from("notifications")
+        .select("*")
+        .eq("student_id", stIdStr)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (!error && rows) {
+        const seenKeys = new Set();
+        for (const r of rows) {
+          const key = `${(r.title || "").trim()}|${(r.message || "").trim()}|${r.type || ""}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            studentNotifications.push({
+              id: r.id,
+              _id: r.id,
+              title: r.title,
+              message: r.message,
+              type: r.type || "general",
+              data: r.data ? (typeof r.data === "string" ? JSON.parse(r.data) : r.data) : {},
+              isRead: r.is_read || false,
+              createdAt: r.created_at,
+              studentId: stIdStr,
+            });
+          }
+        }
+      } else {
+        const docs = await Notification.find({ student: student._id || student.id })
+          .sort({ createdAt: -1 })
+          .limit(50);
+        const seenKeys = new Set();
+        for (const d of docs) {
+          const key = `${(d.title || "").trim()}|${(d.message || "").trim()}|${d.type || ""}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            studentNotifications.push({
+              id: d._id,
+              _id: d._id,
+              title: d.title,
+              message: d.message,
+              type: d.type,
+              data: d.data,
+              isRead: d.isRead,
+              createdAt: d.createdAt,
+              studentId: stIdStr,
+            });
+          }
+        }
+      }
+
+      notificationsMap[stIdStr] = studentNotifications;
+    }
+
+    const primaryStudentId = String(students[0]._id || students[0].id || "").trim();
+    const primaryNotifications = notificationsMap[primaryStudentId] || [];
+    const unreadCount = primaryNotifications.filter((n) => !n.isRead).length;
+
+    return res.json({
+      success: true,
+      notifications: primaryNotifications,
+      notificationsMap,
+      unreadCount,
+    });
   } catch (error) {
     console.error("getStudentNotifications error:", error.message);
     return res.status(500).json({ message: "Could not fetch notifications" });
