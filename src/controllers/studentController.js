@@ -2047,23 +2047,50 @@ export const getStudentNotes = async (req, res) => {
   try {
     const students = req.students || (req.student ? [req.student] : []);
     if (!students || students.length === 0) {
-      return res.json({ success: true, notesMap: {}, notes: [] });
+      return res.json({ success: true, notesMap: {} });
     }
 
     const notesMap = {};
-    const allNotesSet = new Map();
 
     for (const student of students) {
       const stIdStr = String(student._id || student.id || "").trim();
+
       const studentBatchIds = [];
       if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+      if (student.batchId) studentBatchIds.push(String(student.batchId));
+      if (student.batch_id) studentBatchIds.push(String(student.batch_id));
       if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
       if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (Array.isArray(student.batchIds)) student.batchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (Array.isArray(student.batch_ids)) student.batch_ids.forEach((b) => studentBatchIds.push(String(b)));
       const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
       const activeBatchIdsSet = new Set(activeStudentBatchIds);
 
+      const instQueryIds = [student.user];
+      try {
+        let institute = await Institute.findById(student.user).select("_id adminUser");
+        if (!institute) {
+          institute = await Institute.findOne({ adminUser: student.user }).select("_id adminUser");
+        }
+        if (!institute) {
+          const uDoc = await User.findById(student.user).select("institute");
+          if (uDoc && uDoc.institute) {
+            institute = await Institute.findById(uDoc.institute).select("_id adminUser");
+          }
+        }
+        if (institute) {
+          instQueryIds.push(String(institute._id));
+          if (institute.adminUser) instQueryIds.push(String(institute.adminUser));
+        }
+      } catch (_) {}
+      const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
+
       const studentNotes = await Note.find({
-        institute: student.user
+        $or: [
+          { institute: { $in: cleanInstIds } },
+          { user: { $in: cleanInstIds } },
+          { createdBy: { $in: cleanInstIds } }
+        ]
       })
         .sort({ createdAt: -1 })
         .populate("batch", "name");
@@ -2075,7 +2102,7 @@ export const getStudentNotes = async (req, res) => {
           const stList = [...(n.students || []), ...(n.student_ids || [])].map((s) => String(s._id || s.id || s));
           return stList.includes(stIdStr);
         }
-        if (targetType === "all") return true;
+        if (targetType === "all" || !targetType) return true;
 
         const noteBatchIds = [];
         if (n.batch_id) noteBatchIds.push(String(n.batch_id));
@@ -2085,17 +2112,13 @@ export const getStudentNotes = async (req, res) => {
 
         const cleanNoteBatchIds = Array.from(new Set(noteBatchIds.filter(Boolean)));
         if (cleanNoteBatchIds.length === 0) return true;
+        if (activeBatchIdsSet.size === 0) return true;
 
         return cleanNoteBatchIds.some((bId) => activeBatchIdsSet.has(bId));
       };
 
       const filteredNotes = (studentNotes || []).filter(isNoteForStudent);
       notesMap[stIdStr] = filteredNotes;
-
-      filteredNotes.forEach((n) => {
-        const nId = String(n._id || n.id);
-        if (nId) allNotesSet.set(nId, n);
-      });
     }
 
     return res.json({
@@ -2119,22 +2142,31 @@ export const getStudentTestMarks = async (req, res) => {
 
     for (const student of students) {
       const stIdStr = String(student._id || student.id || "").trim();
+
+      const instQueryIds = [student.user];
+      try {
+        let institute = await Institute.findById(student.user).select("_id adminUser");
+        if (!institute) {
+          institute = await Institute.findOne({ adminUser: student.user }).select("_id adminUser");
+        }
+        if (institute) {
+          instQueryIds.push(String(institute._id));
+          if (institute.adminUser) instQueryIds.push(String(institute.adminUser));
+        }
+      } catch (_) {}
+      const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
+
       const rawTestResults = await TestResult.find({
         $or: [
           { student: student._id },
           { student: stIdStr },
           { student_id: stIdStr },
-          { studentId: stIdStr }
+          { studentId: stIdStr },
+          { enrollmentNumber: student.enrollmentNumber }
         ]
       }).sort({ createdAt: -1 });
 
-      const filteredTestResults = (rawTestResults || []).filter((t) => {
-        if (!t) return false;
-        const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim();
-        return tStId === stIdStr;
-      });
-
-      testResultsMap[stIdStr] = filteredTestResults;
+      testResultsMap[stIdStr] = rawTestResults || [];
     }
 
     return res.json({
@@ -2163,15 +2195,35 @@ export const getStudentVideos = async (req, res) => {
 
       const studentBatchIds = [];
       if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+      if (student.batchId) studentBatchIds.push(String(student.batchId));
+      if (student.batch_id) studentBatchIds.push(String(student.batch_id));
       if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
       if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (Array.isArray(student.batchIds)) student.batchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (Array.isArray(student.batch_ids)) student.batch_ids.forEach((b) => studentBatchIds.push(String(b)));
       const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
-      const activeBatchIdsSet = new Set(activeStudentBatchIds);
       const studentId = student._id;
+
+      const instQueryIds = [student.user];
+      try {
+        let institute = await Institute.findById(student.user).select("_id adminUser");
+        if (!institute) {
+          institute = await Institute.findOne({ adminUser: student.user }).select("_id adminUser");
+        }
+        if (institute) {
+          instQueryIds.push(String(institute._id));
+          if (institute.adminUser) instQueryIds.push(String(institute.adminUser));
+        }
+      } catch (_) {}
+      const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
 
       // 1. Direct target audience videos
       const rawVideos = await VideoLecture.find({
-        institute: student.user,
+        $or: [
+          { institute: { $in: cleanInstIds } },
+          { user: { $in: cleanInstIds } },
+          { createdBy: { $in: cleanInstIds } }
+        ],
         isArchived: { $ne: true },
         $or: [
           { targetType: "all" },
@@ -2179,6 +2231,7 @@ export const getStudentVideos = async (req, res) => {
           { targetType: "batch", batch: { $in: activeStudentBatchIds } },
           { targetType: "student", students: studentId },
           { targetType: null },
+          { targetType: "" },
         ],
       }).sort({ createdAt: -1 });
 
@@ -2264,29 +2317,15 @@ export const getStudentVideos = async (req, res) => {
         }
 
         // 2e. Fetch video lectures directly by collected video_ids
-        const cleanDirectVideoIds = Array.from(new Set(directVideoIds.filter(Boolean)));
-        if (cleanDirectVideoIds.length > 0) {
+        const finalVideoIds = Array.from(new Set(directVideoIds.filter(Boolean)));
+        if (finalVideoIds.length > 0) {
           const relVideos = await VideoLecture.find({
-            $or: [
-              { _id: { $in: cleanDirectVideoIds } },
-              { id: { $in: cleanDirectVideoIds } },
-              { bunnyVideoId: { $in: cleanDirectVideoIds } },
-            ],
+            _id: { $in: finalVideoIds },
             isArchived: { $ne: true },
           });
-
           videosList.push(...relVideos);
         }
       } catch (relErr) {
-        console.error("Error fetching release videos in getStudentVideos:", relErr);
-      }
-
-      const isVideoForStudent = (v) => {
-        if (!v) return false;
-        const st = (v.status || "").toLowerCase();
-        const isActiveOrReady = st === "active" || st === "ready" || st === "";
-        const notExpired = !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime();
-        if (!isActiveOrReady || !notExpired || v.isArchived) return false;
 
         const targetType = (v.targetType || v.target_type || "").toLowerCase();
         if (targetType === "student") {
