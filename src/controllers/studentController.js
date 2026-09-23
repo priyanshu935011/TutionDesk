@@ -1811,21 +1811,51 @@ export const getStudentSyncData = async (req, res) => {
 
         const currentBatchIdVal = batch ? (batch._id || batch.id) : null;
 
-        // Fetch top 3 notes & notices for fast homepage preview summary
-        const [notes, notices, totalNotesCount, totalNoticesCount] = await Promise.all([
-          Note.find({
-            institute: instituteId,
-            $or: [
-              { targetType: "batch", batch: currentBatchIdVal },
-              { targetType: "batch", batch: null },
-              { targetType: "student", students: student._id },
-              { targetType: null, batch: currentBatchIdVal },
-              { targetType: null, batch: null }
-            ],
-          })
-            .select("_id title subject createdAt fileUrl")
-            .sort({ createdAt: -1 })
-            .limit(3),
+        const studentBatchIds = [];
+        if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+        if (student.batchId) studentBatchIds.push(String(student.batchId));
+        if (student.batch_id) studentBatchIds.push(String(student.batch_id));
+        if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
+        if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+        if (Array.isArray(student.batchIds)) student.batchIds.forEach((b) => studentBatchIds.push(String(b)));
+        if (Array.isArray(student.batch_ids)) student.batch_ids.forEach((b) => studentBatchIds.push(String(b)));
+        const activeStudentBatchIdsSet = new Set(studentBatchIds.filter(Boolean));
+        const stIdStr = String(student._id || student.id || "").trim();
+
+        const allInstNotes = await Note.find({
+          $or: [
+            { institute: instituteId },
+            { user: instituteId },
+            { createdBy: instituteId }
+          ]
+        }).select("_id targetType target_type batch batch_id batches batch_ids students student_ids title subject createdAt fileUrl");
+
+        const siblingNotesList = (allInstNotes || []).filter((n) => {
+          if (!n) return false;
+          const targetType = (n.targetType || n.target_type || "").toLowerCase();
+          if (targetType === "student") {
+            const stList = [...(n.students || []), ...(n.student_ids || [])].map((s) => String(s._id || s.id || s));
+            return stList.includes(stIdStr);
+          }
+          if (targetType === "all" || !targetType) return true;
+
+          const noteBatchIds = [];
+          if (n.batch_id) noteBatchIds.push(String(n.batch_id));
+          if (n.batch) noteBatchIds.push(String(n.batch._id || n.batch.id || n.batch));
+          if (Array.isArray(n.batch_ids)) n.batch_ids.forEach((b) => noteBatchIds.push(String(b)));
+          if (Array.isArray(n.batches)) n.batches.forEach((b) => noteBatchIds.push(String(b._id || b.id || b)));
+
+          const cleanNoteBatchIds = Array.from(new Set(noteBatchIds.filter(Boolean)));
+          if (cleanNoteBatchIds.length === 0) return true;
+          if (activeStudentBatchIdsSet.size === 0) return true;
+
+          return cleanNoteBatchIds.some((bId) => activeStudentBatchIdsSet.has(bId));
+        });
+
+        const totalNotesCount = siblingNotesList.length;
+        const notes = siblingNotesList.slice(0, 3);
+
+        const [notices, totalNoticesCount] = await Promise.all([
           Notice.find({
             institute: instituteId,
             $or: [
@@ -1839,16 +1869,6 @@ export const getStudentSyncData = async (req, res) => {
             .select("_id title content noticeType createdAt holidayDate originalTime rescheduledDate rescheduledTime")
             .sort({ createdAt: -1 })
             .limit(3),
-          Note.countDocuments({
-            institute: instituteId,
-            $or: [
-              { targetType: "batch", batch: currentBatchIdVal },
-              { targetType: "batch", batch: null },
-              { targetType: "student", students: student._id },
-              { targetType: null, batch: currentBatchIdVal },
-              { targetType: null, batch: null }
-            ],
-          }),
           Notice.countDocuments({
             institute: instituteId,
             $or: [
