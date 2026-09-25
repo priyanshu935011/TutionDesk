@@ -3,6 +3,7 @@ import { Readable } from "stream";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
+import User from "../models/User.js";
 import Student from "../models/Student.js";
 import { getInitialPassword } from "./studentController.js";
 import { sendResetEmail, sendOTPEmail } from "../utils/mailer.js";
@@ -15,6 +16,24 @@ const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2
 
 const generateToken = (payload) =>
   jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
+
+const resolveInstituteForUserId = async (
+  userId,
+  selectFields = "status subscriptionEnd studentPortalEnabled name brandingEnabled logoUrl themeColor"
+) => {
+  if (!userId) return null;
+  let inst = await Institute.findById(userId).select(selectFields);
+  if (!inst) {
+    inst = await Institute.findOne({ adminUser: userId }).select(selectFields);
+  }
+  if (!inst) {
+    const uDoc = await User.findById(userId).select("institute");
+    if (uDoc && uDoc.institute) {
+      inst = await Institute.findById(uDoc.institute).select(selectFields);
+    }
+  }
+  return inst;
+};
 
 export const studentLogin = async (req, res) => {
   try {
@@ -103,24 +122,31 @@ export const studentLogin = async (req, res) => {
     // Verify subscription status of at least one institution and check portal toggle
     let hasActiveSubscription = false;
     let portalDisabled = false;
+    let evaluatedCount = 0;
 
     for (const student of matchedStudents) {
-      const inst = await Institute.findById(student.user).select(
+      const inst = await resolveInstituteForUserId(
+        student.user,
         "status subscriptionEnd studentPortalEnabled"
       );
       if (inst) {
+        evaluatedCount++;
         if (inst.studentPortalEnabled === false) {
           portalDisabled = true;
           continue;
         }
         const isExpired =
           inst.status !== "active" ||
-          new Date(inst.subscriptionEnd).getTime() < Date.now();
+          (inst.subscriptionEnd && new Date(inst.subscriptionEnd).getTime() < Date.now());
         if (!isExpired) {
           hasActiveSubscription = true;
           break;
         }
       }
+    }
+
+    if (evaluatedCount === 0 && matchedStudents.length > 0) {
+      hasActiveSubscription = true;
     }
 
     if (portalDisabled && !hasActiveSubscription) {
@@ -166,7 +192,7 @@ export const studentLogin = async (req, res) => {
     }
 
     const matchedStudent = finalMatchedStudents[0];
-    const activeInstitute = await Institute.findById(matchedStudent.user).select("name brandingEnabled logoUrl themeColor");
+    const activeInstitute = await resolveInstituteForUserId(matchedStudent.user, "name brandingEnabled logoUrl themeColor");
 
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
 
@@ -460,9 +486,14 @@ export const switchProfile = async (req, res) => {
     }
 
     // Verify subscription status of target profile's institution
-    const inst = await Institute.findById(firstSibling.user).select("status subscriptionEnd");
-    if (!inst || inst.status !== "active" || new Date(inst.subscriptionEnd).getTime() < Date.now()) {
-      return res.status(403).json({ message: "The target profile's institute subscription has expired." });
+    const inst = await resolveInstituteForUserId(firstSibling.user, "status subscriptionEnd name");
+    if (inst) {
+      const isExpired =
+        inst.status !== "active" ||
+        (inst.subscriptionEnd && new Date(inst.subscriptionEnd).getTime() < Date.now());
+      if (isExpired) {
+        return res.status(403).json({ message: "The target profile's institute subscription has expired." });
+      }
     }
 
     // Issue new session ID and token
