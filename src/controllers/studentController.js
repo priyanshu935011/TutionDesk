@@ -2590,13 +2590,6 @@ export const getStudentPortalData = async (req, res) => {
         const [notes, testResults, liveQuiz, rawQuizzes, rawVideos, notices] = await Promise.all([
           Note.find({
             institute: instituteId,
-            $or: [
-              { targetType: "batch", batch: currentBatchIdVal },
-              { targetType: "batch", batch: null },
-              { targetType: "student", students: student._id },
-              { targetType: null, batch: currentBatchIdVal },
-              { targetType: null, batch: null }
-            ],
           })
             .sort({ createdAt: -1 })
             .populate("batch", "name"),
@@ -2643,7 +2636,32 @@ export const getStudentPortalData = async (req, res) => {
           : rawAttendance;
 
         const currentStudentIdStr = String(student._id || student.id || "").toLowerCase();
-        const batchNotes = notes || [];
+        const activeStudentBatchIds = [];
+        if (currentBatchIdVal) activeStudentBatchIds.push(String(currentBatchIdVal));
+        if (student.batch) activeStudentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+        if (Array.isArray(student.batches)) student.batches.forEach((b) => activeStudentBatchIds.push(String(b._id || b.id || b)));
+        if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => activeStudentBatchIds.push(String(b)));
+        const activeStudentBatchIdsSet = new Set(activeStudentBatchIds.filter(Boolean));
+
+        const batchNotes = (notes || []).filter((n) => {
+          if (!n) return false;
+          const targetType = (n.targetType || n.target_type || "").toLowerCase();
+          if (targetType === "student") {
+            const stList = [...(n.students || []), ...(n.student_ids || [])].map((s) => String(s._id || s.id || s).toLowerCase());
+            return stList.includes(currentStudentIdStr);
+          }
+          const noteBatchIds = [];
+          if (n.batch_id) noteBatchIds.push(String(n.batch_id));
+          if (n.batch) noteBatchIds.push(String(n.batch._id || n.batch.id || n.batch));
+          if (Array.isArray(n.batch_ids)) n.batch_ids.forEach((b) => noteBatchIds.push(String(b)));
+          if (Array.isArray(n.batches)) n.batches.forEach((b) => noteBatchIds.push(String(b._id || b.id || b)));
+
+          const cleanNoteBatchIds = Array.from(new Set(noteBatchIds.filter(Boolean)));
+          if (cleanNoteBatchIds.length === 0) return true;
+          if (activeStudentBatchIdsSet.size === 0) return true;
+
+          return cleanNoteBatchIds.some((bId) => activeStudentBatchIdsSet.has(bId));
+        });
         const batchTestResults = (testResults || []).filter((t) => {
           if (!t) return false;
           const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim().toLowerCase();
