@@ -94,23 +94,18 @@ const protectStudent = async (req, res, next) => {
     req.studentEmail = decoded.email.toLowerCase();
 
     // Determine active student context for single-record endpoints
-    // First priority: match student record by decoded JWT token (studentId or enrollmentNumber)
-    if (decoded.studentId) {
-      req.student = students.find((s) => String(s._id || s.id) === String(decoded.studentId));
-    }
-    if (!req.student && decoded.enrollmentNumber) {
-      req.student = students.find((s) => String(s.enrollmentNumber) === String(decoded.enrollmentNumber));
+    const targetStudentId =
+      req.headers["x-student-id"] ||
+      req.query.studentId ||
+      req.body.studentId ||
+      decoded.studentId;
+
+    if (targetStudentId) {
+      req.student = students.find((s) => String(s._id || s.id) === String(targetStudentId));
     }
 
-    // Second priority: override with x-student-id header or param ONLY IF it belongs to the same student enrollment
-    const headerOrParamStudentId = req.headers["x-student-id"] || req.query.studentId || req.body.studentId;
-    if (headerOrParamStudentId) {
-      const matchedParamStudent = students.find((s) => String(s._id || s.id) === String(headerOrParamStudentId));
-      if (matchedParamStudent) {
-        if (!decoded.enrollmentNumber || String(matchedParamStudent.enrollmentNumber) === String(decoded.enrollmentNumber)) {
-          req.student = matchedParamStudent;
-        }
-      }
+    if (!req.student && decoded.enrollmentNumber) {
+      req.student = students.find((s) => String(s.enrollmentNumber) === String(decoded.enrollmentNumber));
     }
 
     if (!req.student) {
