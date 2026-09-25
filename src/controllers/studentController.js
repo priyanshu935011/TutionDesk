@@ -272,7 +272,12 @@ const isTeacherOfBatch = (b, user) => {
         paidAmount: paid,
         feePlanType: sObj.feePlanType || "monthly",
         phone: sObj.phone || "",
+        parentName: sObj.parentName || "",
         parentPhone: sObj.parentPhone || "",
+        email: sObj.email || "",
+        dueDate: sObj.dueDate || null,
+        joinedOn: sObj.joinedOn || null,
+        customFields: sObj.customFields || {},
         attendanceRecords: sObj.attendanceRecords || [],
         isArchived: Boolean(sObj.isArchived),
       };
