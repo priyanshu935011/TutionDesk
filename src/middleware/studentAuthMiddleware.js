@@ -101,11 +101,24 @@ const protectStudent = async (req, res, next) => {
       decoded.studentId;
 
     if (targetStudentId) {
-      req.student = students.find((s) => String(s._id) === String(targetStudentId));
+      req.student = students.find((s) => String(s._id || s.id) === String(targetStudentId));
+    }
+
+    if (!req.student && decoded.enrollmentNumber) {
+      req.student = students.find((s) => String(s.enrollmentNumber) === String(decoded.enrollmentNumber));
     }
 
     if (!req.student) {
       req.student = students[0]; // fallback to first student record
+    }
+
+    // Reorder req.students so active student is ALWAYS first at index 0
+    if (req.student) {
+      const activeIdx = students.findIndex((s) => String(s._id || s.id) === String(req.student._id || req.student.id));
+      if (activeIdx > 0) {
+        students.splice(activeIdx, 1);
+        students.unshift(req.student);
+      }
     }
 
     next();
