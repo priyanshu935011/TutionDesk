@@ -108,6 +108,15 @@ export const getInstituteStorageAccount = async (instituteId) => {
   if (isValidId(instituteId)) {
     try {
       institute = await Institute.findById(instituteId);
+      if (!institute) {
+        institute = await Institute.findOne({ adminUser: instituteId });
+      }
+      if (!institute) {
+        const uDoc = await User.findById(instituteId).select("institute");
+        if (uDoc && uDoc.institute) {
+          institute = await Institute.findById(uDoc.institute);
+        }
+      }
     } catch (_) {}
   }
 
@@ -196,10 +205,13 @@ export const getInstituteStorageAccount = async (instituteId) => {
     storage,
     limitBytes,
     usedBytes: actualUsedBytes,
+    usedStorageBytes: actualUsedBytes,
     reservedBytes: actualReservedBytes,
     availableBytes,
     maxGb,
+    maxStorageGb: maxGb,
     usedGb: Number((actualUsedBytes / (1024 * 1024 * 1024)).toFixed(2)),
+    usedStorageGb: Number((actualUsedBytes / (1024 * 1024 * 1024)).toFixed(2)),
     availableGb: Number((availableBytes / (1024 * 1024 * 1024)).toFixed(2)),
     videoStorageBytes,
     videoStorageGb: Number((videoStorageBytes / (1024 * 1024 * 1024)).toFixed(2)),
@@ -239,7 +251,7 @@ export const initVideoUpload = async (req, res) => {
       targetAudienceMetadata = {},
     } = req.body;
 
-    const fileSizeBytes = Number(fileSize || 0);
+    const fileSizeBytes = Number(fileSize || req.body.fileSizeBytes || req.body.expectedSizeBytes || 0);
     if (!title || !title.trim()) {
       return res.status(400).json({ message: "Video title is required" });
     }
