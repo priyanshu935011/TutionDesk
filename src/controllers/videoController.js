@@ -1914,7 +1914,10 @@ export const revokeVideoRelease = async (req, res) => {
 
 export const getStudentReleasedLectures = async (req, res) => {
   try {
-    const student = req.user;
+    const student = req.user || (req.students && req.students[0]);
+    if (!student) {
+      return res.status(401).json({ message: "Student authentication required" });
+    }
     const studentId = String(student._id || student.id || "");
     const instituteId = student.institute?._id || student.institute || student.user;
 

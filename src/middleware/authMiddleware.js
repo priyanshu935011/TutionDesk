@@ -127,16 +127,30 @@ const protect = async (req, res, next) => {
 
     req.user = user;
 
-    if (req.user && req.user.role !== "super_admin" && req.user.institute) {
+    if (
+      req.user &&
+      req.user.role !== "super_admin" &&
+      req.user.role !== "student" &&
+      req.user.institute
+    ) {
       const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");
       const rawInst = req.user.institute;
       const instId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
 
       if (instId && String(instId).trim().length >= 8) {
         try {
-          const institute = await Institute.findById(instId).select(
-            "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan recordedLecturesFeatureEnabled releaseVideosFeatureEnabled"
-          );
+          const selectFields =
+            "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan recordedLecturesFeatureEnabled releaseVideosFeatureEnabled";
+          let institute = await Institute.findById(instId).select(selectFields);
+          if (!institute) {
+            institute = await Institute.findOne({ adminUser: instId }).select(selectFields);
+          }
+          if (!institute && mongoose.Types.ObjectId.isValid(instId)) {
+            const uDoc = await User.findById(instId).select("institute");
+            if (uDoc && uDoc.institute) {
+              institute = await Institute.findById(uDoc.institute).select(selectFields);
+            }
+          }
 
           if (institute) {
             const isExpired =
