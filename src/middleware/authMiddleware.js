@@ -69,27 +69,9 @@ const protect = async (req, res, next) => {
 
     let user = null;
     const userId = decoded.id || decoded._id || decoded.userId || decoded.sub;
+    const isStudentToken = decoded.role === "student" || Boolean(decoded.studentId);
 
-    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-      try {
-        user = await User.findById(userId).select("-password");
-      } catch (_) {}
-    }
-
-    if (!user && decoded.email) {
-      try {
-        user = await User.findOne({ email: decoded.email.toLowerCase().trim() }).select("-password");
-      } catch (_) {}
-    }
-
-    if (!user && userId) {
-      try {
-        user = await User.findOne({ $or: [{ _id: userId }, { id: userId }] }).select("-password");
-      } catch (_) {}
-    }
-
-    // Fallback: Check Student model if user is a student
-    if (!user) {
+    if (isStudentToken) {
       try {
         const studentQuery = [];
         if (userId && mongoose.Types.ObjectId.isValid(userId)) {
@@ -112,6 +94,59 @@ const protect = async (req, res, next) => {
           }
         }
       } catch (_) {}
+
+      if (!user) {
+        user = {
+          _id: userId || "00000000-0000-0000-0000-000000000000",
+          id: userId || "00000000-0000-0000-0000-000000000000",
+          email: decoded?.email || "",
+          role: "student",
+          institute: decoded?.institute || decoded?.instituteId || null,
+        };
+      }
+    } else {
+      if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+        try {
+          user = await User.findById(userId).select("-password");
+        } catch (_) {}
+      }
+
+      if (!user && decoded.email) {
+        try {
+          user = await User.findOne({ email: decoded.email.toLowerCase().trim() }).select("-password");
+        } catch (_) {}
+      }
+
+      if (!user && userId) {
+        try {
+          user = await User.findOne({ $or: [{ _id: userId }, { id: userId }] }).select("-password");
+        } catch (_) {}
+      }
+
+      if (!user) {
+        try {
+          const studentQuery = [];
+          if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+            studentQuery.push({ _id: userId });
+          }
+          if (decoded.email) {
+            studentQuery.push({ email: decoded.email.toLowerCase().trim() });
+          }
+          if (studentQuery.length > 0) {
+            const student = await Student.findOne({ $or: studentQuery });
+            if (student) {
+              user = {
+                _id: student._id,
+                id: student._id,
+                name: student.name,
+                email: student.email,
+                role: "student",
+                institute: student.user || student.institute,
+              };
+            }
+          }
+        } catch (_) {}
+      }
     }
 
     // Direct token payload fallback if user document is not in DB
@@ -127,12 +162,13 @@ const protect = async (req, res, next) => {
 
     req.user = user;
 
-    if (
-      req.user &&
-      req.user.role !== "super_admin" &&
-      req.user.role !== "student" &&
-      req.user.institute
-    ) {
+    const skipSubscriptionCheck =
+      isStudentToken ||
+      req.user.role === "super_admin" ||
+      req.user.role === "student" ||
+      req.user.role === "student_parent";
+
+    if (req.user && !skipSubscriptionCheck && req.user.institute) {
       const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");
       const rawInst = req.user.institute;
       const instId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
