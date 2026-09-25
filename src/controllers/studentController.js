@@ -2775,16 +2775,43 @@ export const getStudentPortalData = async (req, res) => {
       if (siblingProfilesQuery.length > 0) {
         const allSiblingStudents = await Student.find({
           $or: siblingProfilesQuery
-        }).select("name enrollmentNumber email phone parentPhone user");
+        }).populate("batch", "name").select("name enrollmentNumber email phone parentPhone user batch batches enrolledBatchIds");
+
+        const batchIdsSet = new Set();
+        allSiblingStudents.forEach((s) => {
+          if (s.batch) batchIdsSet.add(String(s.batch._id || s.batch.id || s.batch));
+          if (Array.isArray(s.batches)) s.batches.forEach((b) => batchIdsSet.add(String(b._id || b.id || b)));
+          if (Array.isArray(s.enrolledBatchIds)) s.enrolledBatchIds.forEach((b) => batchIdsSet.add(String(b)));
+        });
+
+        const batchesList = batchIdsSet.size > 0 ? await Batch.find({ _id: { $in: Array.from(batchIdsSet) } }).select("_id name") : [];
+        const batchNameMap = new Map();
+        batchesList.forEach((b) => {
+          if (b) batchNameMap.set(String(b._id || b.id), b.name);
+        });
 
         const profilesMap = new Map();
         allSiblingStudents.forEach((s) => {
           if (s && s.enrollmentNumber && !profilesMap.has(s.enrollmentNumber)) {
+            let resolvedBatchName = "";
+            if (s.batch) {
+              resolvedBatchName = typeof s.batch === "object" && s.batch.name ? s.batch.name : (batchNameMap.get(String(s.batch._id || s.batch.id || s.batch)) || "");
+            }
+            if (!resolvedBatchName && Array.isArray(s.batches) && s.batches.length > 0) {
+              const b0 = s.batches[0];
+              resolvedBatchName = typeof b0 === "object" && b0.name ? b0.name : (batchNameMap.get(String(b0._id || b0.id || b0)) || "");
+            }
+            if (!resolvedBatchName && Array.isArray(s.enrolledBatchIds) && s.enrolledBatchIds.length > 0) {
+              resolvedBatchName = batchNameMap.get(String(s.enrolledBatchIds[0])) || "";
+            }
+
             profilesMap.set(s.enrollmentNumber, {
               name: s.name,
               enrollmentNumber: s.enrollmentNumber,
               email: s.email || "",
               phone: s.phone || s.parentPhone || "",
+              batch: resolvedBatchName ? { name: resolvedBatchName } : null,
+              batchName: resolvedBatchName || "General",
             });
           }
         });
