@@ -2642,8 +2642,13 @@ export const getStudentPortalData = async (req, res) => {
           ? rawAttendance.filter((a) => !a.batchId || String(a.batchId) === String(currentBatchIdVal))
           : rawAttendance;
 
+        const currentStudentIdStr = String(student._id || student.id || "").toLowerCase();
         const batchNotes = notes || [];
-        const batchTestResults = testResults || [];
+        const batchTestResults = (testResults || []).filter((t) => {
+          if (!t) return false;
+          const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim().toLowerCase();
+          return !tStId || tStId === currentStudentIdStr;
+        });
         const studentNotices = notices || [];
 
         const now = new Date();

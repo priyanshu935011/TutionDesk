@@ -42,6 +42,22 @@ const uploadMetadataFile = (filename, contentString) => {
     });
 };
 
+function extractStudentIdsFromFilter(filter) {
+  if (!filter || typeof filter !== "object") return [];
+  const ids = [];
+  if (filter.student) ids.push(filter.student);
+  if (filter.student_id) ids.push(filter.student_id);
+  if (filter.studentId) ids.push(filter.studentId);
+  if (filter.$or && Array.isArray(filter.$or)) {
+    for (const item of filter.$or) {
+      if (item.student) ids.push(item.student);
+      if (item.student_id) ids.push(item.student_id);
+      if (item.studentId) ids.push(item.studentId);
+    }
+  }
+  return ids;
+}
+
 export const initializeSupabaseStorage = async () => {
   try {
     const bucketName = process.env.SUPABASE_BUCKET || "notes";
@@ -960,6 +976,7 @@ class SupabaseQuery {
     }
 
     let attempt = 0;
+    const initialFilter = JSON.parse(JSON.stringify(this.args[0] || {}));
     const currentFilter = { ...(this.args[0] || {}) };
 
     if (tableName === "institutes" && (currentFilter.leadApiKey || currentFilter.lead_api_key)) {
@@ -1144,18 +1161,31 @@ class SupabaseQuery {
               });
             }
           }
-          // Filter the flattened array according to filter
-          rows = flattened.filter(doc => {
-            // Check student filter
-            if (currentFilter.student) {
-              const filterVal = currentFilter.student;
-              if (filterVal && typeof filterVal === "object" && filterVal.$in) {
-                return filterVal.$in.includes(doc.student);
+          // Filter the flattened array according to target student filter
+          const rawTargetStudentIds = [
+            ...extractStudentIdsFromFilter(initialFilter),
+            ...extractStudentIdsFromFilter(currentFilter)
+          ];
+          const targetStudentIdStrs = [];
+          for (const item of rawTargetStudentIds) {
+            if (item && typeof item === "object" && item.$in && Array.isArray(item.$in)) {
+              for (const v of item.$in) {
+                if (v) targetStudentIdStrs.push(String(v?._id || v?.id || v).toLowerCase());
               }
-              return doc.student === filterVal;
+            } else if (item) {
+              targetStudentIdStrs.push(String(item?._id || item?.id || item).toLowerCase());
             }
-            return true;
-          });
+          }
+
+          if (targetStudentIdStrs.length > 0) {
+            const targetSet = new Set(targetStudentIdStrs);
+            rows = flattened.filter(doc => {
+              const docStStr = String(doc.student || doc.student_id || "").toLowerCase();
+              return targetSet.has(docStStr);
+            });
+          } else {
+            rows = flattened;
+          }
         }
 
         const docs = rows.map(row => new SupabaseDocument(tableName, row, this.model));
