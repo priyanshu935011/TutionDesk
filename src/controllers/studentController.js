@@ -2999,7 +2999,6 @@ export const bulkCreateStudents = async (req, res) => {
 
         // Validate required fields
         if (!name) throw new Error("Name is required");
-        if (!phone) throw new Error("Phone is required");
         if (!batchName) throw new Error("Batch Name is required");
 
         // Resolve batch ID
