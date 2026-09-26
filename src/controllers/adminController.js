@@ -332,7 +332,6 @@ export const createInstitute = async (req, res) => {
     if (
       !name ||
       !ownerName ||
-      !adminEmail ||
       !adminPassword ||
       !subscriptionPlan ||
       subscriptionAmount === undefined ||
@@ -341,11 +340,13 @@ export const createInstitute = async (req, res) => {
       return res.status(400).json({ message: "All required fields must be filled" });
     }
 
-    const normalizedEmail = adminEmail.toLowerCase();
-    const existingUser = await User.findOne({ email: normalizedEmail });
+    const normalizedEmail = adminEmail ? adminEmail.toLowerCase().trim() : "";
+    if (normalizedEmail) {
+      const existingUser = await User.findOne({ email: normalizedEmail });
 
-    if (existingUser) {
-      return res.status(400).json({ message: "Admin email already exists" });
+      if (existingUser) {
+        return res.status(400).json({ message: "Admin email already exists" });
+      }
     }
 
     const startDate = new Date(subscriptionStart);
@@ -457,8 +458,9 @@ export const updateInstitute = async (req, res) => {
       maxLeadFileSizeMb,
     } = req.body;
 
-    if (adminEmail && adminEmail.toLowerCase() !== institute.adminEmail) {
-      const existingUser = await User.findOne({ email: adminEmail.toLowerCase() });
+    const normalizedEmail = adminEmail !== undefined && adminEmail !== null ? adminEmail.toLowerCase().trim() : undefined;
+    if (normalizedEmail && normalizedEmail !== (institute.adminEmail || "").toLowerCase()) {
+      const existingUser = await User.findOne({ email: normalizedEmail });
       if (existingUser && String(existingUser._id) !== String(institute.adminUser)) {
         return res.status(400).json({ message: "Admin email already exists" });
       }
@@ -467,7 +469,7 @@ export const updateInstitute = async (req, res) => {
     if (name !== undefined) institute.name = name;
     if (ownerName !== undefined) institute.ownerName = ownerName;
     if (adminPhone !== undefined) institute.adminPhone = adminPhone;
-    if (adminEmail !== undefined) institute.adminEmail = adminEmail.toLowerCase();
+    if (normalizedEmail !== undefined) institute.adminEmail = normalizedEmail;
     if (subscriptionPlan !== undefined) institute.subscriptionPlan = subscriptionPlan;
     if (subscriptionAmount !== undefined) institute.subscriptionAmount = Number(subscriptionAmount);
     if (trialDays !== undefined) institute.trialDays = Number(trialDays);
