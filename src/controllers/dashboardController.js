@@ -11,7 +11,7 @@ export const getDashboard = async (req, res) => {
     if (instIdStr) {
       institute = await Institute.findById(instIdStr)
         .select(
-          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
         );
     }
 

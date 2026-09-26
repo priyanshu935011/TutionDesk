@@ -9,6 +9,7 @@ import QuizAttempt from "../models/QuizAttempt.js";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
+import WhatsappLog from "../models/WhatsappLog.js";
 import cloudinary from "../utils/cloudinary.js";
 import {
   buildNoteDownloadFilename,
@@ -2514,5 +2515,42 @@ export const getQuickSummary = async (req, res) => {
   } catch (error) {
     console.error("getQuickSummary error:", error);
     return res.status(500).json({ message: "Could not fetch quick summary." });
+  }
+};
+
+export const getWhatsappLogs = async (req, res) => {
+  try {
+    if (req.user?.role !== "institute_admin") {
+      return res.status(403).json({ message: "Access denied. Only institute administrators can view WhatsApp logs." });
+    }
+    const instituteId = req.user.institute?._id || req.user.institute;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const [logs, totalSent, totalFailed, sentToday] = await Promise.all([
+      WhatsappLog.find({ institute: instituteId })
+        .sort({ createdAt: -1 })
+        .limit(200)
+        .lean(),
+      WhatsappLog.countDocuments({ institute: instituteId, status: "sent" }),
+      WhatsappLog.countDocuments({ institute: instituteId, status: "failed" }),
+      WhatsappLog.countDocuments({ institute: instituteId, status: "sent", createdAt: { $gte: startOfDay } }),
+    ]);
+
+    return res.json({
+      logs: logs || [],
+      summary: {
+        totalSent: totalSent || 0,
+        totalFailed: totalFailed || 0,
+        sentToday: sentToday || 0,
+      },
+    });
+  } catch (error) {
+    console.error("getWhatsappLogs error:", error);
+    return res.status(500).json({ message: "Could not fetch WhatsApp logs." });
   }
 };
