@@ -500,7 +500,8 @@ export const updateInstitute = async (req, res) => {
     if (institute.adminUser) {
       const adminUser = await User.findById(institute.adminUser);
       if (adminUser) {
-        if (adminEmail !== undefined) adminUser.email = adminEmail.toLowerCase();
+        if (normalizedEmail !== undefined) adminUser.email = normalizedEmail;
+        if (adminPhone !== undefined) adminUser.phone = adminPhone;
         if (adminPassword) adminUser.password = await bcrypt.hash(adminPassword, 10);
         await adminUser.save();
       }

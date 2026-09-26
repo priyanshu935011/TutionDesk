@@ -50,15 +50,16 @@ const buildInstituteState = async (user) => {
 
 export const loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, phone, identifier, password } = req.body;
+    const rawIdentifier = email || phone || identifier || "";
 
-    if (!email || !password) {
+    if (!rawIdentifier || !password) {
       return res
         .status(400)
-        .json({ message: "Email and password are required" });
+        .json({ message: "Email/Phone and password are required" });
     }
 
-    const normalizedIdentifier = (email || "").toLowerCase().trim();
+    const normalizedIdentifier = String(rawIdentifier).toLowerCase().trim();
     const cleanPhone = normalizedIdentifier.replace(/\D/g, "");
 
     if (
@@ -102,6 +103,26 @@ export const loginUser = async (req, res) => {
     } catch (err) {
       console.warn("User lookup $or query warning, falling back to email query:", err.message);
       user = await User.findOne({ email: normalizedIdentifier });
+    }
+
+    // Fallback: search Institute adminPhone if user not found directly by phone
+    if (!user && cleanPhone.length >= 7) {
+      try {
+        const inst = await Institute.findOne({
+          $or: [
+            { adminPhone: normalizedIdentifier },
+            { adminPhone: cleanPhone },
+            { adminPhone: last10 },
+            { adminPhone: `+91${last10}` },
+            { adminPhone: `91${last10}` },
+          ],
+        });
+        if (inst && inst.adminUser) {
+          user = await User.findById(inst.adminUser);
+        }
+      } catch (e) {
+        console.warn("Institute phone lookup fallback error:", e.message);
+      }
     }
 
     if (!user) {
