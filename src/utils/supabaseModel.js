@@ -385,13 +385,29 @@ function matchFilter(doc, filter) {
           const re = new RegExp(opVal, opt);
           if (!re.test(String(docVal || ""))) return false;
         } else if (op === "$gte") {
-          if (!(docVal >= cleanOpVal)) return false;
+          const docTime = new Date(docVal).getTime();
+          const cleanTime = new Date(cleanOpVal).getTime();
+          if (!isNaN(docTime) && !isNaN(cleanTime)) {
+            if (!(docTime >= cleanTime)) return false;
+          } else if (!(docVal >= cleanOpVal)) return false;
         } else if (op === "$lte") {
-          if (!(docVal <= cleanOpVal)) return false;
+          const docTime = new Date(docVal).getTime();
+          const cleanTime = new Date(cleanOpVal).getTime();
+          if (!isNaN(docTime) && !isNaN(cleanTime)) {
+            if (!(docTime <= cleanTime)) return false;
+          } else if (!(docVal <= cleanOpVal)) return false;
         } else if (op === "$gt") {
-          if (!(docVal > cleanOpVal)) return false;
+          const docTime = new Date(docVal).getTime();
+          const cleanTime = new Date(cleanOpVal).getTime();
+          if (!isNaN(docTime) && !isNaN(cleanTime)) {
+            if (!(docTime > cleanTime)) return false;
+          } else if (!(docVal > cleanOpVal)) return false;
         } else if (op === "$lt") {
-          if (!(docVal < cleanOpVal)) return false;
+          const docTime = new Date(docVal).getTime();
+          const cleanTime = new Date(cleanOpVal).getTime();
+          if (!isNaN(docTime) && !isNaN(cleanTime)) {
+            if (!(docTime < cleanTime)) return false;
+          } else if (!(docVal < cleanOpVal)) return false;
         } else if (op === "$ne") {
           if (String(docVal) === String(cleanOpVal)) return false;
         }
@@ -891,6 +907,10 @@ class SupabaseQuery {
 
   populate(fields, selectFields) {
     this.populateFields.push({ fields, selectFields });
+    return this;
+  }
+
+  lean() {
     return this;
   }
 

@@ -2523,7 +2523,8 @@ export const getWhatsappLogs = async (req, res) => {
     if (req.user?.role !== "institute_admin") {
       return res.status(403).json({ message: "Access denied. Only institute administrators can view WhatsApp logs." });
     }
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const rawInst = req.user.institute;
+    const instituteId = rawInst?._id || rawInst?.id || rawInst;
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
@@ -2531,22 +2532,47 @@ export const getWhatsappLogs = async (req, res) => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const [logs, totalSent, totalFailed, sentToday] = await Promise.all([
-      WhatsappLog.find({ institute: instituteId })
-        .sort({ createdAt: -1 })
-        .limit(200)
-        .lean(),
-      WhatsappLog.countDocuments({ institute: instituteId, status: "sent" }),
-      WhatsappLog.countDocuments({ institute: instituteId, status: "failed" }),
-      WhatsappLog.countDocuments({ institute: instituteId, status: "sent", createdAt: { $gte: startOfDay } }),
-    ]);
+    let logs = [];
+    try {
+      logs = await WhatsappLog.find({ institute: instituteId }).sort({ createdAt: -1 }).limit(200);
+      if ((!logs || logs.length === 0) && typeof instituteId === "object") {
+        const instStr = String(instituteId._id || instituteId.id || instituteId);
+        logs = await WhatsappLog.find({ institute: instStr }).sort({ createdAt: -1 }).limit(200);
+      }
+    } catch (e) {
+      console.warn("WhatsappLog.find query warning:", e.message);
+    }
+
+    const rawLogs = Array.isArray(logs) ? logs : [];
+
+    const mappedLogs = rawLogs.map((l) => {
+      const doc = typeof l.toObject === "function" ? l.toObject() : { ...l };
+      return {
+        ...doc,
+        _id: doc._id || doc.id || crypto.randomUUID(),
+        recipient: doc.recipient || doc.to || "-",
+        messageText: doc.messageText || doc.message || "",
+        msgType: doc.msgType || "custom",
+        status: doc.status || "sent",
+        cost: doc.cost || 0,
+        createdAt: doc.createdAt || new Date().toISOString(),
+      };
+    });
+
+    const totalSent = mappedLogs.filter((l) => String(l.status).toLowerCase() === "sent").length;
+    const totalFailed = mappedLogs.filter((l) => String(l.status).toLowerCase() === "failed").length;
+    const sentToday = mappedLogs.filter((l) => {
+      if (String(l.status).toLowerCase() !== "sent" || !l.createdAt) return false;
+      const logDate = new Date(l.createdAt);
+      return !isNaN(logDate.getTime()) && logDate.getTime() >= startOfDay.getTime();
+    }).length;
 
     return res.json({
-      logs: logs || [],
+      logs: mappedLogs,
       summary: {
-        totalSent: totalSent || 0,
-        totalFailed: totalFailed || 0,
-        sentToday: sentToday || 0,
+        totalSent,
+        totalFailed,
+        sentToday,
       },
     });
   } catch (error) {

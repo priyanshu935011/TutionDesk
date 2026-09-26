@@ -1647,7 +1647,8 @@ export const getWalletInfo = async (req, res) => {
 
 export const getWhatsappLogs = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const rawInst = req.user?.institute;
+    const instituteId = rawInst?._id || rawInst?.id || rawInst;
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
@@ -1658,13 +1659,19 @@ export const getWhatsappLogs = async (req, res) => {
       filter.msgType = msgType;
     }
 
-    const logs = await WhatsappLog.find(filter).sort({ createdAt: -1 }).limit(100);
-    const mappedLogs = logs.map(l => {
-      const doc = typeof l.toObject === "function" ? l.toObject() : l;
+    let logs = [];
+    try {
+      logs = await WhatsappLog.find(filter).sort({ createdAt: -1 }).limit(100);
+    } catch (_) {}
+
+    const rawLogs = Array.isArray(logs) ? logs : [];
+    const mappedLogs = rawLogs.map((l) => {
+      const doc = typeof l.toObject === "function" ? l.toObject() : { ...l };
       return {
         ...doc,
-        recipient: doc.to,
-        message: doc.messageText
+        _id: doc._id || doc.id || crypto.randomUUID(),
+        recipient: doc.recipient || doc.to || "-",
+        message: doc.messageText || doc.message || "",
       };
     });
     return res.json({ logs: mappedLogs });
