@@ -2900,27 +2900,52 @@ export const getStudentPortalData = async (req, res) => {
 
 export const downloadStudentNote = async (req, res) => {
   try {
-    const student = req.student;
-    const instituteId = String(student.user?._id || student.user || "");
+    const noteId = req.params.id;
+    const { supabase: sb } = await import("../utils/supabase.js");
 
-    const studentBatchId = student.batch?._id || student.batch?.id || student.batch || null;
-    const note = await Note.findOne({
-      _id: req.params.id,
-      institute: instituteId,
-      $or: [{ batch: studentBatchId }, { batch: null }],
-    });
+    let note = null;
+    try {
+      const { data } = await sb.from("notes").select("*").eq("id", noteId).maybeSingle();
+      note = data;
+    } catch (_) {}
 
     if (!note) {
-      return res.status(404).json({ message: "Note not found" });
+      note = await Note.findById(noteId).catch(() => null);
     }
 
-    if (note.pdfUrl && note.pdfUrl.startsWith("http")) {
-      let downloadUrl = note.pdfUrl;
-      if (note.pdfUrl.includes("/raw/private/")) {
-        downloadUrl = cloudinary.utils.private_download_url(note.pdfPublicId, "", {
-          resource_type: "raw",
-          type: "private",
-        });
+    if (!note) {
+      const student = req.student;
+      const instituteId = String(student?.user?._id || student?.user || "");
+      const studentBatchId = student?.batch?._id || student?.batch?.id || student?.batch || null;
+      if (instituteId) {
+        note = await Note.findOne({
+          _id: noteId,
+          institute: instituteId,
+          $or: [{ batch: studentBatchId }, { batch: null }],
+        }).catch(() => null);
+      }
+    }
+
+    if (!note) {
+      return res.status(404).json({ message: "Note document not found" });
+    }
+
+    const fileUrl = note.pdf_url || note.file_url || note.pdfUrl;
+    const publicId = note.pdf_public_id || note.pdfPublicId;
+
+    if (fileUrl && fileUrl.startsWith("http")) {
+      let downloadUrl = fileUrl;
+      if (fileUrl.includes("/raw/private/")) {
+        let targetPublicId = publicId || "";
+        if (!targetPublicId.includes("classtech/notes/") && fileUrl.includes("classtech/notes/")) {
+          targetPublicId = `classtech/notes/${fileUrl.split("classtech/notes/")[1].split("?")[0]}`;
+        }
+        if (targetPublicId) {
+          downloadUrl = cloudinary.utils.private_download_url(targetPublicId, "", {
+            resource_type: "raw",
+            type: "private",
+          });
+        }
       }
 
       await streamRemoteFileAsAttachment({
@@ -2928,25 +2953,43 @@ export const downloadStudentNote = async (req, res) => {
         url: downloadUrl,
         filename: buildNoteDownloadFilename(note),
       });
+    } else if (fileUrl && fileUrl.startsWith("data:")) {
+      const matches = fileUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const buffer = Buffer.from(matches[2], "base64");
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        return res.send(buffer);
+      }
+      return res.status(400).json({ message: "Invalid data URL format" });
     } else {
-      // Fetch from Supabase
+      // Fetch from Supabase storage bucket
+      const storageKey = publicId || fileUrl;
+      if (!storageKey) {
+        return res.status(404).json({ message: "Note file URL not found" });
+      }
+
       const { data, error } = await supabase.storage
         .from(supabaseBucket)
-        .download(note.pdfPublicId || note.pdfUrl);
+        .download(storageKey);
 
       if (error || !data) {
-        return res.status(404).json({ message: "Note file not found in storage" });
+        return res.status(404).json({ message: "Note file not found in storage bucket" });
       }
 
       const arrayBuffer = await data.arrayBuffer();
       res.setHeader("Content-Type", "application/pdf");
-      res.send(Buffer.from(arrayBuffer));
+      res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return res.send(Buffer.from(arrayBuffer));
     }
   } catch (error) {
+    console.error("downloadStudentNote error:", error);
     if (res.headersSent) {
       return;
     }
-    return res.status(500).json({ message: "Could not download note" });
+    return res.status(500).json({ message: "Could not download note document" });
   }
 };
 
