@@ -686,12 +686,12 @@ export const getSmtpSettings = async (req, res) => {
   try {
     const setting = await SystemSetting.findOne({ key: "smtp_settings" });
     const defaults = {
-      host: "",
-      port: 587,
-      user: "",
-      pass: "",
-      from: '"Classtech" <support@classtech.in>',
-      brevoApiKey: "",
+      host: process.env.SMTP_HOST || "",
+      port: Number(process.env.SMTP_PORT) || 587,
+      user: process.env.SMTP_USER || "",
+      pass: process.env.SMTP_PASS || "",
+      from: process.env.SMTP_FROM || '"Classtech" <support@classtech.in>',
+      brevoApiKey: process.env.BREVO_API_KEY || "",
     };
     if (!setting) {
       return res.json(defaults);
@@ -705,12 +705,12 @@ export const getSmtpSettings = async (req, res) => {
       }
     }
     return res.json({
-      host: val.host || "",
-      port: val.port || 587,
-      user: val.user || "",
-      pass: val.pass || "",
-      from: val.from || '"Classtech" <support@classtech.in>',
-      brevoApiKey: val.brevoApiKey || "",
+      host: val.host || defaults.host,
+      port: Number(val.port) || defaults.port,
+      user: val.user || defaults.user,
+      pass: val.pass || defaults.pass,
+      from: val.from || defaults.from,
+      brevoApiKey: val.brevoApiKey || defaults.brevoApiKey,
     });
   } catch (error) {
     console.error("getSmtpSettings error:", error);
