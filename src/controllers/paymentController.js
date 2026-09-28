@@ -810,7 +810,11 @@ export const testSmtpConnection = async (req, res) => {
     let success = false;
     let errorLog = "";
 
-    if (testBrevoApiKey || (testPass && testPass.startsWith("xkeysib-"))) {
+    const isBrevoApi = Boolean(testBrevoApiKey) || 
+      (testPass && (testPass.startsWith("xkeysib-") || testPass.startsWith("xsmtpsib-") || testPass.includes("brevo"))) ||
+      (testHost && (testHost.includes("brevo") || testHost.includes("sendinblue")));
+
+    if (isBrevoApi) {
       try {
         console.log("Testing Brevo HTTP API connection...");
         const apiKey = testBrevoApiKey || testPass;
@@ -1172,7 +1176,11 @@ export const testSmtpRenewalConnection = async (req, res) => {
     let success = false;
     let errorLog = "";
 
-    if (testBrevoApiKey || (testPass && testPass.startsWith("xkeysib-"))) {
+    const isBrevoRenewalApi = Boolean(testBrevoApiKey) || 
+      (testPass && (testPass.startsWith("xkeysib-") || testPass.startsWith("xsmtpsib-") || testPass.includes("brevo"))) ||
+      (testHost && (testHost.includes("brevo") || testHost.includes("sendinblue")));
+
+    if (isBrevoRenewalApi) {
       try {
         console.log("Testing Brevo HTTP API connection (Renewal SMTP)...");
         const apiKey = testBrevoApiKey || testPass;

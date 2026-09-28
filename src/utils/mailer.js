@@ -630,8 +630,11 @@ export const sendRenewalReceiptEmail = async (recipientEmail, instituteName, pay
       </div>
     `;
 
-    let sent = false;
-    if (config.brevoApiKey || (pass && pass.startsWith("xkeysib-"))) {
+    const isBrevoReceiptApi = Boolean(config.brevoApiKey) || 
+      (pass && (pass.startsWith("xkeysib-") || pass.startsWith("xsmtpsib-") || pass.includes("brevo"))) ||
+      (host && (host.includes("brevo") || host.includes("sendinblue")));
+
+    if (isBrevoReceiptApi) {
       try {
         console.log("Sending receipt email via Brevo HTTP REST API (port 443)...");
         const response = await fetch("https://api.brevo.com/v3/smtp/email", {
