@@ -125,17 +125,29 @@ export const logSystemError = async ({
     const methodPath = req?.method && (req?.originalUrl || req?.path)
       ? `${req.method} ${req.originalUrl || req.path}`
       : "N/A";
+    const userSummary = `${name} (${email} / ${phone})`;
 
     const whatsappMessage =
       `⚠️ *SYSTEM ERROR ALERT*\n\n` +
       `📌 *Endpoint:* ${methodPath}\n` +
-      `👤 *User:* ${name} (${email} / ${phone})\n` +
+      `👤 *User:* ${userSummary}\n` +
       `🛡️ *Role:* ${role}\n` +
       `🏢 *Institute:* ${instName}\n` +
       `🚨 *Error:* ${message || "Unknown error"}\n` +
       `⏰ *Time:* ${timeStr}`;
 
-    sendMessage("admin_test", alertPhone, whatsappMessage, "error_alert").catch((err) => {
+    const templateConfig = {
+      templateName: process.env.META_ERROR_TEMPLATE_NAME || "system_error_alert",
+      parameters: [
+        methodPath,
+        userSummary,
+        role,
+        String(message || "Unknown error").substring(0, 500),
+        timeStr,
+      ],
+    };
+
+    sendMessage("admin_test", alertPhone, whatsappMessage, "error_alert", templateConfig).catch((err) => {
       console.warn("Failed to dispatch WhatsApp error alert:", err.message);
     });
   } catch (err) {
