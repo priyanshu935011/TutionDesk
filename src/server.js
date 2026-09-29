@@ -29,6 +29,8 @@ import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js";
 import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
 
+import { errorLoggerMiddleware, globalErrorHandler } from "./middleware/errorLoggerMiddleware.js";
+
 connectDB();
 
 const app = express();
@@ -85,6 +87,7 @@ app.use(compression());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(globalLimiter);
+app.use(errorLoggerMiddleware);
 
 app.get("/", (_, res) => {
   res.json({ message: "Coaching CRM API is running" });
@@ -161,6 +164,8 @@ app.use("/api/payment", paymentRoutes);
 app.use("/payment", paymentRoutes);
 app.use("/videos", videoRoutes);
 app.use("/api/videos", videoRoutes);
+
+app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 8080;
 
