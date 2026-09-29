@@ -126,6 +126,7 @@ export const logSystemError = async ({
       ? `${req.method} ${req.originalUrl || req.path}`
       : "N/A";
     const userSummary = `${name} (${email} / ${phone})`;
+    const errorDetails = `${userSummary} [Role: ${role}] | Error: ${String(message || "Unknown error").substring(0, 300)}`;
 
     const whatsappMessage =
       `⚠️ *SYSTEM ERROR ALERT*\n\n` +
@@ -139,11 +140,9 @@ export const logSystemError = async ({
     const templateConfig = {
       templateName: process.env.META_ERROR_TEMPLATE_NAME || "system_error_alert",
       parameters: [
-        methodPath,
-        userSummary,
-        role,
-        String(message || "Unknown error").substring(0, 500),
-        timeStr,
+        methodPath,    // {{1}}
+        errorDetails,  // {{2}}
+        timeStr,       // {{3}}
       ],
     };
 
