@@ -980,6 +980,7 @@ export const getReceiptDesignSettings = async (req, res) => {
     const defaults = {
       logoUrl: "https://classtech.in/logo.png",
       primaryColor: "#4f46e5",
+      phone: "",
       termsAndConditions: "1. Subscription payments are non-refundable.\n2. Access is valid for the selected plan tenure.",
       footerNotes: "Thank you for partnering with Classtech!",
       signatureText: "Authorized Signatory",
@@ -999,6 +1000,7 @@ export const getReceiptDesignSettings = async (req, res) => {
     return res.json({
       logoUrl: val.logoUrl || defaults.logoUrl,
       primaryColor: val.primaryColor || defaults.primaryColor,
+      phone: val.phone || "",
       termsAndConditions: val.termsAndConditions || defaults.termsAndConditions,
       footerNotes: val.footerNotes || defaults.footerNotes,
       signatureText: val.signatureText || defaults.signatureText,
@@ -1012,11 +1014,12 @@ export const getReceiptDesignSettings = async (req, res) => {
 
 export const updateReceiptDesignSettings = async (req, res) => {
   try {
-    const { logoUrl, primaryColor, termsAndConditions, footerNotes, signatureText, signatureUrl } = req.body;
+    const { logoUrl, primaryColor, phone, termsAndConditions, footerNotes, signatureText, signatureUrl } = req.body;
 
     const updatedValue = {
       logoUrl: logoUrl || "https://classtech.in/logo.png",
       primaryColor: primaryColor || "#4f46e5",
+      phone: phone || "",
       termsAndConditions: termsAndConditions || "",
       footerNotes: footerNotes || "",
       signatureText: signatureText || "Authorized Signatory",
@@ -1311,6 +1314,7 @@ export const previewReceipt = async (req, res) => {
     const design = {
       logoUrl: rawDesign.logoUrl || "https://classtech.in/logo.png",
       primaryColor: rawDesign.primaryColor || "#4f46e5",
+      phone: rawDesign.phone || "",
       termsAndConditions: rawDesign.termsAndConditions || "1. Subscription payments are non-refundable.\n2. Access is valid for the selected plan tenure.",
       footerNotes: rawDesign.footerNotes || "Thank you for partnering with Classtech!",
       signatureText: rawDesign.signatureText || "Authorized Signatory",
@@ -1948,4 +1952,35 @@ export const updateNoticeExpirySettings = async (req, res) => {
     return res.status(500).json({ message: "Could not save notice expiry settings." });
   }
 };
+
+export const proxyImage = async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url) {
+      return res.status(400).json({ message: "URL is required" });
+    }
+
+    if (url.startsWith("data:")) {
+      return res.json({ dataUrl: url });
+    }
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 8000,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+
+    const contentType = response.headers["content-type"] || "image/png";
+    const base64 = Buffer.from(response.data, "binary").toString("base64");
+    const dataUrl = `data:${contentType};base64,${base64}`;
+
+    return res.json({ dataUrl });
+  } catch (error) {
+    console.error("proxyImage error:", error.message);
+    return res.status(500).json({ message: "Could not proxy image" });
+  }
+};
+
 

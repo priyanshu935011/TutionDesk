@@ -35,13 +35,15 @@ import {
   getWhatsappLogs,
   createWalletRechargeSession,
   verifyWalletRecharge,
+  proxyImage,
 } from "../controllers/paymentController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
-// Public webhook route (not protected by auth)
+// Public webhook & proxy routes
 router.post("/webhook", handleCashfreeWebhook);
+router.get("/proxy-image", protect, proxyImage);
 
 // Protected routes (Tuition Admin / Teachers)
 router.post("/create-session", protect, createPaymentSession);
