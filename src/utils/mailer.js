@@ -387,6 +387,13 @@ export const sendDemoRequestEmail = async ({
       return true;
     }
 
+    const mailOptions = {
+      from,
+      to: targetRecipientEmail,
+      subject: `🚀 New Demo Request: ${name} (${instituteName || "Tuition"})`,
+      html: emailHtml,
+    };
+
     const transporter = nodemailer.createTransport({
       host,
       port: Number(port),

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
+import ContactMessage from "../models/ContactMessage.js";
 import redisClient from "../config/redis.js";
 import { sendResetEmail, sendDemoRequestEmail, sendOTPEmail } from "../utils/mailer.js";
 import { sendSMSOTP } from "../utils/smsHelper.js";
@@ -286,18 +287,52 @@ export const bookDemo = async (req, res) => {
       return res.status(400).json({ message: "Full Name and Phone Number are required." });
     }
 
-    await sendDemoRequestEmail({
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email ? email.trim() : "",
-      instituteName: instituteName ? instituteName.trim() : "",
-      tuitionType: tuitionType || "Solo / Academy",
-      studentCount: studentCount || "1-50",
-      preferredTime: preferredTime || "Anytime",
-      notes: notes ? notes.trim() : "",
+    const cleanName = name.trim();
+    const cleanPhone = phone.trim();
+    const cleanEmail = email ? email.trim() : "";
+    const cleanInstitute = instituteName ? instituteName.trim() : "";
+    const cleanNotes = notes ? notes.trim() : "";
+
+    // 1. Save in ContactMessage collection so it displays in Super Admin dashboard
+    const demoDetailsMessage = `
+🚀 DEMO REQUEST DETAILS:
+- Full Name: ${cleanName}
+- Phone Number: ${cleanPhone}
+- Email: ${cleanEmail || "Not provided"}
+- Institute / Coaching Name: ${cleanInstitute || "Not provided"}
+- Institute Type: ${tuitionType || "Coaching Institute"}
+- Estimated Student Capacity: ${studentCount || "50-200 Students"}
+- Preferred Call Slot: ${preferredTime || "Morning (9 AM - 12 PM)"}
+- Special Notes / Requirements: ${cleanNotes || "None"}
+    `.trim();
+
+    await ContactMessage.create({
+      name: cleanName,
+      email: cleanEmail || `${cleanPhone}@demorequest.local`,
+      phone: cleanPhone,
+      subject: `🚀 Free Demo Request: ${cleanName} (${cleanInstitute || "Coaching"})`,
+      message: demoDetailsMessage,
+      status: "unread",
     });
 
+    // 2. Dispatch email notification to priyanshugiri63@gmail.com
+    try {
+      await sendDemoRequestEmail({
+        name: cleanName,
+        phone: cleanPhone,
+        email: cleanEmail,
+        instituteName: cleanInstitute,
+        tuitionType: tuitionType || "Coaching Institute",
+        studentCount: studentCount || "50-200 Students",
+        preferredTime: preferredTime || "Morning (9 AM - 12 PM)",
+        notes: cleanNotes,
+      });
+    } catch (emailErr) {
+      console.error("Demo email notification error:", emailErr);
+    }
+
     return res.status(200).json({
+      success: true,
       message: "Thank you for booking a free demo! Our team will contact you shortly.",
     });
   } catch (error) {
