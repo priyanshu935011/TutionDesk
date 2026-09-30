@@ -275,10 +275,12 @@ const isTeacherOfBatch = (b, user) => {
         parentName: sObj.parentName || "",
         parentPhone: sObj.parentPhone || "",
         email: sObj.email || "",
+        address: sObj.address || "",
         dueDate: sObj.dueDate || null,
         joinedOn: sObj.joinedOn || null,
         customFields: sObj.customFields || {},
         attendanceRecords: sObj.attendanceRecords || [],
+        paymentHistory: sObj.paymentHistory || [],
         isArchived: Boolean(sObj.isArchived),
       };
     });
@@ -921,9 +923,38 @@ export const updateStudent = async (req, res) => {
     }
 
     const inputTotal = Number(totalFees !== undefined ? totalFees : student.totalFees);
-    const finalPaymentHistory = paymentHistory !== undefined 
+    let finalPaymentHistory = paymentHistory !== undefined 
       ? paymentHistory 
-      : (student.paymentHistory || []);
+      : [...(student.paymentHistory || [])];
+
+    if (req.body.paidAmount !== undefined && paymentHistory === undefined) {
+      const targetPaid = Math.max(0, Number(req.body.paidAmount) || 0);
+      const currentPaid = getPaidAmount(finalPaymentHistory);
+      if (targetPaid !== currentPaid) {
+        if (finalPaymentHistory.length === 0) {
+          if (targetPaid > 0) {
+            finalPaymentHistory = [{
+              _id: crypto.randomUUID(),
+              amount: targetPaid,
+              paymentDate: new Date(),
+              paymentType: feePlanType || "partial",
+              note: "Fee Payment"
+            }];
+          }
+        } else {
+          const diff = targetPaid - currentPaid;
+          if (diff !== 0) {
+            finalPaymentHistory.push({
+              _id: crypto.randomUUID(),
+              amount: diff,
+              paymentDate: new Date(),
+              paymentType: feePlanType || "partial",
+              note: diff > 0 ? "Fee Payment Adjustment" : "Fee Refund / Adjustment"
+            });
+          }
+        }
+      }
+    }
 
     const paid = getPaidAmount(finalPaymentHistory);
     const total = Math.max(inputTotal, paid);
