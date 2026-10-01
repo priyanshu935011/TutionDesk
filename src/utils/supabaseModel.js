@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { calculatePendingAmount } from "./feeHelper.js";
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_KEY || "";
@@ -1425,7 +1426,7 @@ class SupabaseQuery {
       
       const paid = doc.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
       doc.paidAmount = paid;
-      doc.pendingAmount = Math.max(0, Number(doc.totalFees || doc.total_fees || 0) - paid);
+      doc.pendingAmount = calculatePendingAmount(doc);
     }
   }
 }

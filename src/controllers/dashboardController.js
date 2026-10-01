@@ -1,6 +1,7 @@
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
+import { calculatePendingAmount } from "../utils/feeHelper.js";
 
 export const getDashboard = async (req, res) => {
   try {
@@ -57,9 +58,7 @@ export const getDashboard = async (req, res) => {
           ? Math.max(Number(sObj.paidAmount), paidFromHistory)
           : paidFromHistory;
 
-        const pending = (sObj.pendingAmount !== undefined && sObj.pendingAmount !== null && !isNaN(Number(sObj.pendingAmount)))
-          ? Number(sObj.pendingAmount)
-          : Math.max(0, total > 0 ? (total - paid) : 0);
+        const pending = calculatePendingAmount(student);
 
         totals.totalFeesCollected += paid;
         totals.totalCollectedFees += paid;

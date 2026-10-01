@@ -1,4 +1,5 @@
 import mongoose from "../utils/supabaseModel.js";
+import { calculatePendingAmount } from "../utils/feeHelper.js";
 
 const paymentSchema = new mongoose.Schema(
   {
@@ -172,7 +173,7 @@ const studentSchema = new mongoose.Schema(
         ret.totalFees = totalFees;
         ret.total_fees = totalFees;
         ret.paidAmount = paidAmount;
-        ret.pendingAmount = Math.max(0, totalFees - paidAmount);
+        ret.pendingAmount = calculatePendingAmount(ret);
         ret.attendanceSummary = {
           total: attendanceRecords.length,
           present: presentCount,
@@ -190,8 +191,7 @@ studentSchema.virtual("paidAmount").get(function getPaidAmount() {
 });
 
 studentSchema.virtual("pendingAmount").get(function getPendingAmount() {
-  const total = Number(this.totalFees ?? this.total_fees ?? this.fees ?? 0);
-  return Math.max(0, total - this.paidAmount);
+  return calculatePendingAmount(this);
 });
 
 const Student = mongoose.model("Student", studentSchema);

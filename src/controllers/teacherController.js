@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import { Readable } from "stream";
+import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Batch from "../models/Batch.js";
 import Institute from "../models/Institute.js";
 import Note from "../models/Note.js";
@@ -2445,7 +2446,6 @@ export const getOutstandingStudents = async (req, res) => {
     let query = {
       user: ownerId,
       isArchived: { $ne: true },
-      pendingAmount: { $gt: 0 },
     };
 
     if (req.user.role === "teacher") {
@@ -2464,32 +2464,38 @@ export const getOutstandingStudents = async (req, res) => {
 
     const students = await Student.find(query)
       .populate("batch", "name")
-      .populate("batches", "name")
-      .sort({ pendingAmount: -1 });
+      .populate("batches", "name");
 
-    const debtors = students.map((s) => {
-      let batchName = "Unassigned";
-      if (s.batch) {
-        batchName = typeof s.batch === "object" ? (s.batch.name || "Unassigned") : String(s.batch);
-      } else if (Array.isArray(s.batches) && s.batches.length > 0) {
-        const first = s.batches[0];
-        batchName = typeof first === "object" ? (first.name || "Unassigned") : String(first);
-      }
+    const debtors = students
+      .map((s) => {
+        const pending = calculatePendingAmount(s);
+        if (pending <= 0) return null;
 
-      return {
-        id: String(s._id || s.id),
-        _id: String(s._id || s.id),
-        name: s.name || "",
-        batchName,
-        pendingAmount: Number(s.pendingAmount || 0),
-        pending: Number(s.pendingAmount || 0),
-        totalFees: Number(s.totalFees || 0),
-        paidAmount: Number(s.paidAmount || 0),
-        phone: s.phone || "",
-        parentPhone: s.parentPhone || "",
-        enrollmentNumber: s.enrollmentNumber || "",
-      };
-    });
+        let batchName = "Unassigned";
+        if (s.batch) {
+          batchName = typeof s.batch === "object" ? (s.batch.name || "Unassigned") : String(s.batch);
+        } else if (Array.isArray(s.batches) && s.batches.length > 0) {
+          const first = s.batches[0];
+          batchName = typeof first === "object" ? (first.name || "Unassigned") : String(first);
+        }
+
+        return {
+          id: String(s._id || s.id),
+          _id: String(s._id || s.id),
+          name: s.name || "",
+          batchName,
+          pendingAmount: pending,
+          pending: pending,
+          totalFees: Number(s.totalFees || s.total_fees || 0),
+          paidAmount: Number(s.paidAmount || 0),
+          phone: s.phone || "",
+          parentPhone: s.parentPhone || "",
+          enrollmentNumber: s.enrollmentNumber || "",
+          dueDate: s.dueDate || null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.pendingAmount - a.pendingAmount);
 
     return res.json(debtors);
   } catch (error) {

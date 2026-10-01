@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import mongoose from "../utils/supabaseModel.js";
+import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import TestResult from "../models/TestResult.js";
@@ -1093,7 +1094,7 @@ export const getInstituteFullAnalytics = async (req, res) => {
       const history = sObj.paymentHistory || [];
       const paid = history.reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const total = Number(sObj.totalFees || 0);
-      const pending = Math.max(0, total - paid);
+      const pending = calculatePendingAmount(s);
 
       totalExpectedFees += total;
       totalCollectedFees += paid;

@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
+import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
@@ -1052,7 +1053,7 @@ export const updateStudent = async (req, res) => {
     }));
     
     student.paidAmount = student.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-    student.pendingAmount = Math.max(0, student.totalFees - student.paidAmount);
+    student.pendingAmount = calculatePendingAmount(student);
 
     const calculatedDueDate = resolveDueDate({ feePlanType, joinedOn: resolvedJoinedOn, dueDate: safeParseDate(dueDate) });
     student.dueDate = safeParseDate(calculatedDueDate) || calculatedDueDate;
@@ -1241,12 +1242,11 @@ export const addPayment = async (req, res) => {
     const totalFees = Number(student.totalFees || 0);
     const nextPaidAmount = currentPaid + numAmount;
 
-    if (totalFees > 0 && nextPaidAmount > totalFees) {
+    if (student.feePlanType !== "monthly" && totalFees > 0 && nextPaidAmount > totalFees) {
       return res.status(400).json({ message: "Paid amount cannot be more than total fees" });
     }
 
     student.paidAmount = nextPaidAmount;
-    student.pendingAmount = Math.max(0, totalFees - nextPaidAmount);
 
     const paymentId = crypto.randomUUID();
     const newPaymentRecord = {
@@ -1276,6 +1276,8 @@ export const addPayment = async (req, res) => {
         }
       } catch (dErr) {}
     }
+
+    student.pendingAmount = calculatePendingAmount(student);
 
     // Direct insert into Supabase payments table
     try {
@@ -3436,7 +3438,7 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
       return res.status(400).json({ message: "No phone number available for this student or parent." });
     }
 
-    const pendingAmount = Number(student.totalFees || 0) - student.paidAmount;
+    const pendingAmount = calculatePendingAmount(student);
     if (pendingAmount <= 0) {
       return res.status(400).json({ message: "This student has no pending fee amount." });
     }
