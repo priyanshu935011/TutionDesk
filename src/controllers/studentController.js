@@ -1519,19 +1519,48 @@ export const markBatchAttendance = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const batch = await Batch.findById(batchId);
-    if (!batch) {
-      return res.status(404).json({ message: "Batch not found." });
+    let batchObj = null;
+    const isObjectId = mongoose.Types.ObjectId.isValid(batchId);
+    if (isObjectId) {
+      batchObj = await Batch.findById(batchId);
+    }
+    if (!batchObj && batchId) {
+      const cleanName = String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
+      batchObj = await Batch.findOne({
+        user: ownerId,
+        name: { $regex: new RegExp(`^${cleanName}$`, "i") }
+      });
     }
 
-    const batchStudents = await Student.find({
+    const resolvedBatchIdStr = batchObj ? String(batchObj._id) : String(batchId);
+    const resolvedBatchName = batchObj ? batchObj.name : String(batchId);
+
+    const queryOr = [];
+    if (mongoose.Types.ObjectId.isValid(resolvedBatchIdStr)) {
+      queryOr.push({ batch: resolvedBatchIdStr });
+      queryOr.push({ batches: resolvedBatchIdStr });
+      queryOr.push({ enrolledBatchIds: resolvedBatchIdStr });
+    }
+    queryOr.push({ enrolledBatchIds: resolvedBatchName });
+    queryOr.push({ batchName: resolvedBatchName });
+
+    let batchStudents = await Student.find({
       user: ownerId,
-      $or: [
-        { batch: batchId },
-        { batches: batchId },
-        { enrolledBatchIds: String(batchId) }
-      ]
+      $or: queryOr
     });
+
+    if (batchStudents.length === 0 && Array.isArray(records) && records.length > 0) {
+      const recordStudentIds = records
+        .map(r => r.studentId || r.id || r._id)
+        .filter(id => id && mongoose.Types.ObjectId.isValid(id));
+      if (recordStudentIds.length > 0) {
+        batchStudents = await Student.find({
+          user: ownerId,
+          _id: { $in: recordStudentIds }
+        });
+      }
+    }
+
     if (batchStudents.length === 0) {
       return res.status(400).json({ message: "No students found in this batch." });
     }
@@ -1544,10 +1573,19 @@ export const markBatchAttendance = async (req, res) => {
 
     let isUpdate = false;
     const absentStudents = [];
-    const studentMap = new Map(batchStudents.map(s => [String(s._id), s]));
+    const studentMap = new Map();
+    for (const s of batchStudents) {
+      studentMap.set(String(s._id), s);
+      if (s.id) studentMap.set(String(s.id), s);
+      if (s.enrollmentNumber) studentMap.set(String(s.enrollmentNumber), s);
+    }
 
     for (const item of records) {
-      const student = studentMap.get(String(item.studentId));
+      const sIdKey = String(item.studentId || item.id || item._id || "");
+      let student = studentMap.get(sIdKey);
+      if (!student && mongoose.Types.ObjectId.isValid(sIdKey)) {
+        student = await Student.findById(sIdKey);
+      }
       if (!student) continue;
 
       const newStatus = item.status === "present" ? "present" : "absent";
@@ -1556,7 +1594,9 @@ export const markBatchAttendance = async (req, res) => {
         if (!r.date) return false;
         const rStr = typeof r.date === "string" ? r.date.substring(0, 10) : new Date(r.date).toISOString().substring(0, 10);
         const matchesDate = rStr === targetDateStr;
-        const matchesBatch = r.batchId ? String(r.batchId) === String(batchId) : true;
+        const matchesBatch = r.batchId
+          ? (String(r.batchId) === String(batchId) || String(r.batchId) === resolvedBatchIdStr || String(r.batchId) === resolvedBatchName)
+          : true;
         return matchesDate && matchesBatch;
       });
 
