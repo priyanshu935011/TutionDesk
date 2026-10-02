@@ -7,19 +7,22 @@ const redisClient = createClient({
   socket: {
     tls: redisUrl.startsWith("rediss://"),
     rejectUnauthorized: false,
-    connectTimeoutMs: 2000,
+    connectTimeoutMs: 5000,
+    keepAlive: 5000,
     reconnectStrategy: (retries) => {
-      if (retries > 3) {
-        console.warn("Redis max reconnect retries reached. Operating without Redis cache.");
-        return new Error("Redis connection failed");
-      }
-      return Math.min(retries * 50, 500);
+      // Reconnect with gentle backoff on idle socket closures
+      return Math.min(retries * 200, 2000);
     },
   },
 });
 
 redisClient.on("error", (err) => {
-  console.error("Redis Client Error:", err);
+  const errMsg = err?.message || String(err);
+  if (errMsg.includes("Socket closed unexpectedly") || errMsg.includes("ETIMEDOUT")) {
+    console.warn("[Upstash Redis] Idle socket closed, reconnecting automatically...");
+  } else {
+    console.error("Redis Client Error:", errMsg);
+  }
 });
 
 redisClient.on("connect", () => {

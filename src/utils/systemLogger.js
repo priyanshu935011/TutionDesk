@@ -118,37 +118,63 @@ export const logSystemError = async ({
     console.error("SystemLog DB Save Error:", err.message);
   }
 
-  // Instant WhatsApp alert dispatch to 9934597030
+  // Instant WhatsApp alert dispatch to 9934597030 (Only for important/critical 5xx server errors)
   try {
-    const alertPhone = "9934597030";
-    const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-    const methodPath = req?.method && (req?.originalUrl || req?.path)
-      ? `${req.method} ${req.originalUrl || req.path}`
-      : "N/A";
-    const userSummary = `${name} (${email} / ${phone})`;
-    const errorDetails = `${userSummary} [Role: ${role}] | Error: ${String(message || "Unknown error").substring(0, 300)}`;
+    const statusCode = metadata?.statusCode || 500;
+    const reqPath = (req?.originalUrl || req?.path || metadata?.path || "").toLowerCase();
+    const categoryLower = String(category || "").toLowerCase();
+    const msgLower = String(message || "").toLowerCase();
 
-    const whatsappMessage =
-      `⚠️ *SYSTEM ERROR ALERT*\n\n` +
-      `📌 *Endpoint:* ${methodPath}\n` +
-      `👤 *User:* ${userSummary}\n` +
-      `🛡️ *Role:* ${role}\n` +
-      `🏢 *Institute:* ${instName}\n` +
-      `🚨 *Error:* ${message || "Unknown error"}\n` +
-      `⏰ *Time:* ${timeStr}`;
+    // Skip WhatsApp alert for routine login, authentication, password reset, rate-limiting, and 4xx client errors
+    const isLoginOrAuth =
+      reqPath.includes("/auth") ||
+      reqPath.includes("/login") ||
+      reqPath.includes("/forgot-password") ||
+      categoryLower.includes("auth") ||
+      msgLower.includes("token") ||
+      msgLower.includes("unauthorized") ||
+      msgLower.includes("not found") ||
+      msgLower.includes("forgot-password");
 
-    const templateConfig = {
-      templateName: process.env.META_ERROR_TEMPLATE_NAME || "system_error_alert",
-      parameters: [
-        methodPath,    // {{1}}
-        errorDetails,  // {{2}}
-        timeStr,       // {{3}}
-      ],
-    };
+    const isClientSideOrNonCritical = statusCode < 500 && statusCode !== 0;
 
-    sendMessage("admin_test", alertPhone, whatsappMessage, "error_alert", templateConfig).catch((err) => {
-      console.warn("Failed to dispatch WhatsApp error alert:", err.message);
-    });
+    // Dispatch WhatsApp ONLY for critical/important server errors (500+, unhandled exceptions, DB crashes)
+    const shouldSendWhatsapp =
+      !isLoginOrAuth &&
+      !isClientSideOrNonCritical &&
+      (statusCode >= 500 || level === "critical" || level === "fatal" || categoryLower.includes("unhandled"));
+
+    if (shouldSendWhatsapp) {
+      const alertPhone = "9934597030";
+      const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+      const methodPath = req?.method && (req?.originalUrl || req?.path)
+        ? `${req.method} ${req.originalUrl || req.path}`
+        : "N/A";
+      const userSummary = `${name} (${email} / ${phone})`;
+      const errorDetails = `${userSummary} [Role: ${role}] | Error: ${String(message || "Unknown error").substring(0, 300)}`;
+
+      const whatsappMessage =
+        `⚠️ *IMPORTANT SYSTEM ERROR ALERT*\n\n` +
+        `📌 *Endpoint:* ${methodPath}\n` +
+        `👤 *User:* ${userSummary}\n` +
+        `🛡️ *Role:* ${role}\n` +
+        `🏢 *Institute:* ${instName}\n` +
+        `🚨 *Error:* ${message || "Unknown error"}\n` +
+        `⏰ *Time:* ${timeStr}`;
+
+      const templateConfig = {
+        templateName: process.env.META_ERROR_TEMPLATE_NAME || "system_error_alert",
+        parameters: [
+          methodPath,    // {{1}}
+          errorDetails,  // {{2}}
+          timeStr,       // {{3}}
+        ],
+      };
+
+      sendMessage("admin_test", alertPhone, whatsappMessage, "error_alert", templateConfig).catch((err) => {
+        console.warn("Failed to dispatch WhatsApp error alert:", err.message);
+      });
+    }
   } catch (err) {
     console.warn("Error triggering WhatsApp error alert:", err.message);
   }

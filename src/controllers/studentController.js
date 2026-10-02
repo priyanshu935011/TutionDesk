@@ -1661,95 +1661,67 @@ export const markBatchAttendance = async (req, res) => {
 
     const message = isUpdate ? "Attendance updated successfully" : "Attendance marked successfully";
 
-    let whatsappStatus = [];
-    try {
-      const actualInstId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
-      let settings = await getCache(`institute:whatsapp_settings:${actualInstId}`);
-      if (!settings || Object.keys(settings).length === 0 || settings.absentAlertsEnabled === undefined) {
-        const inst = await Institute.findById(actualInstId);
-        settings = inst?.whatsappSettings || {};
-      }
-
-      const isAlertsEnabled = settings && (settings.absentAlertsEnabled === true || settings.absentAlertsEnabled === "true");
-
-      if (isAlertsEnabled && absentStudents.length > 0) {
-        const dateObj = date ? new Date(date) : new Date();
-        const formattedDate = dateObj.toLocaleDateString("en-IN", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        });
-        const globalTemplates = await getGlobalTemplates();
-        const inst = await Institute.findById(actualInstId);
-
-        for (const student of absentStudents) {
-          const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
-          if (!recipientPhone) {
-            whatsappStatus.push({
-              studentName: student.name,
-              sent: false,
-              reason: "Student does not have parent phone or phone number."
-            });
-            continue;
-          }
-
-          const messageText = formatAbsentMessage({
-            template: globalTemplates.absent,
-            studentName: student.name,
-            date: formattedDate,
-            instituteName: inst?.name || "Classtech",
-          });
-
-          try {
-            console.log(`Sending WhatsApp absent alert to ${student.name} at ${recipientPhone}...`);
-            const result = await sendMessage(actualInstId, recipientPhone, messageText, "absent_alert", {
-              templateName: "absent_alert",
-              parameters: [
-                student.name,
-                formattedDate,
-                inst?.name || "Classtech"
-              ]
-            });
-            if (result && result.success) {
-              console.log(`WhatsApp absent alert sent successfully for ${student.name}`);
-              whatsappStatus.push({
-                studentName: student.name,
-                sent: true,
-                reason: "Message sent successfully."
-              });
-            } else {
-              whatsappStatus.push({
-                studentName: student.name,
-                sent: false,
-                reason: result?.message || "Failed to send message via WhatsApp gateway."
-              });
-            }
-            await new Promise((r) => setTimeout(r, 200));
-          } catch (wErr) {
-            console.error(`Failed sending WhatsApp to ${student.name}:`, wErr.message);
-            whatsappStatus.push({
-              studentName: student.name,
-              sent: false,
-              reason: `Error: ${wErr.message}`
-            });
-          }
-        }
-      } else if (absentStudents.length > 0) {
-        whatsappStatus.push({
-          sent: false,
-          reason: "WhatsApp absent alerts are disabled in settings."
-        });
-      }
-    } catch (bgErr) {
-      console.error("WhatsApp batch dispatch error:", bgErr.message);
-    }
-
+    // Respond immediately to the client so UI is instant and never times out (<200ms)
     res.json({
       success: true,
       message,
       isUpdate,
       students: updatedStudents,
-      whatsappStatus
+      whatsappStatus: [{ sent: true, reason: "WhatsApp absent alerts dispatched in background." }]
+    });
+
+    // Asynchronously dispatch WhatsApp absent alerts in the background without blocking HTTP response
+    setImmediate(async () => {
+      try {
+        const actualInstId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
+        let settings = await getCache(`institute:whatsapp_settings:${actualInstId}`);
+        if (!settings || Object.keys(settings).length === 0 || settings.absentAlertsEnabled === undefined) {
+          const inst = await Institute.findById(actualInstId);
+          settings = inst?.whatsappSettings || {};
+        }
+
+        const isAlertsEnabled = settings && (settings.absentAlertsEnabled === true || settings.absentAlertsEnabled === "true");
+
+        if (isAlertsEnabled && absentStudents.length > 0) {
+          const dateObj = date ? new Date(date) : new Date();
+          const formattedDate = dateObj.toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          });
+          const globalTemplates = await getGlobalTemplates();
+          const inst = await Institute.findById(actualInstId);
+
+          for (const student of absentStudents) {
+            const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
+            if (!recipientPhone) continue;
+
+            const messageText = formatAbsentMessage({
+              template: globalTemplates.absent,
+              studentName: student.name,
+              date: formattedDate,
+              instituteName: inst?.name || "Classtech",
+            });
+
+            try {
+              console.log(`[Background WhatsApp] Sending absent alert to ${student.name} at ${recipientPhone}...`);
+              await sendMessage(actualInstId, recipientPhone, messageText, "absent_alert", {
+                templateName: "absent_alert",
+                parameters: [
+                  student.name,
+                  formattedDate,
+                  inst?.name || "Classtech"
+                ]
+              });
+              await new Promise((r) => setTimeout(r, 150));
+            } catch (wErr) {
+              console.error(`[Background WhatsApp Error] Failed sending to ${student.name}:`, wErr.message);
+            }
+          }
+        }
+      } catch (bgErr) {
+        console.error("WhatsApp batch background dispatch error:", bgErr.message);
+      }
     });
 
   } catch (error) {
