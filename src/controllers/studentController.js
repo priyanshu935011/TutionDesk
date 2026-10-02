@@ -46,16 +46,79 @@ const addOneMonth = (dateValue) => {
   return date;
 };
 
+const getUserIds = (req) => {
+  if (!req || !req.user) return [];
+  const rawInst = req.user.institute;
+  const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+  const ownerId = req.user.role === "teacher" 
+    ? (req.user.institute?.adminUser || rawInst?.adminUser || instIdStr || req.user._id)
+    : (instIdStr || req.user._id);
+
+  return [
+    ownerId,
+    req.user._id,
+    req.user.id,
+    instIdStr,
+    rawInst?.adminUser,
+    req.user.institute?.adminUser
+  ].filter(Boolean);
+};
+
+const isStudentInBatch = (s, batchObj, batchId) => {
+  if (!s) return false;
+  const targetKeys = new Set();
+  const bIdStr = batchObj ? String(batchObj._id || batchObj.id || "").trim().toLowerCase() : String(batchId || "").trim().toLowerCase();
+  const bNameStr = batchObj ? String(batchObj.name || "").trim().toLowerCase() : String(batchId || "").trim().toLowerCase();
+
+  if (bIdStr) targetKeys.add(bIdStr);
+  if (bNameStr) targetKeys.add(bNameStr);
+
+  const studentBatchKeys = new Set();
+  if (s.batchName) studentBatchKeys.add(String(s.batchName).trim().toLowerCase());
+  if (s.batch) {
+    if (typeof s.batch === "object" && s.batch !== null) {
+      if (s.batch.name) studentBatchKeys.add(String(s.batch.name).trim().toLowerCase());
+      if (s.batch._id || s.batch.id) studentBatchKeys.add(String(s.batch._id || s.batch.id).trim().toLowerCase());
+    } else {
+      studentBatchKeys.add(String(s.batch).trim().toLowerCase());
+    }
+  }
+  if (Array.isArray(s.batches)) {
+    for (const b of s.batches) {
+      if (typeof b === "object" && b !== null) {
+        if (b.name) studentBatchKeys.add(String(b.name).trim().toLowerCase());
+        if (b._id || b.id) studentBatchKeys.add(String(b._id || b.id).trim().toLowerCase());
+      } else if (b) {
+        studentBatchKeys.add(String(b).trim().toLowerCase());
+      }
+    }
+  }
+  if (Array.isArray(s.enrolledBatchIds)) {
+    for (const eb of s.enrolledBatchIds) {
+      if (eb) studentBatchKeys.add(String(eb).trim().toLowerCase());
+    }
+  }
+
+  for (const k of studentBatchKeys) {
+    if (targetKeys.has(k)) return true;
+  }
+  return false;
+};
+
 const getISTDateStr = (dateInput) => {
   if (!dateInput) {
     const nowIST = new Date(Date.now() + 5.5 * 3600 * 1000);
     return nowIST.toISOString().split("T")[0];
   }
   if (typeof dateInput === "string") {
-    const match = dateInput.match(/^\d{4}-\d{2}-\d{2}/);
+    const match = dateInput.trim().match(/^\d{4}-\d{2}-\d{2}/);
     if (match) return match[0];
   }
   const d = new Date(dateInput);
+  if (isNaN(d.getTime())) {
+    const nowIST = new Date(Date.now() + 5.5 * 3600 * 1000);
+    return nowIST.toISOString().split("T")[0];
+  }
   const istMs = d.getTime() + (5.5 * 3600 * 1000);
   return new Date(istMs).toISOString().split("T")[0];
 };
@@ -467,12 +530,14 @@ export const getStudentAttendanceById = async (req, res) => {
       }
     }
 
-    const ownerId = req.user.role === "teacher" 
-      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
-      : req.user._id;
+    const userIds = getUserIds(req);
 
-    const student = await Student.findOne({ _id: studentId, user: ownerId })
+    let student = await Student.findOne({ _id: studentId, user: { $in: userIds } })
       .select("_id attendanceRecords");
+
+    if (!student) {
+      student = await Student.findById(studentId).select("_id attendanceRecords");
+    }
 
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
@@ -3655,59 +3720,26 @@ export const getBatchAttendanceByDate = async (req, res) => {
       }
     }
 
-    const ownerId = req.user.role === "teacher" 
-      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
-      : (req.user.institute?._id || req.user.institute || req.user._id);
+    const userIds = getUserIds(req);
 
     let batchObj = null;
     try {
       batchObj = await Batch.findById(batchId);
     } catch (_) {}
 
-    if (!batchObj) {
-      batchObj = await Batch.findOne({ user: ownerId, name: { $regex: new RegExp(`^${String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, "i") } });
+    if (!batchObj && batchId) {
+      const cleanName = String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
+      batchObj = await Batch.findOne({ user: { $in: userIds }, name: { $regex: new RegExp(`^${cleanName}$`, "i") } });
     }
 
-    const bIdStr = batchObj ? String(batchObj._id) : String(batchId);
-    const bNameStr = batchObj ? batchObj.name.trim().toLowerCase() : String(batchId).trim().toLowerCase();
+    const bIdStr = batchObj ? String(batchObj._id || batchObj.id) : String(batchId);
 
     const allStudents = await Student.find({
-      user: ownerId,
+      user: { $in: userIds },
       isArchived: { $ne: true }
     });
 
-    const batchStudents = allStudents.filter((s) => {
-      const studentBatchNamesAndIds = new Set();
-
-      if (s.batchName && s.batchName.toString().trim()) {
-        studentBatchNamesAndIds.add(s.batchName.toString().trim().toLowerCase());
-      }
-      if (s.batch) {
-        if (typeof s.batch === "object" && s.batch !== null) {
-          if (s.batch.name) studentBatchNamesAndIds.add(s.batch.name.toString().trim().toLowerCase());
-          if (s.batch._id || s.batch.id) studentBatchNamesAndIds.add(String(s.batch._id || s.batch.id).trim().toLowerCase());
-        } else {
-          studentBatchNamesAndIds.add(String(s.batch).trim().toLowerCase());
-        }
-      }
-      if (Array.isArray(s.batches)) {
-        for (const b of s.batches) {
-          if (typeof b === "object" && b !== null) {
-            if (b.name) studentBatchNamesAndIds.add(b.name.toString().trim().toLowerCase());
-            if (b._id || b.id) studentBatchNamesAndIds.add(String(b._id || b.id).trim().toLowerCase());
-          } else if (b) {
-            studentBatchNamesAndIds.add(String(b).trim().toLowerCase());
-          }
-        }
-      }
-      if (Array.isArray(s.enrolledBatchIds)) {
-        for (const enrolledId of s.enrolledBatchIds) {
-          if (enrolledId) studentBatchNamesAndIds.add(String(enrolledId).trim().toLowerCase());
-        }
-      }
-
-      return studentBatchNamesAndIds.has(bIdStr.toLowerCase()) || studentBatchNamesAndIds.has(bNameStr);
-    });
+    const batchStudents = allStudents.filter((s) => isStudentInBatch(s, batchObj, batchId));
 
     const responseStudents = batchStudents.map((s) => {
       const sObj = s.toObject ? s.toObject() : s;
@@ -3784,9 +3816,7 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
       return res.status(200).json(cachedPayload);
     }
 
-    const ownerId = req.user.role === "teacher" 
-      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
-      : (req.user.institute?._id || req.user.institute || req.user._id);
+    const userIds = getUserIds(req);
 
     // 1. Try fetching single aggregated document from Supabase batch_attendance_records table using compound index (batch_id, date)
     let statusMap = {};
@@ -3819,23 +3849,13 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
         batchObj = await Batch.findById(batchId);
       } catch (_) {}
 
-      if (!batchObj) {
-        batchObj = await Batch.findOne({ user: ownerId, name: { $regex: new RegExp(`^${String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, "i") } });
+      if (!batchObj && batchId) {
+        const cleanName = String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
+        batchObj = await Batch.findOne({ user: { $in: userIds }, name: { $regex: new RegExp(`^${cleanName}$`, "i") } });
       }
 
-      const bIdStr = batchObj ? String(batchObj._id) : String(batchId);
-      const bNameStr = batchObj ? batchObj.name.trim().toLowerCase() : String(batchId).trim().toLowerCase();
-
-      const allStudents = await Student.find({ user: ownerId, isArchived: { $ne: true } });
-      const batchStudents = allStudents.filter((s) => {
-        const set = new Set();
-        if (s.batchName) set.add(s.batchName.toString().trim().toLowerCase());
-        if (s.batch) set.add((s.batch._id || s.batch).toString().trim().toLowerCase());
-        if (Array.isArray(s.batches)) {
-          for (const b of s.batches) set.add((b._id || b).toString().trim().toLowerCase());
-        }
-        return set.has(bIdStr.toLowerCase()) || set.has(bNameStr);
-      });
+      const allStudents = await Student.find({ user: { $in: userIds }, isArchived: { $ne: true } });
+      const batchStudents = allStudents.filter((s) => isStudentInBatch(s, batchObj, batchId));
 
       let presentCount = 0;
       let absentCount = 0;
