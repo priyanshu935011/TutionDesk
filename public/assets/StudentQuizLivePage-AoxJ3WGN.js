@@ -1,0 +1,1 @@
+import{j as t}from"./index-DlEPCTj0.js";import{L as o}from"./LiveQuizRoom-DqrvWY0k.js";import"./vendor-eaE7oDqn.js";import"./index-BcxXcwBL.js";function u(){return t.jsx(o,{mode:"student"})}export{u as default};

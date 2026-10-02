@@ -1,0 +1,1 @@
+import{j as r}from"./index-DlEPCTj0.js";import{L as e}from"./LiveQuizRoom-DqrvWY0k.js";import{f as t}from"./vendor-eaE7oDqn.js";import"./index-BcxXcwBL.js";function u(){const{quizId:o}=t();return r.jsx(e,{mode:"teacher",quizId:o})}export{u as default};
