@@ -1692,11 +1692,7 @@ export const markBatchAttendance = async (req, res) => {
 
     const updatedStudents = await populateStudent(Student.find({
       user: ownerId,
-      $or: [
-        { batch: batchId },
-        { batches: batchId },
-        { enrolledBatchIds: String(batchId) }
-      ]
+      $or: queryOr
     }));
 
     const message = isUpdate ? "Attendance updated successfully" : "Attendance marked successfully";
@@ -3754,6 +3750,13 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
       res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
     } else {
       res.setHeader("Cache-Control", "no-cache");
+    }
+
+    let cachedPayload = null;
+    if (!isRefresh) {
+      try {
+        cachedPayload = await getCache(cacheKey);
+      } catch (_) {}
     }
 
     if (cachedPayload && !isRefresh) {

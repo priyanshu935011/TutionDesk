@@ -1932,7 +1932,16 @@ export const createHiredTeacher = async (req, res) => {
       }
     }
 
-    const finalEmail = cleanEmail || "";
+    let finalEmail = cleanEmail;
+    if (!finalEmail) {
+      const base = cleanPhone ? `teacher_${last10 || cleanPhone}` : `teacher_${Date.now()}`;
+      finalEmail = `${base}@classtech.local`;
+      const duplicateUser = await User.findOne({ email: finalEmail });
+      if (duplicateUser) {
+        finalEmail = `${base}_${Date.now()}@classtech.local`;
+      }
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const newTeacher = await User.create({
       name: name.trim(),
