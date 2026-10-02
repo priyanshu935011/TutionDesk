@@ -1465,12 +1465,17 @@ class SupabaseModel {
               else if (dbSubKey === "institute") dbSubKey = "institute_id";
             }
 
+            if (this.tableName === "video_playlist_items") {
+              if (dbSubKey === "playlist") dbSubKey = "playlist_id";
+              else if (dbSubKey === "video") dbSubKey = "video_id";
+            }
+
             let subVal = cleanValue(rawSubVal);
             if (subVal && typeof subVal === "object" && subVal.$in !== undefined) {
               subVal = subVal.$in;
             }
 
-            const isIdArray = dbSubKey === "student_ids" || dbSubKey === "batch_ids";
+            const isIdArray = ["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features"].includes(dbSubKey);
 
             if (subVal !== undefined) {
               if (subVal === null) {
@@ -1537,12 +1542,16 @@ class SupabaseModel {
         else if (dbKey === "teacher") dbKey = "teacher_id";
         else if (dbKey === "institute") dbKey = "institute_id";
       }
+      if (this.tableName === "video_playlist_items") {
+        if (dbKey === "playlist") dbKey = "playlist_id";
+        else if (dbKey === "video") dbKey = "video_id";
+      }
 
       if (val === null) {
         q = q.is(dbKey, null);
       } else if (val instanceof Date) {
         q = q.eq(dbKey, val.toISOString());
-      } else if ((dbKey === "student_ids" || dbKey === "batch_ids") && typeof val === "string") {
+      } else if (["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features"].includes(dbKey) && typeof val === "string") {
         q = q.contains(dbKey, [val]);
       } else if (typeof val === "object" && val !== null && val.$size === undefined && val._id === undefined && val.id === undefined) {
         for (const [op, opVal] of Object.entries(val)) {
@@ -1584,7 +1593,7 @@ class SupabaseModel {
           }
         }
       } else {
-        if (dbKey === "student_ids" || dbKey === "batch_ids") {
+        if (["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features"].includes(dbKey)) {
           if (val && typeof val === "object" && val.$size === 0) {
             q = q.eq(dbKey, "{}");
           } else {
