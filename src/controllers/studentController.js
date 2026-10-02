@@ -1514,50 +1514,71 @@ export const markBatchAttendance = async (req, res) => {
       return res.status(400).json({ message: "Batch ID, date, and student attendance records are required." });
     }
 
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const rawInst = req.user.institute;
+    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+    const instituteId = instIdStr || req.user._id;
+
     const ownerId = req.user.role === "teacher" 
-      ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
-      : (req.user.institute?._id || req.user.institute || req.user._id);
+      ? (req.user.institute?.adminUser || rawInst?.adminUser || instIdStr || req.user._id)
+      : (instIdStr || req.user._id);
+
+    const userIds = [
+      ownerId,
+      req.user._id,
+      req.user.id,
+      instIdStr,
+      rawInst?.adminUser,
+      req.user.institute?.adminUser
+    ].filter(Boolean);
 
     let batchObj = null;
-    const isObjectId = mongoose.Types.ObjectId.isValid(batchId);
-    if (isObjectId) {
-      batchObj = await Batch.findById(batchId);
+    const isValidIdStr = (str) => str && typeof str === "string" && str.trim().length > 0 && str !== "[object Object]";
+
+    if (isValidIdStr(batchId)) {
+      try {
+        batchObj = await Batch.findById(batchId);
+      } catch (_) {}
     }
+
     if (!batchObj && batchId) {
       const cleanName = String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
       batchObj = await Batch.findOne({
-        user: ownerId,
+        user: { $in: userIds },
         name: { $regex: new RegExp(`^${cleanName}$`, "i") }
       });
     }
 
-    const resolvedBatchIdStr = batchObj ? String(batchObj._id) : String(batchId);
+    const resolvedBatchIdStr = batchObj ? String(batchObj._id || batchObj.id) : String(batchId);
     const resolvedBatchName = batchObj ? batchObj.name : String(batchId);
 
-    const queryOr = [];
-    if (mongoose.Types.ObjectId.isValid(resolvedBatchIdStr)) {
-      queryOr.push({ batch: resolvedBatchIdStr });
-      queryOr.push({ batches: resolvedBatchIdStr });
-      queryOr.push({ enrolledBatchIds: resolvedBatchIdStr });
-    }
-    queryOr.push({ enrolledBatchIds: resolvedBatchName });
-    queryOr.push({ batchName: resolvedBatchName });
+    const queryOr = [
+      { batch: resolvedBatchIdStr },
+      { batches: resolvedBatchIdStr },
+      { enrolledBatchIds: resolvedBatchIdStr },
+      { enrolledBatchIds: resolvedBatchName },
+      { batchName: resolvedBatchName },
+      { batch: resolvedBatchName }
+    ];
 
     let batchStudents = await Student.find({
-      user: ownerId,
+      user: { $in: userIds },
       $or: queryOr
     });
 
-    if (batchStudents.length === 0 && Array.isArray(records) && records.length > 0) {
-      const recordStudentIds = records
-        .map(r => r.studentId || r.id || r._id)
-        .filter(id => id && mongoose.Types.ObjectId.isValid(id));
-      if (recordStudentIds.length > 0) {
-        batchStudents = await Student.find({
-          user: ownerId,
-          _id: { $in: recordStudentIds }
-        });
+    const recordStudentIds = (Array.isArray(records) ? records : [])
+      .map(r => String(r.studentId || r.id || r._id || "").trim())
+      .filter(id => id.length > 0 && id !== "[object Object]");
+
+    if (batchStudents.length === 0 && recordStudentIds.length > 0) {
+      batchStudents = await Student.find({
+        _id: { $in: recordStudentIds }
+      });
+    }
+
+    if (batchStudents.length === 0 && recordStudentIds.length > 0) {
+      const allActive = await Student.find({ user: { $in: userIds }, isArchived: { $ne: true } });
+      if (allActive.length > 0) {
+        batchStudents = allActive;
       }
     }
 
