@@ -1509,7 +1509,8 @@ class SupabaseModel {
                 const cleanItem = cleanValue(subVal);
                 if (cleanItem && String(cleanItem) !== "[object Object]") {
                   const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
-                  if (dbSubKey !== "id" || isUuid) {
+                  const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbSubKey);
+                  if (!isUuidCol || isUuid) {
                     orParts.push(`${dbSubKey}.eq.${cleanItem}`);
                   }
                 }

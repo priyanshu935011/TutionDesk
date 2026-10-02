@@ -1616,14 +1616,18 @@ export const markBatchAttendance = async (req, res) => {
     const resolvedBatchIdStr = batchObj ? String(batchObj._id || batchObj.id) : String(batchId);
     const resolvedBatchName = batchObj ? batchObj.name : String(batchId);
 
+    const isStrictUuid = (str) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(str || "").trim());
+
     const queryOr = [
-      { batch: resolvedBatchIdStr },
-      { batches: resolvedBatchIdStr },
-      { enrolledBatchIds: resolvedBatchIdStr },
       { enrolledBatchIds: resolvedBatchName },
-      { batchName: resolvedBatchName },
-      { batch: resolvedBatchName }
+      { batchName: resolvedBatchName }
     ];
+
+    if (isStrictUuid(resolvedBatchIdStr)) {
+      queryOr.push({ batch: resolvedBatchIdStr });
+      queryOr.push({ batches: resolvedBatchIdStr });
+      queryOr.push({ enrolledBatchIds: resolvedBatchIdStr });
+    }
 
     let batchStudents = await Student.find({
       user: { $in: userIds },
