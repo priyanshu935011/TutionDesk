@@ -1,15 +1,9 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import compression from "compression";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 import connectDB from "./config/db.js";
 import { initializeUptimeTracking } from "./middleware/authMiddleware.js";
 import { globalLimiter, authLimiter } from "./middleware/rateLimiter.js";
@@ -168,35 +162,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/payment", paymentRoutes);
-const possibleWebPaths = [
-  path.join(__dirname, "../public"),
-  path.join(__dirname, "../../frontend/dist"),
-  path.join(__dirname, "../dist"),
-];
-const frontendDistPath = possibleWebPaths.find((p) => fs.existsSync(p));
-if (frontendDistPath) {
-  app.use(express.static(frontendDistPath));
-  app.get("*", (req, res, next) => {
-    if (
-      req.path.startsWith("/api") ||
-      req.path.startsWith("/student") ||
-      req.path.startsWith("/auth") ||
-      req.path.startsWith("/teacher") ||
-      req.path.startsWith("/admin") ||
-      req.path.startsWith("/batches") ||
-      req.path.startsWith("/students") ||
-      req.path.startsWith("/videos") ||
-      req.path.startsWith("/payments") ||
-      req.path.startsWith("/whatsapp") ||
-      req.path.startsWith("/notices") ||
-      req.path.startsWith("/public") ||
-      req.path.startsWith("/leads")
-    ) {
-      return next();
-    }
-    res.sendFile(path.join(frontendDistPath, "index.html"));
-  });
-}
+app.use("/videos", videoRoutes);
+app.use("/api/videos", videoRoutes);
 
 app.use(globalErrorHandler);
 
