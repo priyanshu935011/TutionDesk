@@ -1702,24 +1702,27 @@ export const markBatchAttendance = async (req, res) => {
 
       // Also sync to Supabase attendance table directly
       try {
+        const validBatchUuid = toValidUUID(resolvedBatchIdStr);
+        const validStudentUuid = toValidUUID(student._id || student.id);
+
         const { data: existingDbRec } = await supabase
           .from("attendance")
           .select("id")
-          .eq("student_id", student._id)
+          .eq("student_id", validStudentUuid)
           .eq("date", targetDateStr)
-          .eq("batch_id", String(batchId))
+          .eq("batch_id", validBatchUuid)
           .maybeSingle();
 
         if (existingDbRec && existingDbRec.id) {
           isUpdate = true;
           await supabase
             .from("attendance")
-            .update({ status: newStatus, batch_id: String(batchId) })
+            .update({ status: newStatus, batch_id: validBatchUuid })
             .eq("id", existingDbRec.id);
         } else {
           await supabase
             .from("attendance")
-            .insert({ student_id: student._id, batch_id: String(batchId), date: targetDateStr, status: newStatus });
+            .insert({ student_id: validStudentUuid, batch_id: validBatchUuid, date: targetDateStr, status: newStatus });
         }
       } catch (dbErr) {
         console.error("Direct attendance table sync error:", dbErr.message);
@@ -1741,6 +1744,7 @@ export const markBatchAttendance = async (req, res) => {
 
     // Sync single aggregated document to Supabase batch_attendance_records table
     try {
+      const validBatchUuid = toValidUUID(resolvedBatchIdStr);
       const statusMap = {};
       let pCount = 0;
       let aCount = 0;
@@ -1752,7 +1756,7 @@ export const markBatchAttendance = async (req, res) => {
         else if (st === "absent") aCount++;
       }
       await supabase.from("batch_attendance_records").upsert({
-        batch_id: String(batchId),
+        batch_id: validBatchUuid,
         date: targetDateStr,
         attendance_map: statusMap,
         total_count: records.length,
@@ -1761,7 +1765,10 @@ export const markBatchAttendance = async (req, res) => {
         updated_at: new Date().toISOString()
       }, { onConflict: "batch_id, date" });
       await deleteCache(`attendance:batch:statusmap:${batchId}:${targetDateStr}`);
-    } catch (_) {}
+      await deleteCache(`attendance:batch:statusmap:${validBatchUuid}:${targetDateStr}`);
+    } catch (upsertErr) {
+      console.error("batch_attendance_records upsert error:", upsertErr.message);
+    }
 
     // Clear dashboard & student cache
     try {
@@ -3827,7 +3834,7 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
       const { data: dbRec, error: dbErr } = await supabase
         .from("batch_attendance_records")
         .select("attendance_map, total_count, present_count, absent_count")
-        .eq("batch_id", String(batchId))
+        .eq("batch_id", toValidUUID(batchId))
         .eq("date", targetDateStr)
         .maybeSingle();
 
