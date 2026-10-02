@@ -1618,21 +1618,25 @@ export const markBatchAttendance = async (req, res) => {
 
     const isStrictUuid = (str) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(str || "").trim());
 
-    const queryOr = [
-      { enrolledBatchIds: resolvedBatchName },
-      { batchName: resolvedBatchName }
-    ];
-
+    let batchStudents = [];
     if (isStrictUuid(resolvedBatchIdStr)) {
-      queryOr.push({ batch: resolvedBatchIdStr });
-      queryOr.push({ batches: resolvedBatchIdStr });
-      queryOr.push({ enrolledBatchIds: resolvedBatchIdStr });
+      const queryOr = [
+        { batch: resolvedBatchIdStr },
+        { batches: resolvedBatchIdStr },
+        { enrolledBatchIds: resolvedBatchIdStr }
+      ];
+      try {
+        batchStudents = await Student.find({
+          user: { $in: userIds },
+          $or: queryOr
+        });
+      } catch (_) {}
     }
 
-    let batchStudents = await Student.find({
-      user: { $in: userIds },
-      $or: queryOr
-    });
+    if (!batchStudents || batchStudents.length === 0) {
+      const allActive = await Student.find({ user: { $in: userIds }, isArchived: { $ne: true } });
+      batchStudents = allActive.filter((s) => isStudentInBatch(s, batchObj, batchId));
+    }
 
     const recordStudentIds = (Array.isArray(records) ? records : [])
       .map(r => String(r.studentId || r.id || r._id || "").trim())
@@ -1642,13 +1646,6 @@ export const markBatchAttendance = async (req, res) => {
       batchStudents = await Student.find({
         _id: { $in: recordStudentIds }
       });
-    }
-
-    if (batchStudents.length === 0 && recordStudentIds.length > 0) {
-      const allActive = await Student.find({ user: { $in: userIds }, isArchived: { $ne: true } });
-      if (allActive.length > 0) {
-        batchStudents = allActive;
-      }
     }
 
     if (batchStudents.length === 0) {
@@ -1787,10 +1784,7 @@ export const markBatchAttendance = async (req, res) => {
       }
     } catch (cErr) {}
 
-    const updatedStudents = await populateStudent(Student.find({
-      user: ownerId,
-      $or: queryOr
-    }));
+    const updatedStudents = batchStudents;
 
     const message = isUpdate ? "Attendance updated successfully" : "Attendance marked successfully";
 
