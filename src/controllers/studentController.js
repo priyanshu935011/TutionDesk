@@ -1879,18 +1879,18 @@ export const getStudentSyncData = async (req, res) => {
 
     for (const student of students) {
       let institute = await Institute.findById(student.user).select(
-        "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser"
+        "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser upiId"
       );
       if (!institute) {
         institute = await Institute.findOne({ adminUser: student.user }).select(
-          "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser"
+          "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser upiId"
         );
       }
       if (!institute) {
         const uDoc = await User.findById(student.user).select("institute");
         if (uDoc && uDoc.institute) {
           institute = await Institute.findById(uDoc.institute).select(
-            "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser"
+            "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser upiId"
           );
         }
       }
@@ -2071,6 +2071,8 @@ export const getStudentSyncData = async (req, res) => {
           },
           teacherName,
           instituteName: institute.name,
+          upiId: institute.upiId || "",
+          upi_id: institute.upiId || "",
           batchName: batch ? batch.name : "Unassigned",
           brandingEnabled: institute.brandingEnabled !== false,
           logoUrl: (institute.brandingEnabled !== false) ? (institute.logoUrl || null) : null,

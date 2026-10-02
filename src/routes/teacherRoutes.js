@@ -24,6 +24,8 @@ import {
   getQuizLeaderboard,
   uploadBrandingLogo,
   updateBrandingSettings,
+  updateInstituteUpi,
+  parseUpiQr,
   updateTestResult,
   deleteTestResult,
   updateGroupedTestResults,
@@ -89,8 +91,10 @@ router.route("/hired-teachers/:id")
   .put(updateHiredTeacher)
   .delete(deleteHiredTeacher);
 
-// Branding endpoints
+// Branding & UPI endpoints
 router.post("/branding/logo", upload.single("logo"), uploadBrandingLogo);
 router.put("/branding", updateBrandingSettings);
+router.put("/upi", updateInstituteUpi);
+router.post("/upi/parse-qr", upload.single("image"), parseUpiQr);
 
 export default router;

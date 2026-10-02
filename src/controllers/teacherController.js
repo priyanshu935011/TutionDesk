@@ -100,7 +100,7 @@ export const getTeacherDashboard = async (req, res) => {
       if (instIdStr) {
         institute = await Institute.findById(instIdStr)
           .select(
-            "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields"
+            "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId"
           );
       }
       if (institute && instIdStr) {
@@ -2183,6 +2183,81 @@ export const updateBrandingSettings = async (req, res) => {
   } catch (error) {
     console.error("updateBrandingSettings error:", error);
     return res.status(500).json({ message: "Could not update branding settings" });
+  }
+};
+
+export const updateInstituteUpi = async (req, res) => {
+  try {
+    if (req.user?.role === "teacher") {
+      return res.status(403).json({ message: "Hired teachers are not allowed to update institute UPI ID" });
+    }
+
+    const { upiId } = req.body;
+    const cleanUpiId = (upiId || "").trim();
+    const rawInst = req.user.institute;
+    const instituteId = rawInst?._id || rawInst || req.user._id;
+
+    const updateFields = { upiId: cleanUpiId };
+
+    let institute = null;
+    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
+      institute = await Institute.findByIdAndUpdate(instituteId, updateFields, { new: true });
+    }
+    if (!institute) {
+      institute = await Institute.findOneAndUpdate({ adminUser: req.user._id }, updateFields, { new: true });
+    }
+    if (!institute && req.user._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+      institute = await Institute.findByIdAndUpdate(req.user._id, updateFields, { new: true });
+    }
+
+    if (req.user._id) {
+      await Institute.updateMany({ adminUser: req.user._id }, updateFields).catch(() => {});
+    }
+
+    await invalidateUserDashboard(req);
+    await clearCachePattern("student:*");
+
+    return res.json({
+      message: "UPI ID updated successfully",
+      upiId: institute ? (institute.upiId || cleanUpiId) : cleanUpiId,
+    });
+  } catch (error) {
+    console.error("updateInstituteUpi error:", error);
+    return res.status(500).json({ message: "Could not update UPI ID" });
+  }
+};
+
+export const parseUpiQr = async (req, res) => {
+  try {
+    if (req.user?.role === "teacher") {
+      return res.status(403).json({ message: "Hired teachers are not allowed to update institute UPI ID" });
+    }
+
+    let rawText = "";
+    if (req.body && req.body.text) {
+      rawText = String(req.body.text);
+    } else if (req.file && req.file.buffer) {
+      rawText = req.file.buffer.toString("utf8");
+    }
+
+    const paMatch = rawText.match(/pa=([^&\s]+)/i);
+    let extractedUpi = "";
+    if (paMatch && paMatch[1]) {
+      extractedUpi = decodeURIComponent(paMatch[1]).trim();
+    } else {
+      const vpaMatch = rawText.match(/([a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64})/i);
+      if (vpaMatch && vpaMatch[1]) {
+        extractedUpi = vpaMatch[1].trim();
+      }
+    }
+
+    return res.json({
+      upiId: extractedUpi,
+      rawText: rawText.length > 200 ? rawText.substring(0, 200) + "..." : rawText,
+    });
+  } catch (error) {
+    console.error("parseUpiQr error:", error);
+    return res.status(500).json({ message: "Could not parse UPI ID from QR image/data" });
   }
 };
 

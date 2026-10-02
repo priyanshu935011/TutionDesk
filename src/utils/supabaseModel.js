@@ -541,6 +541,8 @@ class SupabaseDocument {
       this.wallet_balance = this.walletBalance;
       this.perMessageCharge = meta.perMessageCharge ?? this.perMessageCharge ?? 0.10;
       this.per_message_charge = this.perMessageCharge;
+      this.upiId = data.upi_id ?? data.upiId ?? meta.upiId ?? this.upiId ?? "";
+      this.upi_id = this.upiId;
       this.whatsappSettings = meta.whatsappSettings ?? this.whatsappSettings ?? {
         absentAlertsEnabled: false,
         feeRemindersEnabled: false,
@@ -758,6 +760,7 @@ class SupabaseDocument {
           studentPortalEnabled: this.studentPortalEnabled ?? true,
           walletBalance: this.walletBalance ?? 0,
           perMessageCharge: this.perMessageCharge ?? 0.10,
+          upiId: this.upiId ?? "",
           whatsappSettings: this.whatsappSettings ?? {}
         };
         writeInstitutesMetadata(metadata);
