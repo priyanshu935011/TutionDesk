@@ -2550,7 +2550,14 @@ export const getOutstandingStudents = async (req, res) => {
       } catch (_) {}
     }
 
-    const students = await Student.find(query);
+    const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id name");
+    const batchMap = new Map();
+    (allBatches || []).forEach((b) => {
+      const bId = String(b._id || b.id || "");
+      if (bId && b.name) batchMap.set(bId.toLowerCase(), b.name);
+    });
+
+    const isUuidStr = (v) => typeof v === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v.trim());
 
     const debtors = (students || [])
       .map((s) => {
@@ -2559,11 +2566,15 @@ export const getOutstandingStudents = async (req, res) => {
         if (pending <= 0) return null;
 
         let batchName = "Unassigned";
-        if (s.batch) {
-          batchName = typeof s.batch === "object" ? (s.batch.name || "Unassigned") : String(s.batch);
-        } else if (Array.isArray(s.batches) && s.batches.length > 0) {
-          const first = s.batches[0];
-          batchName = typeof first === "object" ? (first.name || "Unassigned") : String(first);
+        if (s.batchName && !isUuidStr(s.batchName)) {
+          batchName = s.batchName;
+        } else if (s.batch && typeof s.batch === "object" && s.batch.name) {
+          batchName = s.batch.name;
+        } else if (Array.isArray(s.batches) && s.batches.length > 0 && typeof s.batches[0] === "object" && s.batches[0].name) {
+          batchName = s.batches[0].name;
+        } else {
+          const bId = String(s.batch?._id || s.batch?.id || s.batch || s.batch_id || "").toLowerCase();
+          batchName = batchMap.get(bId) || "Unassigned";
         }
 
         return {
