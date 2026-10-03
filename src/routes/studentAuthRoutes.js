@@ -6,6 +6,7 @@ import {
   resetStudentPassword,
   updateStudentProfile,
   uploadStudentProfilePicture,
+  changeStudentPassword,
 } from "../controllers/studentAuthController.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
 
@@ -17,6 +18,7 @@ router.post("/forgot-password", forgotStudentPassword);
 router.post("/app-forgot-password", forgotStudentPassword);
 router.post("/reset-password", resetStudentPassword);
 router.post("/app-reset-password", resetStudentPassword);
+router.post("/change-password", protectStudent, changeStudentPassword);
 router.put("/profile", protectStudent, updateStudentProfile);
 router.post("/profile-picture", protectStudent, upload.single("image"), uploadStudentProfilePicture);
 
