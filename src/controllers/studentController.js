@@ -236,9 +236,15 @@ export const getStudents = async (req, res) => {
     }
 
     // Fetch all batches for this institute and filter by status in-memory
-    const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
+    const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id name status teacher");
     const activeBatchIds = new Set(allBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
     const archivedBatchIds = new Set(allBatches.filter((b) => b.status === "archived").map((b) => String(b._id)));
+
+    const batchNameMap = new Map();
+    allBatches.forEach((b) => {
+      const bId = String(b._id || b.id || "");
+      if (bId && b.name) batchNameMap.set(bId.toLowerCase(), b.name);
+    });
 
 const isTeacherOfBatch = (b, user) => {
   if (!b || !b.teacher || !user) return false;
@@ -346,11 +352,23 @@ const isTeacherOfBatch = (b, user) => {
         ? sObj.batches.map((b) => (b?._id || b?.id || b).toString())
         : (sObj.batch ? [(sObj.batch?._id || sObj.batch?.id || sObj.batch).toString()] : []);
 
+      const isUuidStr = (v) => typeof v === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v.trim());
+      let resolvedBatchName = "";
+      if (sObj.batchName && !isUuidStr(sObj.batchName)) {
+        resolvedBatchName = sObj.batchName;
+      } else if (sObj.batch && typeof sObj.batch === "object" && sObj.batch.name) {
+        resolvedBatchName = sObj.batch.name;
+      } else {
+        const bId = String(sObj.batch?._id || sObj.batch?.id || sObj.batch || sObj.batch_id || "").toLowerCase();
+        resolvedBatchName = batchNameMap.get(bId) || "";
+      }
+
       return {
         _id: sObj._id || sObj.id,
         id: sObj._id || sObj.id,
         name: sObj.name || "",
         enrollmentNumber: sObj.enrollmentNumber || "",
+        batchName: resolvedBatchName,
         batch: sObj.batch,
         batches: sObj.batches || [],
         enrolledBatchIds,
