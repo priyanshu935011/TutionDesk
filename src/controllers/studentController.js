@@ -3740,8 +3740,14 @@ export const getBatchAttendanceByDate = async (req, res) => {
     } catch (_) {}
 
     if (!batchObj && batchId) {
-      const cleanName = String(batchId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
-      batchObj = await Batch.findOne({ user: { $in: userIds }, name: { $regex: new RegExp(`^${cleanName}$`, "i") } });
+      try {
+        const cleanName = String(batchId).trim().toLowerCase();
+        const allBatches = await Batch.find({ user: { $in: userIds } });
+        batchObj = (allBatches || []).find(b => 
+          String(b.name || "").trim().toLowerCase() === cleanName || 
+          String(b._id || b.id || "").trim() === String(batchId).trim()
+        );
+      } catch (_) {}
     }
 
     const bIdStr = batchObj ? String(batchObj._id || batchObj.id) : String(batchId);
@@ -3751,16 +3757,16 @@ export const getBatchAttendanceByDate = async (req, res) => {
       isArchived: { $ne: true }
     });
 
-    const batchStudents = allStudents.filter((s) => isStudentInBatch(s, batchObj, batchId));
+    const batchStudents = (allStudents || []).filter((s) => isStudentInBatch(s, batchObj, batchId));
 
     const responseStudents = batchStudents.map((s) => {
-      const sObj = s.toObject ? s.toObject() : s;
-      const records = sObj.attendanceRecords || [];
-      const record = records.find((r) => {
-        if (!r.date) return false;
+      const sObj = s.toObject ? s.toObject() : (s.toJSON ? s.toJSON() : s);
+      const records = sObj.attendanceRecords || sObj.attendance_records || [];
+      const record = Array.isArray(records) ? records.find((r) => {
+        if (!r || !r.date) return false;
         const rDateKey = getISTDateStr(r.date);
         return rDateKey === targetDateStr;
-      });
+      }) : null;
 
       return {
         id: sObj._id || sObj.id,

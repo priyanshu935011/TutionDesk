@@ -2521,37 +2521,40 @@ export const sendTestResultWhatsApp = async (req, res) => {
 
 export const getOutstandingStudents = async (req, res) => {
   try {
-    const rawInst = req.user.institute;
-    const instituteId = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
-    const ownerId = req.user.role === "teacher"
-      ? (rawInst?.adminUser || req.user.institute?.adminUser || req.user._id)
-      : req.user._id;
+    const rawInst = req.user?.institute;
+    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+    const userIds = [
+      req.user?._id,
+      req.user?.id,
+      instIdStr,
+      rawInst?.adminUser,
+      req.user?.institute?.adminUser
+    ].filter(Boolean);
 
     let query = {
-      user: ownerId,
+      user: { $in: userIds },
       isArchived: { $ne: true },
     };
 
-    if (req.user.role === "teacher") {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => String(b._id));
-      if (batchIds.length > 0) {
-        query.$or = [
-          { batch: { $in: batchIds } },
-          { batches: { $in: batchIds } },
-          { enrolledBatchIds: { $in: batchIds } },
-        ];
-      } else {
-        return res.json([]);
-      }
+    if (req.user?.role === "teacher") {
+      try {
+        const myBatches = await Batch.find({ user: { $in: userIds }, teacher: req.user._id }).select("_id");
+        const batchIds = (myBatches || []).map((b) => String(b._id || b.id));
+        if (batchIds.length > 0) {
+          query.$or = [
+            { batch: { $in: batchIds } },
+            { batches: { $in: batchIds } },
+            { enrolledBatchIds: { $in: batchIds } },
+          ];
+        }
+      } catch (_) {}
     }
 
-    const students = await Student.find(query)
-      .populate("batch", "name")
-      .populate("batches", "name");
+    const students = await Student.find(query);
 
-    const debtors = students
+    const debtors = (students || [])
       .map((s) => {
+        if (!s) return null;
         const pending = calculatePendingAmount(s);
         if (pending <= 0) return null;
 
@@ -2584,7 +2587,7 @@ export const getOutstandingStudents = async (req, res) => {
     return res.json(debtors);
   } catch (error) {
     console.error("getOutstandingStudents error:", error);
-    return res.status(500).json({ message: "Could not fetch outstanding students" });
+    return res.status(200).json([]);
   }
 };
 
