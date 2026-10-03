@@ -2550,6 +2550,7 @@ export const getOutstandingStudents = async (req, res) => {
       } catch (_) {}
     }
 
+    const students = await Student.find(query);
     const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id name");
     const batchMap = new Map();
     (allBatches || []).forEach((b) => {
