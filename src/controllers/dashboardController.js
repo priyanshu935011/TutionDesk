@@ -60,6 +60,21 @@ export const getDashboard = async (req, res) => {
             ? Number(sObj.paidAmount)
             : paidFromHistory);
 
+        let paidThisMonth = 0;
+        if (Array.isArray(sObj.paymentHistory)) {
+          sObj.paymentHistory.forEach((p) => {
+            const pAmt = Number(p?.amount || 0);
+            const pDateStr = p?.date || p?.paymentDate || p?.createdAt;
+            if (pDateStr) {
+              const pDate = new Date(pDateStr);
+              if (!isNaN(pDate.getTime()) && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
+                paidThisMonth += pAmt;
+              }
+            }
+          });
+        }
+        totals.currentMonthCollectedFees += paidThisMonth;
+
         const pending = calculatePendingAmount(student);
 
         totals.totalFeesCollected += paid;
@@ -81,6 +96,7 @@ export const getDashboard = async (req, res) => {
         totalStudents: 0,
         totalFeesCollected: 0,
         totalCollectedFees: 0,
+        currentMonthCollectedFees: 0,
         totalPendingFees: 0,
         pendingStudents: 0,
         totalAttendanceMarked: 0,

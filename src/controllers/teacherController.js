@@ -2193,10 +2193,11 @@ export const updateInstituteUpi = async (req, res) => {
     }
 
     const { upiId } = req.body;
-    const cleanUpiId = (upiId || "").trim();
-    const rawInst = req.user.institute;
-    const instituteId = rawInst?._id || rawInst || req.user._id;
-
+    let cleanUpiId = (upiId || "").trim();
+    const paMatch = cleanUpiId.match(/pa=([^&\s]+)/i);
+    if (paMatch && paMatch[1]) {
+      cleanUpiId = decodeURIComponent(paMatch[1]).trim();
+    }
     const updateFields = { upiId: cleanUpiId };
 
     let institute = null;
