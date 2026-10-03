@@ -1367,6 +1367,7 @@ class SupabaseQuery {
     }
 
     const studentMetadata = readStudentMetadata();
+    let metadataChanged = false;
     for (const doc of docs) {
       const meta = studentMetadata[doc.id] || {};
       if (meta.profilePicture) {
