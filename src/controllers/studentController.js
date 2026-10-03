@@ -199,11 +199,14 @@ export const getStudents = async (req, res) => {
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
     const cacheKey = `teacher:students:${req.user._id}:${req.user.role}:${req.query.includeArchived}:${req.query.archivedOnly}`;
-    if (req.query.refresh !== "true" && req.query.archivedOnly !== "true") {
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh && req.query.archivedOnly !== "true") {
       const cached = await getCache(cacheKey);
       if (cached) {
         return res.json(cached);
       }
+    } else {
+      await clearCachePattern("teacher:students:*");
     }
 
     const query = { user: ownerId };
@@ -308,11 +311,13 @@ const isTeacherOfBatch = (b, user) => {
     const lightStudents = students.map((student) => {
       const sObj = student.toJSON ? student.toJSON() : student;
       const total = Number(sObj.totalFees || 0);
-      const paid = Number(
-        sObj.paidAmount !== undefined && sObj.paidAmount !== null
-          ? sObj.paidAmount
-          : (sObj.paymentHistory || []).reduce((sum, p) => sum + Number(p.amount || 0), 0)
-      );
+      const paid = (sObj.paymentHistory && Array.isArray(sObj.paymentHistory))
+        ? sObj.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0)
+        : Number(
+            sObj.paidAmount !== undefined && sObj.paidAmount !== null
+              ? sObj.paidAmount
+              : 0
+          );
       const pendingAmount = Number(
         sObj.pendingAmount !== undefined && sObj.pendingAmount !== null
           ? sObj.pendingAmount

@@ -1382,54 +1382,36 @@ class SupabaseQuery {
         doc.due_date = meta.dueDate;
       }
       const dbPayments = paymentsByStudent[doc.id] || [];
-      const metaPayments = meta.paymentHistory || [];
-      let combinedPayments = [];
-      if (dbPayments.length > 0) {
-        combinedPayments = [...dbPayments];
-        for (const mp of metaPayments) {
-          const mpId = String(mp._id || mp.id || "").trim();
-          const mpDateStr = mp.paymentDate || mp.payment_date || "";
-          let mpDay = "";
-          try {
-            if (mpDateStr) mpDay = new Date(mpDateStr).toISOString().substring(0, 10);
-          } catch (_) {}
+      const hasDbPaymentsQueryRun = !results[0]?.error;
 
-          const isDuplicate = combinedPayments.some((p) => {
-            const pId = String(p._id || p.id || "").trim();
-            if (mpId && pId && mpId === pId) return true;
-
-            const pDateStr = p.paymentDate || p.payment_date || "";
-            let pDay = "";
-            try {
-              if (pDateStr) pDay = new Date(pDateStr).toISOString().substring(0, 10);
-            } catch (_) {}
-
-            if (
-              Number(p.amount || 0) === Number(mp.amount || 0) &&
-              (p.paymentType || "monthly") === (mp.paymentType || "monthly") &&
-              pDay &&
-              pDay === mpDay
-            ) {
-              return true;
-            }
-            return false;
-          });
-
-          if (!isDuplicate) {
-            combinedPayments.push(mp);
-          }
-        }
+      let finalPayments = [];
+      if (hasDbPaymentsQueryRun) {
+        // DB payments table is the single source of truth
+        finalPayments = dbPayments;
       } else {
-        combinedPayments = [...metaPayments];
+        // Fallback to metadata only if DB query failed
+        finalPayments = meta.paymentHistory || [];
       }
-      doc.paymentHistory = combinedPayments;
-      doc.payment_history = combinedPayments;
+
+      doc.paymentHistory = finalPayments;
+      doc.payment_history = finalPayments;
       doc.attendanceRecords = attendanceByStudent[doc.id] || [];
       doc.attendance_records = doc.attendanceRecords;
       
       const paid = doc.paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
       doc.paidAmount = paid;
       doc.pendingAmount = calculatePendingAmount(doc);
+
+      // Keep student metadata in sync with actual DB payments to purge deleted payment records
+      if (studentMetadata[doc.id]) {
+        studentMetadata[doc.id].paymentHistory = finalPayments;
+        studentMetadata[doc.id].paidAmount = paid;
+        studentMetadata[doc.id].pendingAmount = doc.pendingAmount;
+        metadataChanged = true;
+      }
+    }
+    if (metadataChanged) {
+      writeStudentMetadata(studentMetadata);
     }
   }
 }

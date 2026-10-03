@@ -22,10 +22,12 @@ export const calculatePendingAmount = (student) => {
   const sObj = typeof student.toObject === "function" ? student.toObject() : student;
   const feePlanType = sObj.feePlanType || "monthly";
   const totalFees = Number(sObj.totalFees ?? sObj.total_fees ?? sObj.fees ?? 0);
-  const paymentHistory = sObj.paymentHistory || [];
-  const paidAmount = (sObj.paidAmount !== undefined && sObj.paidAmount !== null && !isNaN(Number(sObj.paidAmount)))
-    ? Number(sObj.paidAmount)
-    : paymentHistory.reduce((sum, p) => sum + Number(p?.amount || 0), 0);
+  const paymentHistory = Array.isArray(sObj.paymentHistory) ? sObj.paymentHistory : null;
+  const paidAmount = paymentHistory !== null
+    ? paymentHistory.reduce((sum, p) => sum + Number(p?.amount || 0), 0)
+    : ((sObj.paidAmount !== undefined && sObj.paidAmount !== null && !isNaN(Number(sObj.paidAmount)))
+      ? Number(sObj.paidAmount)
+      : 0);
 
   if (feePlanType !== "monthly") {
     return Math.max(0, totalFees - paidAmount);

@@ -54,9 +54,11 @@ export const getDashboard = async (req, res) => {
         const total = Number(sObj.totalFees ?? sObj.total_fees ?? sObj.fees ?? 0);
         const history = sObj.paymentHistory || [];
         const paidFromHistory = history.reduce((sum, p) => sum + Number(p?.amount || 0), 0);
-        const paid = (sObj.paidAmount !== undefined && sObj.paidAmount !== null && !isNaN(Number(sObj.paidAmount)))
-          ? Math.max(Number(sObj.paidAmount), paidFromHistory)
-          : paidFromHistory;
+        const paid = (Array.isArray(sObj.paymentHistory))
+          ? paidFromHistory
+          : ((sObj.paidAmount !== undefined && sObj.paidAmount !== null && !isNaN(Number(sObj.paidAmount)))
+            ? Number(sObj.paidAmount)
+            : paidFromHistory);
 
         const pending = calculatePendingAmount(student);
 
