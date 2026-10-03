@@ -66,15 +66,26 @@ const getUserIds = (req) => {
 
 const isStudentInBatch = (s, batchObj, batchId) => {
   if (!s) return false;
-  const targetKeys = new Set();
-  const bIdStr = batchObj ? String(batchObj._id || batchObj.id || "").trim().toLowerCase() : String(batchId || "").trim().toLowerCase();
-  const bNameStr = batchObj ? String(batchObj.name || "").trim().toLowerCase() : String(batchId || "").trim().toLowerCase();
 
-  if (bIdStr) targetKeys.add(bIdStr);
-  if (bNameStr) targetKeys.add(bNameStr);
+  const rawBatchId = String(batchId || "").trim().toLowerCase();
+  if (!rawBatchId || rawBatchId === "all" || rawBatchId === "all_batches" || rawBatchId === "undefined") {
+    return true;
+  }
+
+  const targetKeys = new Set();
+  if (rawBatchId) targetKeys.add(rawBatchId);
+
+  if (batchObj) {
+    if (batchObj._id) targetKeys.add(String(batchObj._id).trim().toLowerCase());
+    if (batchObj.id) targetKeys.add(String(batchObj.id).trim().toLowerCase());
+    if (batchObj.name) targetKeys.add(String(batchObj.name).trim().toLowerCase());
+  }
 
   const studentBatchKeys = new Set();
   if (s.batchName) studentBatchKeys.add(String(s.batchName).trim().toLowerCase());
+  if (s.batch_name) studentBatchKeys.add(String(s.batch_name).trim().toLowerCase());
+  if (s.batch_id) studentBatchKeys.add(String(s.batch_id).trim().toLowerCase());
+
   if (s.batch) {
     if (typeof s.batch === "object" && s.batch !== null) {
       if (s.batch.name) studentBatchKeys.add(String(s.batch.name).trim().toLowerCase());
@@ -83,6 +94,7 @@ const isStudentInBatch = (s, batchObj, batchId) => {
       studentBatchKeys.add(String(s.batch).trim().toLowerCase());
     }
   }
+
   if (Array.isArray(s.batches)) {
     for (const b of s.batches) {
       if (typeof b === "object" && b !== null) {
@@ -93,8 +105,15 @@ const isStudentInBatch = (s, batchObj, batchId) => {
       }
     }
   }
+
   if (Array.isArray(s.enrolledBatchIds)) {
     for (const eb of s.enrolledBatchIds) {
+      if (eb) studentBatchKeys.add(String(eb).trim().toLowerCase());
+    }
+  }
+
+  if (Array.isArray(s.enrolled_batch_ids)) {
+    for (const eb of s.enrolled_batch_ids) {
       if (eb) studentBatchKeys.add(String(eb).trim().toLowerCase());
     }
   }
@@ -3734,18 +3753,23 @@ export const getBatchAttendanceByDate = async (req, res) => {
     const userIds = getUserIds(req);
 
     let batchObj = null;
-    try {
-      batchObj = await Batch.findById(batchId);
-    } catch (_) {}
+    const cleanBatchIdStr = String(batchId || "").trim();
+    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanBatchIdStr);
 
-    if (!batchObj && batchId) {
+    if (isUUID) {
       try {
-        const cleanName = String(batchId).trim().toLowerCase();
+        batchObj = await Batch.findById(cleanBatchIdStr);
+      } catch (_) {}
+    }
+
+    if ((!batchObj || !batchObj.name) && cleanBatchIdStr) {
+      try {
         const allBatches = await Batch.find({ user: { $in: userIds } });
-        batchObj = (allBatches || []).find(b => 
-          String(b.name || "").trim().toLowerCase() === cleanName || 
-          String(b._id || b.id || "").trim() === String(batchId).trim()
+        const match = (allBatches || []).find(b => 
+          String(b.name || "").trim().toLowerCase() === cleanBatchIdStr.toLowerCase() || 
+          String(b._id || b.id || "").trim().toLowerCase() === cleanBatchIdStr.toLowerCase()
         );
+        if (match) batchObj = match;
       } catch (_) {}
     }
 
