@@ -580,10 +580,12 @@ class SupabaseDocument {
       }
       if (this.due_date || this.dueDate) {
         this.dueDate = this.due_date || this.dueDate;
+        this.due_date = this.dueDate;
         // Sync metadata with database value
         if (metadata[this._id]) metadata[this._id].dueDate = this.dueDate;
       } else if (meta.dueDate) {
         this.dueDate = meta.dueDate;
+        this.due_date = meta.dueDate;
       }
       if (!this.paymentHistory || this.paymentHistory.length === 0) {
         if (meta.paymentHistory !== undefined) this.paymentHistory = meta.paymentHistory;
@@ -1378,7 +1380,15 @@ class SupabaseQuery {
         doc.customFields = meta.customFields;
         doc.custom_fields = meta.customFields;
       }
-      if (meta.dueDate) {
+      const dbDueDate = doc.due_date || doc.dueDate;
+      if (dbDueDate) {
+        doc.dueDate = dbDueDate;
+        doc.due_date = dbDueDate;
+        if (studentMetadata[doc.id] && studentMetadata[doc.id].dueDate !== dbDueDate) {
+          studentMetadata[doc.id].dueDate = dbDueDate;
+          metadataChanged = true;
+        }
+      } else if (meta.dueDate) {
         doc.dueDate = meta.dueDate;
         doc.due_date = meta.dueDate;
       }
