@@ -2493,16 +2493,24 @@ export const getStudentVideos = async (req, res) => {
             ],
             status: "ACTIVE",
             revokedAt: null,
-            startsAt: { $lte: now },
-            $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
           }).populate("video");
 
           for (const r of activeReleases || []) {
+            const statusStr = (r.status || "").toUpperCase();
+            if (statusStr === "REVOKED" || r.revokedAt != null || statusStr === "EXPIRED") continue;
+
+            const exp = r.expiresAt || r.expires_at || r.expiresat;
+            if (exp && new Date(exp) <= now) continue;
+
+            const start = r.startsAt || r.starts_at || r.startsat;
+            if (start && new Date(start) > now) continue;
+
             if (r.video) {
               const vObj = typeof r.video.toObject === "function" ? r.video.toObject() : r.video;
               if ((vObj.status === "READY" || vObj.status === "active") && !vObj.isArchived) {
-                if (r.expiresAt || r.expires_at) {
-                  vObj.expiryDate = r.expiresAt || r.expires_at;
+                if (exp) {
+                  vObj.expiryDate = exp;
+                  vObj.expiresAt = exp;
                 }
                 videosList.push(vObj);
               }
@@ -2518,7 +2526,12 @@ export const getStudentVideos = async (req, res) => {
             _id: { $in: finalVideoIds },
             isArchived: { $ne: true },
           });
-          videosList.push(...relVideos);
+          for (const rv of relVideos || []) {
+            const vObj = typeof rv.toObject === "function" ? rv.toObject() : rv;
+            const exp = vObj.expiryDate || vObj.expiresAt || vObj.expires_at;
+            if (exp && new Date(exp) <= now) continue;
+            videosList.push(vObj);
+          }
         }
       } catch (relErr) {
         console.error("Error fetching release videos:", relErr);

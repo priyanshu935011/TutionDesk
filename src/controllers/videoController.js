@@ -1866,8 +1866,18 @@ export const getVideoReleases = async (req, res) => {
           }
         }
 
+        const now = new Date();
+        const exp = rObj.expiresAt || rObj.expires_at || rObj.expiresat;
+        let computedStatus = rObj.status || "ACTIVE";
+        if (rObj.revokedAt || computedStatus === "REVOKED") {
+          computedStatus = "REVOKED";
+        } else if (exp && new Date(exp) <= now) {
+          computedStatus = "EXPIRED";
+        }
+
         return {
           ...rObj,
+          status: computedStatus,
           video: videoObj,
           studentCount: Math.max(populatedStudents.length, studentIds.length, rObj.studentCount || 0),
           studentIds,
@@ -1942,11 +1952,19 @@ export const getStudentReleasedLectures = async (req, res) => {
 
     // Group valid videos and calculate longest validity
     const videoValidityMap = {};
-    activeReleases.forEach((r) => {
-      if (r.video && r.video.status === "READY" && !r.video.isArchived) {
+    (activeReleases || []).forEach((r) => {
+      const statusStr = (r.status || "").toUpperCase();
+      if (statusStr === "REVOKED" || r.revokedAt != null || statusStr === "EXPIRED") return;
+
+      const currentExp = r.expiresAt || r.expires_at || r.expiresat;
+      if (currentExp && new Date(currentExp) <= now) return;
+
+      const start = r.startsAt || r.starts_at || r.startsat;
+      if (start && new Date(start) > now) return;
+
+      if (r.video && (r.video.status === "READY" || r.video.status === "active") && !r.video.isArchived) {
         const vId = String(r.video._id || r.video.id);
         const existingExp = videoValidityMap[vId]?.expiresAt;
-        const currentExp = r.expiresAt;
 
         if (!existingExp || (currentExp && new Date(currentExp) > new Date(existingExp))) {
           videoValidityMap[vId] = {
@@ -2017,12 +2035,14 @@ export const getStudentPlaybackAuthorization = async (req, res) => {
       video: video._id,
       status: "ACTIVE",
       revokedAt: null,
-      startsAt: { $lte: now },
-      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
     });
 
-    if (!validRelease && req.user.role !== "super_admin" && req.user.role !== "institute_admin" && req.user.role !== "teacher") {
-      return res.status(403).json({ message: "You do not have active access to play this video lecture." });
+    const exp = validRelease?.expiresAt || validRelease?.expires_at || validRelease?.expiresat;
+    const isExpired = exp && new Date(exp) <= now;
+    const isRevoked = validRelease?.status === "REVOKED" || validRelease?.revokedAt != null;
+
+    if ((!validRelease || isExpired || isRevoked) && req.user.role !== "super_admin" && req.user.role !== "institute_admin" && req.user.role !== "teacher") {
+      return res.status(403).json({ message: "This video lecture access has expired or been revoked." });
     }
 
     const bunny = await getBunnySettingsHelper();
