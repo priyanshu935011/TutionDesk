@@ -2428,11 +2428,8 @@ export const getStudentVideos = async (req, res) => {
       } catch (_) {}
       const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
 
-      // 1. Build releaseExpiryMap & expiredVideoIdsSet for this student
-      const releaseExpiryMap = new Map();
-      const expiredVideoIdsSet = new Set();
-      const relIds = new Set();
-      const directVideoIds = new Set();
+      // 1. Gather all student release mappings: { releaseId, videoId }
+      const studentReleaseMappings = [];
 
       try {
         const releaseMappings = await VideoReleaseStudent.find({
@@ -2445,10 +2442,11 @@ export const getStudentVideos = async (req, res) => {
         });
 
         for (const m of releaseMappings || []) {
-          if (m.release_id) relIds.add(String(m.release_id));
-          if (m.release) relIds.add(String(m.release));
-          if (m.video_id) directVideoIds.add(String(m.video_id));
-          if (m.video) directVideoIds.add(String(m.video));
+          const rId = String(m.release_id || m.release || "").trim();
+          const vId = String(m.video_id || m.video || "").trim();
+          if (rId && vId) {
+            studentReleaseMappings.push({ releaseId: rId, videoId: vId });
+          }
         }
       } catch (_) {}
 
@@ -2461,8 +2459,11 @@ export const getStudentVideos = async (req, res) => {
 
           if (Array.isArray(sbVrs)) {
             for (const r of sbVrs) {
-              if (r.release_id) relIds.add(String(r.release_id));
-              if (r.video_id) directVideoIds.add(String(r.video_id));
+              const rId = String(r.release_id || r.release || "").trim();
+              const vId = String(r.video_id || r.video || "").trim();
+              if (rId && vId) {
+                studentReleaseMappings.push({ releaseId: rId, videoId: vId });
+              }
             }
           }
         }
@@ -2473,76 +2474,81 @@ export const getStudentVideos = async (req, res) => {
         for (const rs of fallbackRelStudents || []) {
           const sId = String(rs.student || rs.student_id || "");
           if (sId === stIdStr || sId === stUuid) {
-            if (rs.release_id) relIds.add(String(rs.release_id));
-            if (rs.release) relIds.add(String(rs.release));
-            if (rs.video_id) directVideoIds.add(String(rs.video_id));
-            if (rs.video) directVideoIds.add(String(rs.video));
+            const rId = String(rs.release_id || rs.release || "").trim();
+            const vId = String(rs.video_id || rs.video || "").trim();
+            if (rId && vId) {
+              studentReleaseMappings.push({ releaseId: rId, videoId: vId });
+            }
           }
         }
       } catch (_) {}
 
-      const cleanRelIds = Array.from(relIds).filter(Boolean);
-      let activeReleases = [];
+      // 2. Query unique VideoRelease records by clean release IDs
+      const cleanRelIds = Array.from(new Set(studentReleaseMappings.map((m) => m.releaseId))).filter(Boolean);
+      const releaseRecordsMap = new Map();
 
-      if (cleanRelIds.length > 0) {
+      if (supabase && cleanRelIds.length > 0) {
         try {
-          activeReleases = await VideoRelease.find({
-            $or: [
-              { _id: { $in: cleanRelIds } },
-              { id: { $in: cleanRelIds } },
-            ],
-          });
-        } catch (_) {}
+          const { data: sbRels } = await supabase
+            .from("video_releases")
+            .select("*")
+            .in("id", cleanRelIds);
 
-        try {
-          if (supabase && cleanRelIds.length > 0) {
-            const { data: sbRels } = await supabase
-              .from("video_releases")
-              .select("*")
-              .in("id", cleanRelIds);
-
-            if (Array.isArray(sbRels)) {
-              const existingIds = new Set(activeReleases.map((r) => String(r._id || r.id)));
-              for (const sbr of sbRels) {
-                const sbrId = String(sbr.id);
-                if (!existingIds.has(sbrId)) {
-                  activeReleases.push(sbr);
-                  existingIds.add(sbrId);
-                }
-              }
-            }
-          }
-        } catch (_) {}
-
-        try {
-          const fallbackRels = readFallbackData("video_releases");
-          const existingIds = new Set(activeReleases.map((r) => String(r._id || r.id)));
-          for (const fbr of fallbackRels) {
-            const fbrId = String(fbr._id || fbr.id);
-            if (cleanRelIds.includes(fbrId) && !existingIds.has(fbrId)) {
-              activeReleases.push(fbr);
-              existingIds.add(fbrId);
+          if (Array.isArray(sbRels)) {
+            for (const sbr of sbRels) {
+              const sbrId = String(sbr.id || sbr._id || "").trim();
+              if (sbrId) releaseRecordsMap.set(sbrId, sbr);
             }
           }
         } catch (_) {}
       }
 
-      for (const r of activeReleases || []) {
+      if (cleanRelIds.length > 0) {
+        try {
+          const mongoRels = await VideoRelease.find({
+            _id: { $in: cleanRelIds },
+          });
+          for (const mr of mongoRels || []) {
+            const mrId = String(mr._id || mr.id || "").trim();
+            if (mrId && !releaseRecordsMap.has(mrId)) {
+              releaseRecordsMap.set(mrId, typeof mr.toObject === "function" ? mr.toObject() : mr);
+            }
+          }
+        } catch (_) {}
+      }
+
+      try {
+        const fallbackRels = readFallbackData("video_releases");
+        for (const fbr of fallbackRels) {
+          const fbrId = String(fbr._id || fbr.id || "").trim();
+          if (fbrId && cleanRelIds.includes(fbrId) && !releaseRecordsMap.has(fbrId)) {
+            releaseRecordsMap.set(fbrId, fbr);
+          }
+        }
+      } catch (_) {}
+
+      // 3. Evaluate release status per video for this student
+      const releaseExpiryMap = new Map();
+      const videoHasReleaseMap = new Map();
+      const videoHasValidReleaseMap = new Map();
+      const directVideoIds = new Set(studentReleaseMappings.map((m) => m.videoId).filter(Boolean));
+
+      for (const mapping of studentReleaseMappings) {
+        const vId = mapping.videoId;
+        const rId = mapping.releaseId;
+        if (!vId) continue;
+
+        videoHasReleaseMap.set(vId, true);
+
+        const r = releaseRecordsMap.get(rId);
+        if (!r) continue;
+
         const statusStr = (r.status || "").toUpperCase();
-        if (statusStr === "REVOKED" || r.revokedAt != null || r.revoked_at != null) continue;
+        const isRevoked = statusStr === "REVOKED" || r.revokedAt != null || r.revoked_at != null;
+        if (isRevoked) continue;
 
         const start = r.startsAt || r.starts_at || r.startsat;
         if (start && new Date(start) > now) continue;
-
-        const vId = String(
-          (typeof r.video === "object" && r.video ? r.video._id || r.video.id : null) ||
-          (typeof r.video === "string" ? r.video : null) ||
-          r.video_id ||
-          r.videoId ||
-          ""
-        ).trim();
-
-        if (!vId) continue;
 
         const neverExp = r.neverExpires === true || r.never_expires === true;
         const expVal = neverExp ? null : (r.expiresAt || r.expires_at || r.expiresat || null);
@@ -2551,9 +2557,11 @@ export const getStudentVideos = async (req, res) => {
           const expDt = new Date(expVal);
           if (!isNaN(expDt.getTime())) {
             if (expDt <= now) {
-              expiredVideoIdsSet.add(vId);
+              // Expired release!
               continue;
             } else {
+              // Valid future release
+              videoHasValidReleaseMap.set(vId, true);
               const isoExp = expDt.toISOString();
               const existing = releaseExpiryMap.get(vId);
               if (!existing || new Date(isoExp) > new Date(existing)) {
@@ -2562,11 +2570,13 @@ export const getStudentVideos = async (req, res) => {
             }
           }
         } else if (neverExp || !expVal) {
+          // Valid release that never expires
+          videoHasValidReleaseMap.set(vId, true);
           releaseExpiryMap.set(vId, null);
         }
       }
 
-      // 2. Direct target audience videos
+      // 3. Direct target audience videos
       const videosList = [];
       const rawVideos = await VideoLecture.find({
         $or: [
@@ -2587,8 +2597,8 @@ export const getStudentVideos = async (req, res) => {
 
       videosList.push(...rawVideos);
 
-      // 3. Educator released videos by directVideoIds or releaseExpiryMap
-      const additionalVideoIds = Array.from(new Set([...directVideoIds, ...releaseExpiryMap.keys()])).filter(Boolean);
+      // 4. Educator released videos by directVideoIds or releaseExpiryMap
+      const additionalVideoIds = Array.from(new Set([...directVideoIds, ...videoHasReleaseMap.keys()])).filter(Boolean);
       if (additionalVideoIds.length > 0) {
         try {
           const relVideos = await VideoLecture.find({
@@ -2618,7 +2628,7 @@ export const getStudentVideos = async (req, res) => {
         }
       } catch (_) {}
 
-      // 4. Construct recordedLecturesMap
+      // 5. Construct recordedLecturesMap
       const recordedLecturesMap = new Map();
 
       for (const v of videosList) {
@@ -2631,48 +2641,48 @@ export const getStudentVideos = async (req, res) => {
         const vIdStr = String(vObj._id || vObj.id || vObj.bunnyVideoId || "").trim();
         if (!vIdStr) continue;
 
+        // FILTER OUT EXPIRED RELEASES:
+        // If this video was assigned via a release to this student, and its release has EXPIRED
+        // (or no valid active release exists for it), filter it out on backend!
+        if (videoHasReleaseMap.has(vIdStr) && !videoHasValidReleaseMap.has(vIdStr)) {
+          continue;
+        }
+
+        if (vObj.expiryDate || vObj.expiresAt || vObj.expires_at) {
+          const exp = vObj.expiryDate || vObj.expiresAt || vObj.expires_at;
+          if (exp && new Date(exp) <= now) {
+            continue;
+          }
+        }
+
         let resolvedExpiry = null;
         if (releaseExpiryMap.has(vIdStr)) {
           resolvedExpiry = releaseExpiryMap.get(vIdStr);
-        } else if (releaseExpiryMap.has(String(vObj._id)) || releaseExpiryMap.has(String(vObj.id)) || releaseExpiryMap.has(String(vObj.bunnyVideoId))) {
-          resolvedExpiry = releaseExpiryMap.get(String(vObj._id)) || releaseExpiryMap.get(String(vObj.id)) || releaseExpiryMap.get(String(vObj.bunnyVideoId));
         } else if (vObj.expiryDate || vObj.expiresAt || vObj.expires_at) {
           const exp = vObj.expiryDate || vObj.expiresAt || vObj.expires_at;
           resolvedExpiry = exp ? new Date(exp).toISOString() : null;
         }
 
-        if (resolvedExpiry && new Date(resolvedExpiry) <= now) {
-          continue;
-        }
-        if (expiredVideoIdsSet.has(vIdStr) && !releaseExpiryMap.has(vIdStr)) {
-          continue;
-        }
+        // Target audience check if not explicitly released
+        if (!videoHasValidReleaseMap.has(vIdStr) && !directVideoIds.has(vIdStr)) {
+          const targetType = (vObj.targetType || vObj.target_type || "").toLowerCase();
+          if (targetType === "student") {
+            const stList = [...(vObj.students || []), ...(vObj.student_ids || [])].map((s) => String(s._id || s.id || s));
+            if (!stList.includes(stIdStr)) continue;
+          } else if (targetType === "batch") {
+            const videoBatchIds = [];
+            if (vObj.batch_id) videoBatchIds.push(String(vObj.batch_id));
+            if (vObj.batch) videoBatchIds.push(String(vObj.batch._id || vObj.batch.id || vObj.batch));
+            if (Array.isArray(vObj.batch_ids)) vObj.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
+            if (Array.isArray(vObj.batches)) vObj.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
 
-        const targetType = (vObj.targetType || vObj.target_type || "").toLowerCase();
-        let isAllowedTarget = false;
-        if (releaseExpiryMap.has(vIdStr) || directVideoIds.has(vIdStr)) {
-          isAllowedTarget = true;
-        } else if (targetType === "student") {
-          const stList = [...(vObj.students || []), ...(vObj.student_ids || [])].map((s) => String(s._id || s.id || s));
-          isAllowedTarget = stList.includes(stIdStr);
-        } else if (targetType === "all" || !targetType) {
-          isAllowedTarget = true;
-        } else {
-          const videoBatchIds = [];
-          if (vObj.batch_id) videoBatchIds.push(String(vObj.batch_id));
-          if (vObj.batch) videoBatchIds.push(String(vObj.batch._id || vObj.batch.id || vObj.batch));
-          if (Array.isArray(vObj.batch_ids)) vObj.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
-          if (Array.isArray(vObj.batches)) vObj.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
-
-          const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
-          if (cleanVideoBatchIds.length === 0 || activeBatchIdsSet.size === 0) {
-            isAllowedTarget = true;
-          } else {
-            isAllowedTarget = cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
+            const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
+            if (cleanVideoBatchIds.length > 0 && activeBatchIdsSet.size > 0) {
+              const matchesBatch = cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
+              if (!matchesBatch) continue;
+            }
           }
         }
-
-        if (!isAllowedTarget) continue;
 
         const videoObj = {
           _id: vObj._id || vObj.id,
