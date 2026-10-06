@@ -35,7 +35,7 @@ const uploadMetadataFile = (filename, contentString) => {
       if (error) {
         console.error(`[Supabase Storage Sync] Error uploading metadata file ${filename}:`, error);
       } else {
-        console.log(`[Supabase Storage Sync] Successfully backed up ${filename} to Supabase bucket.`);
+        console.debug(`[Supabase Storage Sync] Successfully backed up ${filename} to Supabase bucket.`);
       }
     })
     .catch(err => {
@@ -1074,13 +1074,13 @@ class SupabaseQuery {
             }
             let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
-              console.warn(`Stripping missing filter column "${filterKey}" from ${tableName} findOne query.`);
+              console.debug(`Stripping missing filter column "${filterKey}" from ${tableName} findOne query.`);
               delete currentFilter[filterKey];
               attempt++;
               continue;
             }
             if (currentFilter.$or && Array.isArray(currentFilter.$or)) {
-              console.warn(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
+              console.debug(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
               currentFilter.$or = currentFilter.$or.filter(item => {
                 return !Object.keys(item).some(k => camelToSnake(k) === badCol);
               });
@@ -1140,13 +1140,13 @@ class SupabaseQuery {
             }
             let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
-              console.warn(`Stripping missing filter column "${filterKey}" from ${tableName} find query.`);
+              console.debug(`Stripping missing filter column "${filterKey}" from ${tableName} find query.`);
               delete currentFilter[filterKey];
               attempt++;
               continue;
             }
             if (currentFilter.$or && Array.isArray(currentFilter.$or)) {
-              console.warn(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
+              console.debug(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
               currentFilter.$or = currentFilter.$or.filter(item => {
                 return !Object.keys(item).some(k => camelToSnake(k) === badCol);
               });
