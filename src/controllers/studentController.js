@@ -2401,7 +2401,8 @@ export const getStudentVideos = async (req, res) => {
 
     for (const student of students) {
       const stIdStr = String(student._id || student.id || "").trim();
-      const videosList = [];
+      const stUuid = toValidUUID(stIdStr);
+      const studentId = student._id;
 
       const studentBatchIds = [];
       if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
@@ -2413,7 +2414,6 @@ export const getStudentVideos = async (req, res) => {
       if (Array.isArray(student.batch_ids)) student.batch_ids.forEach((b) => studentBatchIds.push(String(b)));
       const activeStudentBatchIds = Array.from(new Set(studentBatchIds.filter(Boolean)));
       const activeBatchIdsSet = new Set(activeStudentBatchIds);
-      const studentId = student._id;
 
       const instQueryIds = [student.user];
       try {
@@ -2428,7 +2428,146 @@ export const getStudentVideos = async (req, res) => {
       } catch (_) {}
       const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
 
-      // 1. Direct target audience videos
+      // 1. Build releaseExpiryMap & expiredVideoIdsSet for this student
+      const releaseExpiryMap = new Map();
+      const expiredVideoIdsSet = new Set();
+      const relIds = new Set();
+      const directVideoIds = new Set();
+
+      try {
+        const releaseMappings = await VideoReleaseStudent.find({
+          $or: [
+            { student: studentId },
+            { student_id: stIdStr },
+            { student: stIdStr },
+            { student_id: stUuid },
+          ],
+        });
+
+        for (const m of releaseMappings || []) {
+          if (m.release_id) relIds.add(String(m.release_id));
+          if (m.release) relIds.add(String(m.release));
+          if (m.video_id) directVideoIds.add(String(m.video_id));
+          if (m.video) directVideoIds.add(String(m.video));
+        }
+      } catch (_) {}
+
+      try {
+        if (supabase) {
+          const { data: sbVrs } = await supabase
+            .from("video_release_students")
+            .select("release_id, video_id, student_id")
+            .or(`student_id.eq.${stIdStr},student_id.eq.${stUuid}`);
+
+          if (Array.isArray(sbVrs)) {
+            for (const r of sbVrs) {
+              if (r.release_id) relIds.add(String(r.release_id));
+              if (r.video_id) directVideoIds.add(String(r.video_id));
+            }
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const fallbackRelStudents = readFallbackData("video_release_students");
+        for (const rs of fallbackRelStudents || []) {
+          const sId = String(rs.student || rs.student_id || "");
+          if (sId === stIdStr || sId === stUuid) {
+            if (rs.release_id) relIds.add(String(rs.release_id));
+            if (rs.release) relIds.add(String(rs.release));
+            if (rs.video_id) directVideoIds.add(String(rs.video_id));
+            if (rs.video) directVideoIds.add(String(rs.video));
+          }
+        }
+      } catch (_) {}
+
+      const cleanRelIds = Array.from(relIds).filter(Boolean);
+      let activeReleases = [];
+
+      if (cleanRelIds.length > 0) {
+        try {
+          activeReleases = await VideoRelease.find({
+            $or: [
+              { _id: { $in: cleanRelIds } },
+              { id: { $in: cleanRelIds } },
+            ],
+          });
+        } catch (_) {}
+
+        try {
+          if (supabase && cleanRelIds.length > 0) {
+            const { data: sbRels } = await supabase
+              .from("video_releases")
+              .select("*")
+              .in("id", cleanRelIds);
+
+            if (Array.isArray(sbRels)) {
+              const existingIds = new Set(activeReleases.map((r) => String(r._id || r.id)));
+              for (const sbr of sbRels) {
+                const sbrId = String(sbr.id);
+                if (!existingIds.has(sbrId)) {
+                  activeReleases.push(sbr);
+                  existingIds.add(sbrId);
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        try {
+          const fallbackRels = readFallbackData("video_releases");
+          const existingIds = new Set(activeReleases.map((r) => String(r._id || r.id)));
+          for (const fbr of fallbackRels) {
+            const fbrId = String(fbr._id || fbr.id);
+            if (cleanRelIds.includes(fbrId) && !existingIds.has(fbrId)) {
+              activeReleases.push(fbr);
+              existingIds.add(fbrId);
+            }
+          }
+        } catch (_) {}
+      }
+
+      for (const r of activeReleases || []) {
+        const statusStr = (r.status || "").toUpperCase();
+        if (statusStr === "REVOKED" || r.revokedAt != null || r.revoked_at != null) continue;
+
+        const start = r.startsAt || r.starts_at || r.startsat;
+        if (start && new Date(start) > now) continue;
+
+        const vId = String(
+          (typeof r.video === "object" && r.video ? r.video._id || r.video.id : null) ||
+          (typeof r.video === "string" ? r.video : null) ||
+          r.video_id ||
+          r.videoId ||
+          ""
+        ).trim();
+
+        if (!vId) continue;
+
+        const neverExp = r.neverExpires === true || r.never_expires === true;
+        const expVal = neverExp ? null : (r.expiresAt || r.expires_at || r.expiresat || null);
+
+        if (expVal) {
+          const expDt = new Date(expVal);
+          if (!isNaN(expDt.getTime())) {
+            if (expDt <= now) {
+              expiredVideoIdsSet.add(vId);
+              continue;
+            } else {
+              const isoExp = expDt.toISOString();
+              const existing = releaseExpiryMap.get(vId);
+              if (!existing || new Date(isoExp) > new Date(existing)) {
+                releaseExpiryMap.set(vId, isoExp);
+              }
+            }
+          }
+        } else if (neverExp || !expVal) {
+          releaseExpiryMap.set(vId, null);
+        }
+      }
+
+      // 2. Direct target audience videos
+      const videosList = [];
       const rawVideos = await VideoLecture.find({
         $or: [
           { institute: { $in: cleanInstIds } },
@@ -2448,145 +2587,117 @@ export const getStudentVideos = async (req, res) => {
 
       videosList.push(...rawVideos);
 
-      // 2. Educator released videos for student
-      try {
-        const relIds = [];
-        const directVideoIds = [];
-
-        const releaseMappings = await VideoReleaseStudent.find({
-          $or: [
-            { student: studentId },
-            { student_id: stIdStr },
-            { student: stIdStr },
-          ],
-        });
-
-        for (const m of releaseMappings || []) {
-          if (m.release_id) relIds.push(String(m.release_id));
-          if (m.release) relIds.push(String(m.release));
-          if (m.video_id) directVideoIds.push(String(m.video_id));
-          if (m.video) directVideoIds.push(String(m.video));
-        }
-
+      // 3. Educator released videos by directVideoIds or releaseExpiryMap
+      const additionalVideoIds = Array.from(new Set([...directVideoIds, ...releaseExpiryMap.keys()])).filter(Boolean);
+      if (additionalVideoIds.length > 0) {
         try {
-          if (supabase) {
-            const { data: sbVrs } = await supabase
-              .from("video_release_students")
-              .select("release_id, video_id, student_id")
-              .eq("student_id", stIdStr);
-
-            if (Array.isArray(sbVrs)) {
-              for (const r of sbVrs) {
-                if (r.release_id) relIds.push(String(r.release_id));
-                if (r.video_id) directVideoIds.push(String(r.video_id));
-              }
+          const relVideos = await VideoLecture.find({
+            _id: { $in: additionalVideoIds },
+            isArchived: { $ne: true },
+          });
+          const existingVideoIds = new Set(videosList.map((v) => String(v._id || v.id || v.bunnyVideoId)));
+          for (const rv of relVideos || []) {
+            const rvId = String(rv._id || rv.id || rv.bunnyVideoId);
+            if (!existingVideoIds.has(rvId)) {
+              videosList.push(rv);
+              existingVideoIds.add(rvId);
             }
           }
         } catch (_) {}
-
-        const cleanRelIds = Array.from(new Set(relIds.filter(Boolean)));
-        if (cleanRelIds.length > 0) {
-          const activeReleases = await VideoRelease.find({
-            $or: [
-              { _id: { $in: cleanRelIds } },
-              { id: { $in: cleanRelIds } },
-            ],
-            status: "ACTIVE",
-            revokedAt: null,
-          }).populate("video");
-
-          for (const r of activeReleases || []) {
-            const statusStr = (r.status || "").toUpperCase();
-            if (statusStr === "REVOKED" || r.revokedAt != null || statusStr === "EXPIRED") continue;
-
-            const exp = r.expiresAt || r.expires_at || r.expiresat;
-            if (exp && new Date(exp) <= now) continue;
-
-            const start = r.startsAt || r.starts_at || r.startsat;
-            if (start && new Date(start) > now) continue;
-
-            if (r.video) {
-              const vObj = typeof r.video.toObject === "function" ? r.video.toObject() : r.video;
-              if ((vObj.status === "READY" || vObj.status === "active") && !vObj.isArchived) {
-                if (exp) {
-                  vObj.expiryDate = exp;
-                  vObj.expiresAt = exp;
-                }
-                videosList.push(vObj);
-              }
-            } else if (r.video_id || r.video) {
-              directVideoIds.push(String(r.video_id || r.video));
-            }
-          }
-        }
-
-        const finalVideoIds = Array.from(new Set(directVideoIds.filter(Boolean)));
-        if (finalVideoIds.length > 0) {
-          const relVideos = await VideoLecture.find({
-            _id: { $in: finalVideoIds },
-            isArchived: { $ne: true },
-          });
-          for (const rv of relVideos || []) {
-            const vObj = typeof rv.toObject === "function" ? rv.toObject() : rv;
-            const exp = vObj.expiryDate || vObj.expiresAt || vObj.expires_at;
-            if (exp && new Date(exp) <= now) continue;
-            videosList.push(vObj);
-          }
-        }
-      } catch (relErr) {
-        console.error("Error fetching release videos:", relErr);
       }
 
-      const isVideoForStudent = (v) => {
-        if (!v) return false;
-        const st = (v.status || "").toLowerCase();
-        const isActiveOrReady = st === "active" || st === "ready" || st === "";
-        const notExpired = !v.expiryDate || new Date(v.expiryDate).getTime() >= now.getTime();
-        if (!isActiveOrReady || !notExpired || v.isArchived) return false;
-
-        const targetType = (v.targetType || v.target_type || "").toLowerCase();
-        if (targetType === "student") {
-          const stList = [...(v.students || []), ...(v.student_ids || [])].map((s) => String(s._id || s.id || s));
-          return stList.includes(stIdStr);
-        }
-        if (targetType === "all" || !targetType) return true;
-
-        const videoBatchIds = [];
-        if (v.batch_id) videoBatchIds.push(String(v.batch_id));
-        if (v.batch) videoBatchIds.push(String(v.batch._id || v.batch.id || v.batch));
-        if (Array.isArray(v.batch_ids)) v.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
-        if (Array.isArray(v.batches)) v.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
-
-        const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
-        if (cleanVideoBatchIds.length === 0) return true;
-        if (activeBatchIdsSet.size === 0) return true;
-
-        return cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
-      };
-
-      const recordedLecturesMap = new Map();
-      videosList
-        .filter(isVideoForStudent)
-        .forEach((v) => {
-          const vIdStr = String(v._id || v.id || v.bunnyVideoId || "");
-          if (vIdStr && !recordedLecturesMap.has(vIdStr)) {
-            const videoObj = {
-              _id: v._id || v.id,
-              title: v.title,
-              description: v.description || "",
-              playlist: v.playlist || "",
-              bunnyVideoId: v.bunnyVideoId,
-              videoUrl: v.videoUrl,
-              hlsUrl: v.hlsUrl,
-              thumbnailUrl: v.thumbnailUrl,
-              durationSeconds: v.durationSeconds || 0,
-              fileSizeBytes: v.fileSizeBytes || 0,
-              createdAt: v.createdAt,
-              expiryDate: v.expiryDate,
-            };
-            recordedLecturesMap.set(vIdStr, videoObj);
+      try {
+        const fallbackVideos = readFallbackData("video_lectures");
+        const existingVideoIds = new Set(videosList.map((v) => String(v._id || v.id || v.bunnyVideoId)));
+        for (const fbv of fallbackVideos || []) {
+          const fbvId = String(fbv._id || fbv.id || fbv.bunnyVideoId);
+          if (additionalVideoIds.includes(fbvId) && !existingVideoIds.has(fbvId) && !fbv.isArchived && fbv.status !== "ARCHIVED") {
+            videosList.push(fbv);
+            existingVideoIds.add(fbvId);
           }
-        });
+        }
+      } catch (_) {}
+
+      // 4. Construct recordedLecturesMap
+      const recordedLecturesMap = new Map();
+
+      for (const v of videosList) {
+        if (!v) continue;
+        const vObj = typeof v.toObject === "function" ? v.toObject() : { ...v };
+        const st = (vObj.status || "").toLowerCase();
+        const isActiveOrReady = st === "active" || st === "ready" || st === "";
+        if (!isActiveOrReady || vObj.isArchived || vObj.status === "ARCHIVED") continue;
+
+        const vIdStr = String(vObj._id || vObj.id || vObj.bunnyVideoId || "").trim();
+        if (!vIdStr) continue;
+
+        let resolvedExpiry = null;
+        if (releaseExpiryMap.has(vIdStr)) {
+          resolvedExpiry = releaseExpiryMap.get(vIdStr);
+        } else if (releaseExpiryMap.has(String(vObj._id)) || releaseExpiryMap.has(String(vObj.id)) || releaseExpiryMap.has(String(vObj.bunnyVideoId))) {
+          resolvedExpiry = releaseExpiryMap.get(String(vObj._id)) || releaseExpiryMap.get(String(vObj.id)) || releaseExpiryMap.get(String(vObj.bunnyVideoId));
+        } else if (vObj.expiryDate || vObj.expiresAt || vObj.expires_at) {
+          const exp = vObj.expiryDate || vObj.expiresAt || vObj.expires_at;
+          resolvedExpiry = exp ? new Date(exp).toISOString() : null;
+        }
+
+        if (resolvedExpiry && new Date(resolvedExpiry) <= now) {
+          continue;
+        }
+        if (expiredVideoIdsSet.has(vIdStr) && !releaseExpiryMap.has(vIdStr)) {
+          continue;
+        }
+
+        const targetType = (vObj.targetType || vObj.target_type || "").toLowerCase();
+        let isAllowedTarget = false;
+        if (releaseExpiryMap.has(vIdStr) || directVideoIds.has(vIdStr)) {
+          isAllowedTarget = true;
+        } else if (targetType === "student") {
+          const stList = [...(vObj.students || []), ...(vObj.student_ids || [])].map((s) => String(s._id || s.id || s));
+          isAllowedTarget = stList.includes(stIdStr);
+        } else if (targetType === "all" || !targetType) {
+          isAllowedTarget = true;
+        } else {
+          const videoBatchIds = [];
+          if (vObj.batch_id) videoBatchIds.push(String(vObj.batch_id));
+          if (vObj.batch) videoBatchIds.push(String(vObj.batch._id || vObj.batch.id || vObj.batch));
+          if (Array.isArray(vObj.batch_ids)) vObj.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
+          if (Array.isArray(vObj.batches)) vObj.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
+
+          const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
+          if (cleanVideoBatchIds.length === 0 || activeBatchIdsSet.size === 0) {
+            isAllowedTarget = true;
+          } else {
+            isAllowedTarget = cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
+          }
+        }
+
+        if (!isAllowedTarget) continue;
+
+        const videoObj = {
+          _id: vObj._id || vObj.id,
+          title: vObj.title,
+          description: vObj.description || "",
+          playlist: vObj.playlist || "",
+          bunnyVideoId: vObj.bunnyVideoId,
+          videoUrl: vObj.videoUrl,
+          hlsUrl: vObj.hlsUrl,
+          thumbnailUrl: vObj.thumbnailUrl,
+          durationSeconds: vObj.durationSeconds || 0,
+          fileSizeBytes: vObj.fileSizeBytes || 0,
+          createdAt: vObj.createdAt,
+          expiryDate: resolvedExpiry,
+        };
+
+        if (!recordedLecturesMap.has(vIdStr)) {
+          recordedLecturesMap.set(vIdStr, videoObj);
+        } else {
+          const existingObj = recordedLecturesMap.get(vIdStr);
+          if (!existingObj.expiryDate && videoObj.expiryDate) {
+            existingObj.expiryDate = videoObj.expiryDate;
+          }
+        }
+      }
 
       videosMap[stIdStr] = Array.from(recordedLecturesMap.values());
     }
