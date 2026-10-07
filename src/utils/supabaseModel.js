@@ -1102,6 +1102,8 @@ class SupabaseQuery {
           if (!studentUuid) return null;
           const testMeta = readTestsMetadata()[row.id] || {};
           const bracketSubject = row.test_name && row.test_name.includes("(") && row.test_name.includes(")") ? row.test_name.split("(").pop().replace(")", "").trim() : "";
+          const rawStScore = row.marks?.[studentUuid];
+          const isStAbsent = rawStScore === -1 || Number(rawStScore) === -1 || String(rawStScore).toLowerCase() === "absent";
           targetRow = {
             id: `${row.id}_${studentUuid}`,
             student: studentUuid,
@@ -1110,7 +1112,7 @@ class SupabaseQuery {
             subject: row.subject || testMeta.subject || bracketSubject || "General",
             testType: row.test_type || testMeta.testType || "Unit Test",
             chapter: row.chapter || testMeta.chapter || "",
-            score: Number(row.marks?.[studentUuid] || 0),
+            score: isStAbsent ? "Absent" : Number(rawStScore || 0),
             totalMarks: Number(row.max_marks || 100),
             examDate: row.test_date || row.created_at,
             createdAt: row.created_at,
@@ -1170,6 +1172,7 @@ class SupabaseQuery {
             const bracketSubject = row.test_name && row.test_name.includes("(") && row.test_name.includes(")") ? row.test_name.split("(").pop().replace(")", "").trim() : "";
             const resolvedSubject = row.subject || testMeta.subject || bracketSubject || "General";
             for (const [studentUuid, score] of Object.entries(marksMap)) {
+              const isAbsent = score === -1 || Number(score) === -1 || String(score).toLowerCase() === "absent";
               flattened.push({
                 id: `${row.id}_${studentUuid}`,
                 student: studentUuid,
@@ -1178,7 +1181,7 @@ class SupabaseQuery {
                 subject: resolvedSubject,
                 testType: row.test_type || testMeta.testType || "Unit Test",
                 chapter: row.chapter || testMeta.chapter || "",
-                score: Number(score || 0),
+                score: isAbsent ? "Absent" : Number(score || 0),
                 totalMarks: Number(row.max_marks || 100),
                 examDate: row.test_date || row.created_at,
                 createdAt: row.created_at,

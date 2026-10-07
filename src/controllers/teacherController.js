@@ -1691,7 +1691,7 @@ export const getTestResults = async (req, res) => {
 export const createTestResult = async (req, res) => {
   try {
     const instituteId = req.user.institute?._id || req.user.institute;
-    const { studentId, title, score, totalMarks, examDate, remarks, subject, testType, category, chapter } = req.body;
+    const { studentId, title, score, totalMarks, examDate, remarks, subject, testType, category, chapter, isAbsent: bodyIsAbsent } = req.body;
 
     if (
       !studentId ||
@@ -1706,13 +1706,15 @@ export const createTestResult = async (req, res) => {
         .json({ message: "All test result fields are required, including subject" });
     }
 
+    const isAbsent = bodyIsAbsent === true || Number(score) === -1 || String(score).toLowerCase() === "absent" || String(score).toLowerCase() === "a";
+
     const result = await TestResult.create({
       institute: instituteId,
       createdBy: req.user._id,
       student: studentId,
       batch: req.body.batchId || req.body.batch || null,
       title,
-      score: Number(score),
+      score: isAbsent ? -1 : Number(score),
       totalMarks: Number(totalMarks),
       examDate,
       remarks: remarks || "",
@@ -1768,7 +1770,8 @@ export const createTestResultsBulk = async (req, res) => {
     const marksMap = {};
     for (const entry of entries) {
       if (entry.studentId) {
-        marksMap[String(entry.studentId)] = Number(entry.score || 0);
+        const isAbsent = entry.isAbsent === true || Number(entry.score) === -1 || String(entry.score).toLowerCase() === "absent" || String(entry.score).toLowerCase() === "a";
+        marksMap[String(entry.studentId)] = isAbsent ? -1 : Number(entry.score || 0);
       }
     }
 
@@ -1815,13 +1818,14 @@ export const createTestResultsBulk = async (req, res) => {
     for (const entry of entries) {
       if (entry.studentId) {
         try {
+          const isAbsent = entry.isAbsent === true || Number(entry.score) === -1 || String(entry.score).toLowerCase() === "absent" || String(entry.score).toLowerCase() === "a";
           await TestResult.create({
             institute: instituteId,
             createdBy: req.user._id,
             student: entry.studentId,
             batch: batchId,
             title: title.trim(),
-            score: Number(entry.score || 0),
+            score: isAbsent ? -1 : Number(entry.score || 0),
             totalMarks: Number(totalMarks),
             examDate,
             remarks: entry.remarks || "",
@@ -1834,17 +1838,21 @@ export const createTestResultsBulk = async (req, res) => {
     }
 
     // Build a response shaped like the website expects (array of per-student results)
-    const populatedResults = studentIds.map((sid) => ({
-      _id: `${insertedRow?.id || "new"}_${sid}`,
-      student: { _id: sid, name: "", enrollmentNumber: "" },
-      title: title.trim(),
-      subject: subject.trim(),
-      testType: resolvedTestType,
-      chapter: resolvedChapter,
-      score: marksMap[sid] ?? 0,
-      totalMarks: Number(totalMarks),
-      examDate,
-    }));
+    const populatedResults = studentIds.map((sid) => {
+      const rawSc = marksMap[sid];
+      const isAbsent = rawSc === -1 || Number(rawSc) === -1 || String(rawSc).toLowerCase() === "absent";
+      return {
+        _id: `${insertedRow?.id || "new"}_${sid}`,
+        student: { _id: sid, name: "", enrollmentNumber: "" },
+        title: title.trim(),
+        subject: subject.trim(),
+        testType: resolvedTestType,
+        chapter: resolvedChapter,
+        score: isAbsent ? "Absent" : (rawSc ?? 0),
+        totalMarks: Number(totalMarks),
+        examDate,
+      };
+    });
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
@@ -2339,7 +2347,14 @@ export const updateTestResult = async (req, res) => {
 
     if (!id.includes("_")) {
       const updateData = {};
-      if (marks !== undefined) updateData.marks = marks;
+      if (marks !== undefined && typeof marks === "object" && marks !== null) {
+        const sanitizedMarks = {};
+        for (const [sKey, sVal] of Object.entries(marks)) {
+          const isAbsent = sVal === -1 || Number(sVal) === -1 || String(sVal).toLowerCase() === "absent" || String(sVal).toLowerCase() === "a";
+          sanitizedMarks[sKey] = isAbsent ? -1 : Number(sVal || 0);
+        }
+        updateData.marks = sanitizedMarks;
+      }
       if (title !== undefined) updateData.test_name = title.trim();
       if (totalMarks !== undefined) updateData.max_marks = Number(totalMarks);
       if (examDate !== undefined) updateData.test_date = new Date(examDate).toISOString().substring(0, 10);
@@ -2367,7 +2382,10 @@ export const updateTestResult = async (req, res) => {
       return res.status(404).json({ message: "Test result not found" });
     }
 
-    if (score !== undefined) result.score = Number(score);
+    if (score !== undefined) {
+      const isAbsent = score === -1 || Number(score) === -1 || String(score).toLowerCase() === "absent" || String(score).toLowerCase() === "a";
+      result.score = isAbsent ? -1 : Number(score);
+    }
     if (totalMarks !== undefined) result.totalMarks = Number(totalMarks);
     if (remarks !== undefined) result.remarks = remarks;
 

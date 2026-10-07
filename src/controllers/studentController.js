@@ -2370,11 +2370,21 @@ export const getStudentTestMarks = async (req, res) => {
         ]
       }).sort({ createdAt: -1 });
 
-      const filteredTestResults = (rawTestResults || []).filter((t) => {
-        if (!t) return false;
-        const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim();
-        return tStId && stIdStr && tStId.toLowerCase() === stIdStr.toLowerCase();
-      });
+      const filteredTestResults = (rawTestResults || [])
+        .filter((t) => {
+          if (!t) return false;
+          const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim();
+          return tStId && stIdStr && tStId.toLowerCase() === stIdStr.toLowerCase();
+        })
+        .map((t) => {
+          const doc = typeof t.toObject === "function" ? t.toObject() : (typeof t.toJSON === "function" ? t.toJSON() : { ...t });
+          const sc = doc.score ?? doc.marksObtained;
+          if (sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent") {
+            doc.score = "Absent";
+            doc.marksObtained = "Absent";
+          }
+          return doc;
+        });
 
       testResultsMap[stIdStr] = filteredTestResults;
     }
@@ -2976,11 +2986,21 @@ export const getStudentPortalData = async (req, res) => {
 
           return cleanNoteBatchIds.some((bId) => activeStudentBatchIdsSet.has(bId));
         });
-        const batchTestResults = (testResults || []).filter((t) => {
-          if (!t) return false;
-          const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim().toLowerCase();
-          return !tStId || tStId === currentStudentIdStr;
-        });
+        const batchTestResults = (testResults || [])
+          .filter((t) => {
+            if (!t) return false;
+            const tStId = String(t.student?._id || t.student?.id || t.student || t.student_id || t.studentId || "").trim().toLowerCase();
+            return !tStId || tStId === currentStudentIdStr;
+          })
+          .map((t) => {
+            const doc = typeof t.toObject === "function" ? t.toObject() : (typeof t.toJSON === "function" ? t.toJSON() : { ...t });
+            const sc = doc.score ?? doc.marksObtained;
+            if (sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent") {
+              doc.score = "Absent";
+              doc.marksObtained = "Absent";
+            }
+            return doc;
+          });
         const studentNotices = notices || [];
 
         const now = new Date();
