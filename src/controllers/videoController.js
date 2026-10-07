@@ -2083,9 +2083,9 @@ export const recordStudentWatchProgress = async (req, res) => {
       totalVideoDurationSeconds,
     } = req.body || {};
 
-    const watchSec = Number(watchTimeSeconds ?? watchDurationSeconds ?? 0);
-    const totalSec = Number(totalDurationSeconds ?? totalVideoDurationSeconds ?? 0);
-    const watchPct = totalSec > 0 ? Number(((watchSec / totalSec) * 100).toFixed(1)) : 0;
+    const watchSec = Math.round(Number(watchTimeSeconds ?? watchDurationSeconds ?? 0));
+    const totalSec = Math.round(Number(totalDurationSeconds ?? totalVideoDurationSeconds ?? 0));
+    const watchPct = totalSec > 0 ? Math.round(Number(((watchSec / totalSec) * 100).toFixed(1))) : 0;
 
     const studentId = req.user?._id || req.user?.id || req.user?.studentId;
     const instituteId = resolveInstituteId(req);
