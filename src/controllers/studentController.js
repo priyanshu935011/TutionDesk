@@ -36,7 +36,7 @@ import { supabaseBucket } from "../utils/supabase.js";
 
 import { getLiveStateForStudent } from "../services/quizRuntime.js";
 
-const allowedFeeTypes = ["monthly", "full_course", "partial"];
+const allowedFeeTypes = ["monthly", "full_course", "partial", "one_time", "yearly"];
 
 const addOneMonth = (dateValue) => {
   if (!dateValue) return null;
@@ -1326,9 +1326,12 @@ export const addPayment = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const { amount, paymentDate, paymentType, note, remarks } = req.body;
+    const { amount, paymentDate, paymentType, paymentMode, monthsPaid, note, remarks } = req.body;
     const paymentNote = note || remarks || "";
     const effectivePaymentType = (paymentType && allowedFeeTypes.includes(paymentType)) ? paymentType : "monthly";
+    const validPaymentModes = ["Cash", "Online", "Cheque", "Card"];
+    const effectivePaymentMode = validPaymentModes.includes(paymentMode) ? paymentMode : "Cash";
+    const numMonths = Math.max(1, Number(monthsPaid) || 1);
 
     const student = await Student.findOne({
       _id: req.params.id,
@@ -1361,6 +1364,8 @@ export const addPayment = async (req, res) => {
       amount: numAmount,
       paymentDate,
       paymentType: effectivePaymentType,
+      paymentMode: effectivePaymentMode,
+      monthsPaid: numMonths,
       note: paymentNote,
     };
 
@@ -1375,11 +1380,10 @@ export const addPayment = async (req, res) => {
         const institute = await Institute.findById(instId).select("flexibleDueDate");
         const isFlexible = institute?.flexibleDueDate === true;
 
-        if (isFlexible) {
-          student.dueDate = addOneMonth(paymentDate);
-        } else {
-          student.dueDate = addOneMonth(student.dueDate || paymentDate);
-        }
+        let baseDate = isFlexible ? new Date(paymentDate) : new Date(student.dueDate || paymentDate);
+        if (isNaN(baseDate.getTime())) baseDate = new Date();
+        baseDate.setMonth(baseDate.getMonth() + numMonths);
+        student.dueDate = baseDate;
       } catch (dErr) {}
     }
 
@@ -1393,6 +1397,8 @@ export const addPayment = async (req, res) => {
         amount: numAmount,
         payment_date: paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString(),
         payment_type: effectivePaymentType,
+        payment_mode: effectivePaymentMode,
+        months_paid: numMonths,
         note: paymentNote
       });
     } catch (payErr) {

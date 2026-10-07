@@ -65,10 +65,16 @@ export const getDashboard = async (req, res) => {
           sObj.paymentHistory.forEach((p) => {
             const pAmt = Number(p?.amount || 0);
             const pDateStr = p?.date || p?.paymentDate || p?.createdAt;
+            const rawMode = p?.paymentMode || p?.payment_mode || "Cash";
+            const modeKey = ["Cash", "Online", "Cheque", "Card"].includes(rawMode) ? rawMode : "Cash";
+
+            totals.paymentModeBreakdown[modeKey] = (totals.paymentModeBreakdown[modeKey] || 0) + pAmt;
+
             if (pDateStr) {
               const pDate = new Date(pDateStr);
               if (!isNaN(pDate.getTime()) && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
                 paidThisMonth += pAmt;
+                totals.currentMonthPaymentModeBreakdown[modeKey] = (totals.currentMonthPaymentModeBreakdown[modeKey] || 0) + pAmt;
               }
             }
           });
@@ -101,6 +107,8 @@ export const getDashboard = async (req, res) => {
         pendingStudents: 0,
         totalAttendanceMarked: 0,
         totalPresent: 0,
+        paymentModeBreakdown: { Cash: 0, Online: 0, Cheque: 0, Card: 0 },
+        currentMonthPaymentModeBreakdown: { Cash: 0, Online: 0, Cheque: 0, Card: 0 },
       }
     );
 

@@ -14,8 +14,17 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentType: {
       type: String,
-      enum: ["monthly", "full_course", "partial"],
+      enum: ["monthly", "full_course", "partial", "one_time", "yearly"],
       required: true,
+    },
+    paymentMode: {
+      type: String,
+      enum: ["Cash", "Online", "Cheque", "Card"],
+      default: "Cash",
+    },
+    monthsPaid: {
+      type: Number,
+      default: 1,
     },
     note: {
       type: String,
