@@ -283,7 +283,39 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     try {
-      totalTestResultsCount = await TestResult.countDocuments(testQuery);
+      if (req.user.role === "teacher") {
+        const allResults = await TestResult.find({ institute: instituteId });
+        const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+        const myBatchIds = new Set();
+        myActiveBatches.forEach((b) => {
+          const bIdStr = String(b._id || b.id || "");
+          if (bIdStr) {
+            myBatchIds.add(bIdStr);
+            myBatchIds.add(bIdStr.toLowerCase());
+            const uuidForm = toValidUUID(bIdStr);
+            if (uuidForm) {
+              myBatchIds.add(uuidForm);
+              myBatchIds.add(uuidForm.toLowerCase());
+            }
+          }
+        });
+        const teacherUuid = toValidUUID(req.user._id);
+        const teacherIdStr = String(req.user._id);
+        const filteredResults = allResults.filter((item) => {
+          const rawBatchId = item.batch_id || item.batchId || (typeof item.batch === "object" ? item.batch?._id || item.batch?.id : item.batch);
+          const itemBatchId = String(rawBatchId || "").trim();
+          const itemCreatedBy = String(item.created_by || item.createdBy || "").trim();
+
+          if (itemBatchId) {
+            return myBatchIds.has(itemBatchId) || myBatchIds.has(itemBatchId.toLowerCase()) || myBatchIds.has(toValidUUID(itemBatchId));
+          } else {
+            return itemCreatedBy === teacherUuid || itemCreatedBy === teacherIdStr;
+          }
+        });
+        totalTestResultsCount = filteredResults.length;
+      } else {
+        totalTestResultsCount = await TestResult.countDocuments(testQuery);
+      }
       steps["step7_test_results"] = totalTestResultsCount;
     } catch (e7) {
       steps["step7_test_results"] = { error: e7.message };
@@ -1583,18 +1615,21 @@ export const updateNote = async (req, res) => {
 
 export const getTestResults = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const query = { institute: instituteId };
-    if (req.user.role === "teacher") {
-      const teacherUuid = toValidUUID(req.user._id);
-      const teacherIdStr = String(req.user._id);
-      query.$or = [
-        { createdBy: req.user._id },
-        { createdBy: teacherIdStr },
-        { created_by: teacherUuid },
-        { created_by: teacherIdStr },
-      ];
+    const rawInst = req.user.institute;
+    let instId = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instId = String(rawInst._id || rawInst.id || "");
+      } else {
+        instId = String(rawInst);
+      }
     }
+    if (!instId && req.user.institute_id) {
+      instId = String(req.user.institute_id);
+    }
+    const instituteId = instId || req.user.institute?._id || req.user.institute;
+    const query = { institute: instituteId };
+
     if (req.query.studentId) {
       query.student = req.query.studentId;
       const studentObj = await Student.findById(req.query.studentId).select("joinedOn");
@@ -1602,9 +1637,50 @@ export const getTestResults = async (req, res) => {
         query.examDate = { $gte: studentObj.joinedOn };
       }
     }
-    const results = await TestResult.find(query)
+
+    let results = await TestResult.find(query)
       .sort({ createdAt: -1 })
       .populate("student", "name enrollmentNumber email");
+
+    if (req.user.role === "teacher") {
+      const ownerId = rawInst?.adminUser ? String(rawInst.adminUser) : String(req.user._id || req.user.id || "");
+      const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instituteId].filter(Boolean);
+      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
+      const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+      const myBatchIds = new Set();
+      myActiveBatches.forEach((b) => {
+        const bIdStr = String(b._id || b.id || "");
+        if (bIdStr) {
+          myBatchIds.add(bIdStr);
+          myBatchIds.add(bIdStr.toLowerCase());
+          const uuidForm = toValidUUID(bIdStr);
+          if (uuidForm) {
+            myBatchIds.add(uuidForm);
+            myBatchIds.add(uuidForm.toLowerCase());
+          }
+        }
+      });
+
+      const teacherUuid = toValidUUID(req.user._id);
+      const teacherIdStr = String(req.user._id);
+
+      results = results.filter((item) => {
+        const rawBatchId = item.batch_id || item.batchId || (typeof item.batch === "object" ? item.batch?._id || item.batch?.id : item.batch);
+        const itemBatchId = String(rawBatchId || "").trim();
+        const itemCreatedBy = String(item.created_by || item.createdBy || "").trim();
+
+        if (itemBatchId) {
+          const isAllowed = myBatchIds.has(itemBatchId) || myBatchIds.has(itemBatchId.toLowerCase()) || myBatchIds.has(toValidUUID(itemBatchId));
+          if (!isAllowed) return false;
+        } else {
+          if (itemCreatedBy !== teacherUuid && itemCreatedBy !== teacherIdStr) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
     return res.json(results);
   } catch (error) {
     console.error("getTestResults error:", error);
