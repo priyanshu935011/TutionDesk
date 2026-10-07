@@ -801,6 +801,12 @@ export const getTeacherVideos = async (req, res) => {
         ""
       ).trim();
 
+      if (req.user?.role === "teacher") {
+        const targetUser = String(req.user._id || req.user.id).trim();
+        const targetUuid = toValidUUID(targetUser);
+        return itemCreatedBy === targetUser || itemCreatedBy === targetUuid;
+      }
+
       if (targetInst && itemInst && itemInst === targetInst) return true;
       if (targetInst && itemCreatedBy && itemCreatedBy === targetInst) return true;
       if (targetUser && itemCreatedBy && itemCreatedBy === targetUser) return true;

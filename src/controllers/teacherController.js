@@ -675,22 +675,7 @@ export const getNotes = async (req, res) => {
 
       rows = rawRows.filter((r) => {
         const rCreatedBy = String(r.created_by || r.createdBy || "");
-        if (rCreatedBy && (rCreatedBy === teacherUuid || rCreatedBy === teacherIdStr)) {
-          return true;
-        }
-
-        const noteBatchIds = [];
-        if (r.batch_id) noteBatchIds.push(String(r.batch_id));
-        if (Array.isArray(r.batch_ids)) {
-          r.batch_ids.forEach((id) => id && noteBatchIds.push(String(id)));
-        } else if (typeof r.batch_ids === "string" && r.batch_ids.startsWith("[")) {
-          try {
-            JSON.parse(r.batch_ids).forEach((id) => id && noteBatchIds.push(String(id)));
-          } catch (_) {}
-        }
-
-        if (noteBatchIds.length === 0) return true;
-        return noteBatchIds.some((bId) => myBatchIds.has(bId));
+        return rCreatedBy && (rCreatedBy === teacherUuid || rCreatedBy === teacherIdStr);
       });
     }
 
@@ -1601,7 +1586,14 @@ export const getTestResults = async (req, res) => {
     const instituteId = req.user.institute?._id || req.user.institute;
     const query = { institute: instituteId };
     if (req.user.role === "teacher") {
-      query.createdBy = req.user._id;
+      const teacherUuid = toValidUUID(req.user._id);
+      const teacherIdStr = String(req.user._id);
+      query.$or = [
+        { createdBy: req.user._id },
+        { createdBy: teacherIdStr },
+        { created_by: teacherUuid },
+        { created_by: teacherIdStr },
+      ];
     }
     if (req.query.studentId) {
       query.student = req.query.studentId;
