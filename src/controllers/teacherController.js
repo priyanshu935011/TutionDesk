@@ -20,7 +20,7 @@ import { toValidUUID } from "../utils/supabaseModel.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { syncInstituteStorage } from "./videoController.js";
-import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
+import { sendMessage, getSessionStatus, sendTemplateMessage, getInstituteWalletBalance } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 
 const uploadBufferToCloudinary = (buffer, options = {}) =>
@@ -123,6 +123,11 @@ export const getTeacherDashboard = async (req, res) => {
           );
       }
       if (institute && instIdStr) {
+        const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
+        if (typeof institute.toObject === "function") {
+          institute = institute.toObject();
+        }
+        institute.walletBalance = liveBal;
         const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
         if (savedSettings && Object.keys(savedSettings).length > 0) {
           institute.whatsappSettings = savedSettings;
@@ -2621,6 +2626,8 @@ export const getQuickSummary = async (req, res) => {
     const usedBytes = storageInfo.usedBytes || 0;
     const usagePercentage = limitBytes > 0 ? Math.min(100, Math.round((usedBytes / limitBytes) * 100)) : 0;
 
+    const liveBal = await getInstituteWalletBalance(instituteId, institute.walletBalance || 0);
+
     return res.json({
       storage: {
         maxStorageGb: storageInfo.maxGb,
@@ -2634,8 +2641,8 @@ export const getQuickSummary = async (req, res) => {
         notesStorageBytes: storageInfo.notesStorageBytes || 0,
         notesStorageGb: storageInfo.notesStorageGb || 0,
       },
-      walletBalance: institute.walletBalance || 0,
-      perMessageCharge: institute.perMessageCharge ?? 0.25,
+      walletBalance: liveBal,
+      perMessageCharge: institute.perMessageCharge ?? 0.10,
     });
   } catch (error) {
     console.error("getQuickSummary error:", error);

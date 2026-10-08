@@ -16,6 +16,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2
 const generateToken = (payload) =>
   jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
 
+import { getInstituteWalletBalance } from "../services/whatsappService.js";
+
 const buildInstituteState = async (user) => {
   if (!user.institute) {
     return null;
@@ -28,6 +30,8 @@ const buildInstituteState = async (user) => {
   if (!institute) {
     return null;
   }
+
+  const liveBalance = await getInstituteWalletBalance(user.institute, institute.walletBalance || 0);
 
   return {
     id: institute._id,
@@ -48,7 +52,7 @@ const buildInstituteState = async (user) => {
     allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
     whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
     studentCustomFields: institute.studentCustomFields || [],
-    walletBalance: Number(institute.walletBalance || 0),
+    walletBalance: Number(liveBalance || 0),
     perMessageCharge: Number(institute.perMessageCharge ?? 0.10),
   };
 };

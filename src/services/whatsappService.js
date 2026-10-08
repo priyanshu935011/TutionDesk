@@ -46,6 +46,50 @@ const findInstituteDoc = async (instituteId) => {
   }
 };
 
+export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
+  const instIdStr = getCleanInstId(instituteId);
+  if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0);
+
+  try {
+    const { data: sbInst } = await supabase
+      .from("institutes")
+      .select("wallet_balance, walletBalance")
+      .eq("id", instIdStr)
+      .maybeSingle();
+
+    if (sbInst) {
+      const b = sbInst.wallet_balance ?? sbInst.walletBalance;
+      if (b !== null && b !== undefined && !isNaN(Number(b))) {
+        return Number(b);
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const { data: sbInst2 } = await supabase
+      .from("institutes")
+      .select("wallet_balance, walletBalance")
+      .eq("_id", instIdStr)
+      .maybeSingle();
+
+    if (sbInst2) {
+      const b = sbInst2.wallet_balance ?? sbInst2.walletBalance;
+      if (b !== null && b !== undefined && !isNaN(Number(b))) {
+        return Number(b);
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const inst = await Institute.findById(instIdStr).select("walletBalance");
+    if (inst && inst.walletBalance !== undefined && inst.walletBalance !== null) {
+      return Number(inst.walletBalance);
+    }
+  } catch (_) {}
+
+  return Number(fallback || 0);
+};
+
 const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, msgType, isSuccess, errMessage = "") => {
   const cleanInstId = String(inst?._id || inst?.id || getCleanInstId(instituteId) || "").trim();
   const cleanTo = formatPhoneNumber(to);
@@ -54,57 +98,80 @@ const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, ms
   const statusVal = isSuccess ? "sent" : "failed";
 
   if (cleanInstId && cleanInstId !== "admin_test") {
-    let currentBalance = 0;
-    if (inst && inst.walletBalance !== undefined && inst.walletBalance !== null) {
-      currentBalance = Number(inst.walletBalance || 0);
-    } else {
-      try {
-        const { data: sbInst } = await supabase
-          .from("institutes")
-          .select("wallet_balance, walletBalance")
-          .or(`id.eq.${cleanInstId},_id.eq.${cleanInstId}`)
-          .maybeSingle();
-        if (sbInst) {
-          currentBalance = Number(sbInst.wallet_balance ?? sbInst.walletBalance ?? 0);
-        }
-      } catch (_) {}
-    }
-
+    // 1. Fetch live balance from Supabase Database Table
+    const currentBalance = await getInstituteWalletBalance(cleanInstId, inst?.walletBalance || 0);
     const newBalance = Math.max(0, currentBalance - (isSuccess ? charge : 0));
 
-    // A. Update MongoDB Institute document
-    if (inst) {
-      try {
+    // A. Update Supabase Database Table 'institutes' directly
+    try {
+      const { error: sbUpErr1 } = await supabase
+        .from("institutes")
+        .update({ wallet_balance: newBalance, walletBalance: newBalance })
+        .eq("id", cleanInstId);
+
+      if (sbUpErr1) {
+        await supabase
+          .from("institutes")
+          .update({ wallet_balance: newBalance, walletBalance: newBalance })
+          .eq("_id", cleanInstId);
+      }
+    } catch (sbUpErr) {
+      console.error("[Supabase Balance Update Error]", sbUpErr.message);
+    }
+
+    // B. Update MongoDB Institute document
+    try {
+      if (inst) {
         inst.walletBalance = newBalance;
         await inst.save();
-      } catch (_) {
-        try {
-          await Institute.updateOne({ _id: inst._id }, { $set: { walletBalance: newBalance } });
-        } catch (_) {}
+      } else {
+        await Institute.updateOne({ _id: cleanInstId }, { $set: { walletBalance: newBalance } });
       }
-    }
+    } catch (_) {}
 
-    // B. Update Supabase Database Table 'institutes'
-    try {
-      await supabase
-        .from("institutes")
-        .update({
-          wallet_balance: newBalance,
-          walletBalance: newBalance
-        })
-        .or(`id.eq.${cleanInstId},_id.eq.${cleanInstId}`);
-    } catch (sbUpErr) {
-      console.warn("[Supabase Institute Table Balance Update Warning]", sbUpErr.message);
-    }
-
-    // Clear L1/Redis dashboard cache so balance updates immediately on UI refresh
+    // Flush cache so UI gets the new balance immediately
     await clearCachePattern("teacher:dashboard:*").catch(() => {});
     await clearCachePattern("institute:*").catch(() => {});
   }
 
-  // 2. Insert Log Row into BOTH MongoDB AND Supabase Database Table 'whatsapp_logs'
+  // 2. Insert Log Row into BOTH Supabase Database Table 'whatsapp_logs' AND MongoDB
   if (cleanInstId && cleanInstId !== "admin_test") {
-    // A. Create MongoDB Log Document
+    // A. Insert into Supabase Database Table 'whatsapp_logs'
+    try {
+      const logPayload = {
+        institute_id: cleanInstId,
+        institute: cleanInstId,
+        to: cleanTo,
+        recipient: cleanTo,
+        message_text: messageText || "WhatsApp Message",
+        msg_type: validMsgType,
+        status: statusVal,
+        cost: costVal,
+        error: errMessage || "",
+        created_at: new Date().toISOString(),
+      };
+
+      const { error: sbErr1 } = await supabase.from("whatsapp_logs").insert([logPayload]);
+      if (sbErr1) {
+        console.warn("[Supabase whatsapp_logs insert warning 1]:", sbErr1.message);
+        const { error: sbErr2 } = await supabase.from("whatsapp_logs").insert([{
+          institute_id: cleanInstId,
+          to: cleanTo,
+          message_text: messageText || "WhatsApp Message",
+          msg_type: validMsgType,
+          status: statusVal,
+          cost: costVal,
+          error: errMessage || ""
+        }]);
+        if (sbErr2) {
+          console.warn("[Supabase whatsapp_logs insert warning 2]:", sbErr2.message);
+        }
+      }
+    } catch (sbLogErr) {
+      console.error("[Supabase whatsapp_logs insert exception]", sbLogErr.message);
+    }
+
+    // B. Create MongoDB Log Document
     try {
       await WhatsappLog.create({
         institute: cleanInstId,
@@ -117,31 +184,6 @@ const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, ms
       });
     } catch (mongoLogErr) {
       console.warn("[MongoDB WhatsappLog Warning]", mongoLogErr.message);
-    }
-
-    // B. Insert Row into Supabase Database Table 'whatsapp_logs'
-    try {
-      const logPayload = {
-        institute_id: cleanInstId,
-        institute: cleanInstId,
-        to: cleanTo,
-        recipient: cleanTo,
-        message_text: messageText || "WhatsApp Message",
-        messageText: messageText || "WhatsApp Message",
-        msg_type: validMsgType,
-        msgType: validMsgType,
-        status: statusVal,
-        cost: costVal,
-        error: errMessage || "",
-        created_at: new Date().toISOString(),
-      };
-
-      const { error: sbErr1 } = await supabase.from("whatsapp_logs").insert([logPayload]);
-      if (sbErr1) {
-        await supabase.from("whatsapplogs").insert([logPayload]).catch(() => {});
-      }
-    } catch (sbLogErr) {
-      console.warn("[Supabase WhatsappLog Table Insert Warning]", sbLogErr.message);
     }
   }
 };
