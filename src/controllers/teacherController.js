@@ -1632,15 +1632,16 @@ export const getTestResults = async (req, res) => {
 
     if (req.query.studentId) {
       query.student = req.query.studentId;
-      const studentObj = await Student.findById(req.query.studentId).select("joinedOn");
-      if (studentObj && studentObj.joinedOn) {
-        query.examDate = { $gte: studentObj.joinedOn };
-      }
     }
 
-    let results = await TestResult.find(query)
-      .sort({ createdAt: -1 })
-      .populate("student", "name enrollmentNumber email");
+    let results = [];
+    try {
+      results = await TestResult.find(query)
+        .sort({ createdAt: -1 })
+        .populate("student", "name enrollmentNumber email");
+    } catch (dbErr) {
+      console.warn("MongoDB TestResult.find warning:", dbErr.message);
+    }
 
     if (req.user.role === "teacher") {
       const ownerId = rawInst?.adminUser ? String(rawInst.adminUser) : String(req.user._id || req.user.id || "");
@@ -1681,7 +1682,112 @@ export const getTestResults = async (req, res) => {
       });
     }
 
-    return res.json(results);
+    // Format MongoDB results so absent scores are consistent
+    const formattedMongoResults = (results || []).map((item) => {
+      const doc = typeof item.toObject === "function" ? item.toObject() : (typeof item.toJSON === "function" ? item.toJSON() : { ...item });
+      const sc = doc.score ?? doc.marksObtained;
+      const isAbsent = doc.isAbsent === true || sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent" || String(sc).toLowerCase() === "a";
+      return {
+        ...doc,
+        score: isAbsent ? "Absent" : Number(sc || 0),
+        marksObtained: isAbsent ? "Absent" : Number(sc || 0),
+        isAbsent,
+      };
+    });
+
+    // Also fetch from Supabase test_marks table
+    let supabaseResults = [];
+    try {
+      const { supabase: sb } = await import("../utils/supabase.js");
+      const { readTestsMetadata } = await import("../utils/supabaseModel.js");
+      const testsMeta = readTestsMetadata() || {};
+
+      const { data: supabaseRows, error: sbErr } = await sb
+        .from("test_marks")
+        .select("*")
+        .eq("institute_id", String(instituteId));
+
+      if (!sbErr && Array.isArray(supabaseRows)) {
+        const targetStudentId = req.query.studentId ? String(req.query.studentId).trim().toLowerCase() : null;
+
+        for (const row of supabaseRows) {
+          const marksObj = row.marks && typeof row.marks === "object" ? row.marks : {};
+          const meta = testsMeta[row.id] || {};
+
+          if (targetStudentId) {
+            let matchedKey = null;
+            for (const k of Object.keys(marksObj)) {
+              if (k.trim().toLowerCase() === targetStudentId) {
+                matchedKey = k;
+                break;
+              }
+            }
+
+            if (matchedKey !== null) {
+              const val = marksObj[matchedKey];
+              const isAbsent = val === -1 || Number(val) === -1 || String(val).toLowerCase() === "absent" || String(val).toLowerCase() === "a";
+              const scoreVal = isAbsent ? "Absent" : Number(val || 0);
+
+              supabaseResults.push({
+                _id: `${row.id}_${matchedKey}`,
+                id: `${row.id}_${matchedKey}`,
+                testId: row.id,
+                title: row.test_name,
+                testName: row.test_name,
+                subject: meta.subject || "General",
+                testType: meta.testType || "Unit Test",
+                chapter: meta.chapter || "",
+                totalMarks: Number(row.max_marks || 100),
+                maxMarks: Number(row.max_marks || 100),
+                examDate: row.test_date,
+                date: row.test_date,
+                score: scoreVal,
+                marksObtained: scoreVal,
+                isAbsent,
+                student: matchedKey,
+                studentId: matchedKey,
+                batch: row.batch_id,
+                batch_id: row.batch_id,
+                createdAt: row.created_at || row.test_date,
+              });
+            }
+          } else {
+            for (const [stKey, val] of Object.entries(marksObj)) {
+              const isAbsent = val === -1 || Number(val) === -1 || String(val).toLowerCase() === "absent" || String(val).toLowerCase() === "a";
+              const scoreVal = isAbsent ? "Absent" : Number(val || 0);
+
+              supabaseResults.push({
+                _id: `${row.id}_${stKey}`,
+                id: `${row.id}_${stKey}`,
+                testId: row.id,
+                title: row.test_name,
+                testName: row.test_name,
+                subject: meta.subject || "General",
+                testType: meta.testType || "Unit Test",
+                chapter: meta.chapter || "",
+                totalMarks: Number(row.max_marks || 100),
+                maxMarks: Number(row.max_marks || 100),
+                examDate: row.test_date,
+                date: row.test_date,
+                score: scoreVal,
+                marksObtained: scoreVal,
+                isAbsent,
+                student: stKey,
+                studentId: stKey,
+                batch: row.batch_id,
+                batch_id: row.batch_id,
+                createdAt: row.created_at || row.test_date,
+              });
+            }
+          }
+        }
+      }
+    } catch (sbEx) {
+      console.warn("Supabase test_marks fetch warning:", sbEx.message);
+    }
+
+    const combined = [...formattedMongoResults, ...supabaseResults];
+    return res.json(combined);
   } catch (error) {
     console.error("getTestResults error:", error);
     return res.status(500).json({ message: "Could not fetch test results" });

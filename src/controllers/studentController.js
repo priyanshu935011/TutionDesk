@@ -2366,15 +2366,18 @@ export const getStudentTestMarks = async (req, res) => {
       } catch (_) {}
       const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
 
-      const rawTestResults = await TestResult.find({
-        $or: [
-          { student: student._id },
-          { student: stIdStr },
-          { student_id: stIdStr },
-          { studentId: stIdStr },
-          { enrollmentNumber: student.enrollmentNumber }
-        ]
-      }).sort({ createdAt: -1 });
+      let rawTestResults = [];
+      try {
+        rawTestResults = await TestResult.find({
+          $or: [
+            { student: student._id },
+            { student: stIdStr },
+            { student_id: stIdStr },
+            { studentId: stIdStr },
+            { enrollmentNumber: student.enrollmentNumber }
+          ]
+        }).sort({ createdAt: -1 });
+      } catch (_) {}
 
       const filteredTestResults = (rawTestResults || [])
         .filter((t) => {
@@ -2385,14 +2388,70 @@ export const getStudentTestMarks = async (req, res) => {
         .map((t) => {
           const doc = typeof t.toObject === "function" ? t.toObject() : (typeof t.toJSON === "function" ? t.toJSON() : { ...t });
           const sc = doc.score ?? doc.marksObtained;
-          if (sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent") {
+          const isAbsent = doc.isAbsent === true || sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent" || String(sc).toLowerCase() === "a";
+          if (isAbsent) {
             doc.score = "Absent";
             doc.marksObtained = "Absent";
+            doc.isAbsent = true;
           }
           return doc;
         });
 
-      testResultsMap[stIdStr] = filteredTestResults;
+      let sbResults = [];
+      try {
+        const { supabase: sb } = await import("../utils/supabase.js");
+        const { readTestsMetadata } = await import("../utils/supabaseModel.js");
+        const testsMeta = readTestsMetadata() || {};
+
+        const { data: supabaseRows } = await sb
+          .from("test_marks")
+          .select("*")
+          .in("institute_id", cleanInstIds.map(String));
+
+        if (Array.isArray(supabaseRows)) {
+          const stEnrStr = String(student.enrollmentNumber || "").trim().toLowerCase();
+          const targetIdLower = stIdStr.toLowerCase();
+
+          for (const row of supabaseRows) {
+            const marksObj = row.marks && typeof row.marks === "object" ? row.marks : {};
+            const meta = testsMeta[row.id] || {};
+
+            for (const [k, val] of Object.entries(marksObj)) {
+              const kLower = String(k).trim().toLowerCase();
+              if (kLower === targetIdLower || (stEnrStr && kLower === stEnrStr)) {
+                const isAbsent = val === -1 || Number(val) === -1 || String(val).toLowerCase() === "absent" || String(val).toLowerCase() === "a";
+                const scoreVal = isAbsent ? "Absent" : Number(val || 0);
+
+                sbResults.push({
+                  _id: `${row.id}_${stIdStr}`,
+                  id: `${row.id}_${stIdStr}`,
+                  testId: row.id,
+                  title: row.test_name,
+                  testName: row.test_name,
+                  subject: meta.subject || "General",
+                  testType: meta.testType || "Unit Test",
+                  chapter: meta.chapter || "",
+                  totalMarks: Number(row.max_marks || 100),
+                  maxMarks: Number(row.max_marks || 100),
+                  examDate: row.test_date,
+                  date: row.test_date,
+                  score: scoreVal,
+                  marksObtained: scoreVal,
+                  isAbsent,
+                  student: stIdStr,
+                  studentId: stIdStr,
+                  batch: row.batch_id,
+                  batch_id: row.batch_id,
+                  createdAt: row.created_at || row.test_date,
+                });
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      testResultsMap[stIdStr] = [...filteredTestResults, ...sbResults];
     }
 
     return res.json({
@@ -3001,12 +3060,66 @@ export const getStudentPortalData = async (req, res) => {
           .map((t) => {
             const doc = typeof t.toObject === "function" ? t.toObject() : (typeof t.toJSON === "function" ? t.toJSON() : { ...t });
             const sc = doc.score ?? doc.marksObtained;
-            if (sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent") {
+            const isAbsent = doc.isAbsent === true || sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent" || String(sc).toLowerCase() === "a";
+            if (isAbsent) {
               doc.score = "Absent";
               doc.marksObtained = "Absent";
+              doc.isAbsent = true;
             }
             return doc;
           });
+
+        try {
+          const { supabase: sb } = await import("../utils/supabase.js");
+          const { readTestsMetadata } = await import("../utils/supabaseModel.js");
+          const testsMeta = readTestsMetadata() || {};
+
+          const { data: supabaseRows } = await sb
+            .from("test_marks")
+            .select("*")
+            .eq("institute_id", String(instituteId));
+
+          if (Array.isArray(supabaseRows)) {
+            const stEnrStr = String(student.enrollmentNumber || "").trim().toLowerCase();
+
+            for (const row of supabaseRows) {
+              const marksObj = row.marks && typeof row.marks === "object" ? row.marks : {};
+              const meta = testsMeta[row.id] || {};
+
+              for (const [k, val] of Object.entries(marksObj)) {
+                const kLower = String(k).trim().toLowerCase();
+                if (kLower === currentStudentIdStr || (stEnrStr && kLower === stEnrStr)) {
+                  const isAbsent = val === -1 || Number(val) === -1 || String(val).toLowerCase() === "absent" || String(val).toLowerCase() === "a";
+                  const scoreVal = isAbsent ? "Absent" : Number(val || 0);
+
+                  batchTestResults.push({
+                    _id: `${row.id}_${currentStudentIdStr}`,
+                    id: `${row.id}_${currentStudentIdStr}`,
+                    testId: row.id,
+                    title: row.test_name,
+                    testName: row.test_name,
+                    subject: meta.subject || "General",
+                    testType: meta.testType || "Unit Test",
+                    chapter: meta.chapter || "",
+                    totalMarks: Number(row.max_marks || 100),
+                    maxMarks: Number(row.max_marks || 100),
+                    examDate: row.test_date,
+                    date: row.test_date,
+                    score: scoreVal,
+                    marksObtained: scoreVal,
+                    isAbsent,
+                    student: currentStudentIdStr,
+                    studentId: currentStudentIdStr,
+                    batch: row.batch_id,
+                    batch_id: row.batch_id,
+                    createdAt: row.created_at || row.test_date,
+                  });
+                  break;
+                }
+              }
+            }
+          }
+        } catch (_) {}
         const studentNotices = notices || [];
 
         const now = new Date();
