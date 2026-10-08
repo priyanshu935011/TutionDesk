@@ -3,8 +3,7 @@ import mongoose from "../utils/supabaseModel.js";
 const whatsappLogSchema = new mongoose.Schema(
   {
     institute: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Institute",
+      type: mongoose.Schema.Types.Mixed,
       required: true,
     },
     to: {

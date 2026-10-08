@@ -1,14 +1,76 @@
 import SystemSetting from "../models/SystemSetting.js";
 import Institute from "../models/Institute.js";
 import WhatsappLog from "../models/WhatsappLog.js";
+import { clearCachePattern } from "../utils/cache.js";
 
 // Helper to format phone number to E.164 format without '+' or special characters
 const formatPhoneNumber = (to) => {
-  let cleanNumber = String(to).replace(/\D/g, "");
+  let cleanNumber = String(to || "").replace(/\D/g, "");
   if (!cleanNumber.startsWith("91") && cleanNumber.length === 10) {
     cleanNumber = "91" + cleanNumber;
   }
   return cleanNumber;
+};
+
+const getCleanInstId = (rawId) => {
+  if (!rawId) return "";
+  if (typeof rawId === "string") return rawId.trim();
+  if (typeof rawId === "object") {
+    return String(rawId._id || rawId.id || rawId.instituteId || "").trim();
+  }
+  return String(rawId).trim();
+};
+
+const findInstituteDoc = async (instituteId) => {
+  const instIdStr = getCleanInstId(instituteId);
+  if (!instIdStr || instIdStr === "admin_test") return null;
+  try {
+    let inst = await Institute.findById(instIdStr);
+    if (!inst) {
+      inst = await Institute.findOne({
+        $or: [
+          { _id: instIdStr },
+          { id: instIdStr },
+          { adminUser: instIdStr }
+        ]
+      });
+    }
+    return inst;
+  } catch (e) {
+    try {
+      return await Institute.findOne({ adminUser: instIdStr });
+    } catch (_) {
+      return null;
+    }
+  }
+};
+
+const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, msgType, isSuccess, errMessage = "") => {
+  const cleanInstId = inst?._id || getCleanInstId(instituteId);
+  if (inst && isSuccess && charge > 0) {
+    try {
+      inst.walletBalance = Math.max(0, Number(inst.walletBalance || 0) - charge);
+      await inst.save();
+    } catch (_) {
+      try {
+        await Institute.updateOne({ _id: inst._id }, { $inc: { walletBalance: -charge } });
+      } catch (e2) {}
+    }
+    await clearCachePattern("teacher:dashboard:*").catch(() => {});
+  }
+
+  if (cleanInstId && cleanInstId !== "admin_test") {
+    const validMsgType = ["absent_alert", "fee_reminder", "test_mark", "custom"].includes(msgType) ? msgType : "custom";
+    await WhatsappLog.create({
+      institute: cleanInstId,
+      to: formatPhoneNumber(to),
+      messageText: messageText || "WhatsApp Message",
+      msgType: validMsgType,
+      status: isSuccess ? "sent" : "failed",
+      cost: isSuccess ? charge : 0,
+      error: errMessage || "",
+    }).catch((logErr) => console.error("[WhatsappLog Save Warning]", logErr.message));
+  }
 };
 
 // Retrieve global Meta WhatsApp Cloud API credentials
@@ -51,17 +113,8 @@ export const logoutSession = async (instituteId) => {
 
 export const sendMessage = async (instituteId, to, text, msgType = "custom", templateConfig = null) => {
   const cleanNumber = formatPhoneNumber(to);
-  let inst = null;
-  let charge = 0.10;
-
-  if (instituteId !== "admin_test" && instituteId) {
-    try {
-      inst = await Institute.findById(instituteId);
-    } catch (e) {
-      inst = null;
-    }
-    charge = inst?.perMessageCharge ?? 0.10;
-  }
+  const inst = await findInstituteDoc(instituteId);
+  const charge = Number(inst?.perMessageCharge ?? 0.10);
 
   const creds = await getMetaCredentials();
   const { accessToken, phoneNumberId, languageCode } = creds;
@@ -127,34 +180,12 @@ export const sendMessage = async (instituteId, to, text, msgType = "custom", tem
       throw new Error(data.error?.message || "Meta API response error");
     }
 
-    if (inst) {
-      inst.walletBalance = Math.max(0, (inst.walletBalance || 0) - charge);
-      await inst.save().catch(() => {});
-    }
-
-    await WhatsappLog.create({
-      institute: instituteId,
-      to: cleanNumber,
-      messageText: text,
-      msgType,
-      status: "sent",
-      cost: charge
-    }).catch(() => {});
+    await recordLogAndDeduct(instituteId, inst, charge, cleanNumber, text, msgType, true);
 
     return { success: true, messageId: data.messages?.[0]?.id || "wa_id_sent" };
   } catch (err) {
     console.warn(`Meta WhatsApp send fallback to ${cleanNumber}:`, err.message);
-    if (instituteId !== "admin_test") {
-      await WhatsappLog.create({
-        institute: instituteId,
-        to: cleanNumber,
-        messageText: text,
-        msgType,
-        status: "sent",
-        cost: 0,
-        error: `Simulated/Fallback: ${err.message}`
-      }).catch(() => {});
-    }
+    await recordLogAndDeduct(instituteId, inst, 0, cleanNumber, text, msgType, false, `Simulated/Fallback: ${err.message}`);
     return { success: true, simulated: true, message: "WhatsApp message sent successfully." };
   }
 };
@@ -223,17 +254,8 @@ export const sendDocument = async (instituteId, to, fileBuffer, fileName, captio
 
 export const sendTemplateMessage = async (instituteId, to, templateName, parameters) => {
   const cleanNumber = formatPhoneNumber(to);
-  let inst = null;
-  let charge = 0.10;
-
-  if (instituteId !== "admin_test" && instituteId) {
-    try {
-      inst = await Institute.findById(instituteId);
-    } catch (e) {
-      inst = null;
-    }
-    charge = inst?.perMessageCharge ?? 0.10;
-  }
+  const inst = await findInstituteDoc(instituteId);
+  const charge = Number(inst?.perMessageCharge ?? 0.10);
 
   const creds = await getMetaCredentials();
   const { accessToken, phoneNumberId, languageCode } = creds;
@@ -276,39 +298,16 @@ export const sendTemplateMessage = async (instituteId, to, templateName, paramet
       throw new Error(data.error?.message || "Failed to send WhatsApp template message via Meta API");
     }
 
-    if (instituteId !== "admin_test" && inst) {
-      inst.walletBalance = Math.max(0, (inst.walletBalance || 0) - charge);
-      await inst.save().catch(() => {});
-
-      await WhatsappLog.create({
-        institute: instituteId,
-        to: cleanNumber,
-        messageText: `Template: ${templateName} | Parameters: ${JSON.stringify(parameters)}`,
-        msgType: "template",
-        status: "sent",
-        cost: charge
-      }).catch(() => {});
-    }
+    await recordLogAndDeduct(instituteId, inst, charge, cleanNumber, `Template: ${templateName}`, "custom", true);
 
     return { success: true, messageId: data.messages?.[0]?.id };
   } catch (err) {
     console.warn(`Meta WhatsApp template fallback to ${cleanNumber}:`, err.message);
-    if (instituteId !== "admin_test") {
-      await WhatsappLog.create({
-        institute: instituteId,
-        to: cleanNumber,
-        messageText: `Template: ${templateName} | Parameters: ${JSON.stringify(parameters)}`,
-        msgType: "template",
-        status: "sent",
-        cost: 0,
-        error: `Simulated/Fallback: ${err.message}`
-      }).catch(() => {});
-    }
+    await recordLogAndDeduct(instituteId, inst, 0, cleanNumber, `Template: ${templateName}`, "custom", false, `Simulated/Fallback: ${err.message}`);
     return { success: true, simulated: true, message: "WhatsApp template message sent successfully." };
   }
 };
 
 export const reconnectAllSessions = async () => {
-  // Baileys auto-reconnect is deprecated since we use the centralized Meta API.
   return;
 };
