@@ -2374,6 +2374,20 @@ export const updateInstituteUpi = async (req, res) => {
       return res.status(403).json({ message: "Hired teachers are not allowed to update institute UPI ID" });
     }
 
+    const rawInst = req.user.institute;
+    let instId = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instId = String(rawInst._id || rawInst.id || "");
+      } else {
+        instId = String(rawInst);
+      }
+    }
+    if (!instId && req.user.institute_id) {
+      instId = String(req.user.institute_id);
+    }
+    const instituteId = instId || req.user.institute?._id || req.user.institute;
+
     const { upiId } = req.body;
     let cleanUpiId = (upiId || "").trim();
     const paMatch = cleanUpiId.match(/pa=([^&\s]+)/i);

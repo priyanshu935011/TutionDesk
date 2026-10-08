@@ -327,6 +327,7 @@ export const createInstitute = async (req, res) => {
       studentPortalEnabled,
       recordedLecturesFeatureEnabled,
       releaseVideosFeatureEnabled,
+      maxVideoStorageGb,
       maxLeadFileSizeMb,
     } = req.body;
 
@@ -380,6 +381,7 @@ export const createInstitute = async (req, res) => {
       quizFeatureEnabled: quizFeatureEnabled !== false,
       recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== false,
       releaseVideosFeatureEnabled: releaseVideosFeatureEnabled !== false,
+      maxVideoStorageGb: maxVideoStorageGb !== undefined ? Number(maxVideoStorageGb) : 50,
       maxLeadFileSizeMb: Number(maxLeadFileSizeMb || 10),
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
@@ -456,6 +458,7 @@ export const updateInstitute = async (req, res) => {
       studentPortalEnabled,
       recordedLecturesFeatureEnabled,
       releaseVideosFeatureEnabled,
+      maxVideoStorageGb,
       maxLeadFileSizeMb,
     } = req.body;
 
@@ -481,6 +484,7 @@ export const updateInstitute = async (req, res) => {
     if (studentCustomFields !== undefined) institute.studentCustomFields = Array.isArray(studentCustomFields) ? studentCustomFields : [];
     if (studentPortalEnabled !== undefined) institute.studentPortalEnabled = Boolean(studentPortalEnabled);
     if (maxLeadFileSizeMb !== undefined) institute.maxLeadFileSizeMb = Number(maxLeadFileSizeMb);
+    if (maxVideoStorageGb !== undefined) institute.maxVideoStorageGb = Number(maxVideoStorageGb);
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
     if (recordedLecturesFeatureEnabled !== undefined) institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
     if (releaseVideosFeatureEnabled !== undefined) institute.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
