@@ -2660,14 +2660,6 @@ export const getStudentVideos = async (req, res) => {
           { createdBy: { $in: cleanInstIds } }
         ],
         isArchived: { $ne: true },
-        $or: [
-          { targetType: "all" },
-          { targetType: "batch", batches: { $in: activeStudentBatchIds } },
-          { targetType: "batch", batch: { $in: activeStudentBatchIds } },
-          { targetType: "student", students: studentId },
-          { targetType: null },
-          { targetType: "" },
-        ],
       }).sort({ createdAt: -1 });
 
       videosList.push(...rawVideos);
@@ -2740,16 +2732,35 @@ export const getStudentVideos = async (req, res) => {
 
         // Target audience check if not explicitly released
         if (!videoHasValidReleaseMap.has(vIdStr) && !directVideoIds.has(vIdStr)) {
-          const targetType = (vObj.targetType || vObj.target_type || "").toLowerCase();
+          const targetType = (
+            vObj.targetAudienceType ||
+            vObj.targetType ||
+            vObj.target_type ||
+            ""
+          ).toLowerCase().trim();
+
+          const meta = vObj.targetAudienceMetadata && typeof vObj.targetAudienceMetadata === "object" ? vObj.targetAudienceMetadata : {};
+
           if (targetType === "student") {
-            const stList = [...(vObj.students || []), ...(vObj.student_ids || [])].map((s) => String(s._id || s.id || s));
-            if (!stList.includes(stIdStr)) continue;
+            const stList = [
+              ...(vObj.students || []),
+              ...(vObj.student_ids || []),
+              ...(Array.isArray(meta.studentIds) ? meta.studentIds : []),
+              ...(Array.isArray(meta.selectedStudentIds) ? meta.selectedStudentIds : []),
+              ...(meta.studentId ? [meta.studentId] : [])
+            ].map((s) => String(s._id || s.id || s));
+
+            if (stList.length > 0 && !stList.includes(stIdStr)) continue;
           } else if (targetType === "batch") {
             const videoBatchIds = [];
             if (vObj.batch_id) videoBatchIds.push(String(vObj.batch_id));
             if (vObj.batch) videoBatchIds.push(String(vObj.batch._id || vObj.batch.id || vObj.batch));
             if (Array.isArray(vObj.batch_ids)) vObj.batch_ids.forEach((b) => videoBatchIds.push(String(b)));
             if (Array.isArray(vObj.batches)) vObj.batches.forEach((b) => videoBatchIds.push(String(b._id || b.id || b)));
+            if (Array.isArray(meta.batchIds)) meta.batchIds.forEach((b) => videoBatchIds.push(String(b)));
+            if (Array.isArray(meta.selectedBatchIds)) meta.selectedBatchIds.forEach((b) => videoBatchIds.push(String(b)));
+            if (meta.batchId) videoBatchIds.push(String(meta.batchId));
+            if (meta.selectedBatchId) videoBatchIds.push(String(meta.selectedBatchId));
 
             const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
             if (cleanVideoBatchIds.length > 0 && activeBatchIdsSet.size > 0) {
