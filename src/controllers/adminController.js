@@ -13,7 +13,8 @@ import Notice from "../models/Notice.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
-import { sendMessage, sendTemplateMessage } from "../services/whatsappService.js";
+import { sendMessage, sendTemplateMessage, getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
+import { supabase } from "../utils/supabase.js";
 import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
 import redisClient from "../config/redis.js";
@@ -66,8 +67,16 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
     }
   });
 
+  const instIdStr = String(institute._id || institute.id || "").trim();
+  const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
+  const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.10);
+
+  const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
+  instObj.walletBalance = liveBal;
+  instObj.perMessageCharge = liveRate;
+
   return {
-    ...institute.toObject(),
+    ...instObj,
     studentCount: activeStudentCount,
     activeStudentCount,
     archivedStudentCount,
@@ -1199,8 +1208,15 @@ export const getInstituteFullAnalytics = async (req, res) => {
       console.error("Error computing whatsappAnalytics:", e);
     }
 
+    const instIdStr = String(institute._id || institute.id || id).trim();
+    const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
+    const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.10);
+    const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
+    instObj.walletBalance = liveBal;
+    instObj.perMessageCharge = liveRate;
+
     return res.json({
-      institute: institute.toObject ? institute.toObject() : institute,
+      institute: instObj,
       adminUser,
       teachers,
       batches,
@@ -1812,26 +1828,77 @@ export const sendWhatsAppTestMessage = async (req, res) => {
 
 export const topupInstituteWallet = async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, walletBalance, newBalance } = req.body;
     const { id } = req.params;
+    const instIdStr = String(id || "").trim();
 
-    if (amount === undefined || Number(amount) <= 0) {
-      return res.status(400).json({ message: "Topup amount must be greater than 0." });
+    if (!instIdStr) {
+      return res.status(400).json({ message: "Institute ID is required." });
     }
 
-    const institute = await Institute.findById(id);
+    const currentBalance = await getInstituteWalletBalance(instIdStr, 0);
+
+    let updatedBalance;
+    if (newBalance !== undefined && !isNaN(Number(newBalance))) {
+      updatedBalance = Number(newBalance);
+    } else if (walletBalance !== undefined && !isNaN(Number(walletBalance))) {
+      updatedBalance = Number(walletBalance);
+    } else if (amount !== undefined && !isNaN(Number(amount))) {
+      if (Number(amount) <= 0) {
+        return res.status(400).json({ message: "Topup amount must be greater than 0." });
+      }
+      updatedBalance = currentBalance + Number(amount);
+    } else {
+      return res.status(400).json({ message: "Valid amount or wallet balance is required." });
+    }
+
+    // 1. Update Supabase 'institutes' database table directly
+    try {
+      const { error: sbErr1 } = await supabase
+        .from("institutes")
+        .update({ wallet_balance: updatedBalance, walletBalance: updatedBalance })
+        .eq("id", instIdStr);
+
+      if (sbErr1) {
+        await supabase
+          .from("institutes")
+          .update({ wallet_balance: updatedBalance, walletBalance: updatedBalance })
+          .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`);
+      }
+    } catch (sbErr) {
+      console.error("[Supabase topupInstituteWallet Error]", sbErr.message);
+    }
+
+    // 2. Also update MongoDB document if available
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      try {
+        institute = await Institute.findById(instIdStr);
+      } catch (_) {}
+    }
     if (!institute) {
-      return res.status(404).json({ message: "Institute not found." });
+      try {
+        institute = await Institute.findOne({
+          $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+        });
+      } catch (_) {}
     }
 
-    institute.walletBalance = (institute.walletBalance || 0) + Number(amount);
-    await institute.save();
+    if (institute) {
+      institute.walletBalance = updatedBalance;
+      await institute.save();
+    }
 
-    await logActivity(req.user._id, "Wallet Topup", `Manually topped up institute ${institute.name} with INR ${amount}`, req.ip);
+    await clearCachePattern("teacher:dashboard:*").catch(() => {});
+    await clearCachePattern("institute:*").catch(() => {});
+
+    try {
+      await logActivity(req.user._id, "Wallet Topup", `Updated wallet balance for institute ${instIdStr} to INR ${updatedBalance}`, req.ip);
+    } catch (_) {}
 
     return res.json({
-      message: "Wallet topped up successfully!",
-      walletBalance: institute.walletBalance,
+      message: "Wallet topped up successfully in table!",
+      walletBalance: updatedBalance,
     });
   } catch (error) {
     console.error("topupInstituteWallet error:", error);
@@ -1841,26 +1908,65 @@ export const topupInstituteWallet = async (req, res) => {
 
 export const updateInstituteMessageCharge = async (req, res) => {
   try {
-    const { charge } = req.body;
+    const { charge, perMessageCharge, rate } = req.body;
     const { id } = req.params;
+    const instIdStr = String(id || "").trim();
 
-    if (charge === undefined || Number(charge) < 0) {
+    const rawRate = charge ?? perMessageCharge ?? rate;
+    if (rawRate === undefined || isNaN(Number(rawRate)) || Number(rawRate) < 0) {
       return res.status(400).json({ message: "Per message charge must be 0 or higher." });
     }
 
-    const institute = await Institute.findById(id);
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found." });
+    const newCharge = Number(rawRate);
+
+    // 1. Update Supabase 'institutes' database table directly
+    try {
+      const { error: sbErr1 } = await supabase
+        .from("institutes")
+        .update({ per_message_charge: newCharge, perMessageCharge: newCharge })
+        .eq("id", instIdStr);
+
+      if (sbErr1) {
+        await supabase
+          .from("institutes")
+          .update({ per_message_charge: newCharge, perMessageCharge: newCharge })
+          .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`);
+      }
+    } catch (sbErr) {
+      console.error("[Supabase updateInstituteMessageCharge Error]", sbErr.message);
     }
 
-    institute.perMessageCharge = Number(charge);
-    await institute.save();
+    // 2. Also update MongoDB document if available
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      try {
+        institute = await Institute.findById(instIdStr);
+      } catch (_) {}
+    }
+    if (!institute) {
+      try {
+        institute = await Institute.findOne({
+          $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+        });
+      } catch (_) {}
+    }
 
-    await logActivity(req.user._id, "Message Charge Update", `Set message charge for ${institute.name} to INR ${charge}`, req.ip);
+    if (institute) {
+      institute.perMessageCharge = newCharge;
+      await institute.save();
+    }
+
+    await clearCachePattern("teacher:dashboard:*").catch(() => {});
+    await clearCachePattern("institute:*").catch(() => {});
+
+    try {
+      await logActivity(req.user._id, "Message Charge Update", `Set message charge for institute ${instIdStr} to INR ${newCharge}`, req.ip);
+    } catch (_) {}
 
     return res.json({
-      message: "Per-message rate updated successfully!",
-      perMessageCharge: institute.perMessageCharge,
+      message: "Per-message rate updated successfully in table!",
+      perMessageCharge: newCharge,
+      charge: newCharge,
     });
   } catch (error) {
     console.error("updateInstituteMessageCharge error:", error);

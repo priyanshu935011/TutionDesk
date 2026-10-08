@@ -104,6 +104,50 @@ export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
   return Number(fallback || 0);
 };
 
+export const getInstituteMessageCharge = async (instituteId, fallback = 0.10) => {
+  const instIdStr = getCleanInstId(instituteId);
+  if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0.10);
+
+  // 1. Direct fetch from Supabase table 'institutes'
+  try {
+    const { data: sbInstList } = await supabase
+      .from("institutes")
+      .select("per_message_charge, perMessageCharge, id, _id, admin_user, adminUser")
+      .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`)
+      .limit(1);
+
+    if (sbInstList && sbInstList.length > 0) {
+      const sbInst = sbInstList[0];
+      const c = sbInst.per_message_charge ?? sbInst.perMessageCharge;
+      if (c !== null && c !== undefined && !isNaN(Number(c))) {
+        return Number(c);
+      }
+    }
+  } catch (_) {}
+
+  // 2. Fallback to MongoDB Institute document
+  try {
+    let inst = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      inst = await Institute.findById(instIdStr).select("perMessageCharge");
+    }
+    if (!inst) {
+      inst = await Institute.findOne({
+        $or: [
+          { _id: instIdStr },
+          { id: instIdStr },
+          { adminUser: instIdStr }
+        ]
+      }).select("perMessageCharge");
+    }
+    if (inst && inst.perMessageCharge !== undefined && inst.perMessageCharge !== null) {
+      return Number(inst.perMessageCharge);
+    }
+  } catch (_) {}
+
+  return Number(fallback || 0.10);
+};
+
 const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, msgType, isSuccess, errMessage = "") => {
   const cleanInstId = String(inst?._id || inst?.id || getCleanInstId(instituteId) || "").trim();
   const cleanTo = formatPhoneNumber(to);
@@ -243,7 +287,7 @@ export const logoutSession = async (instituteId) => {
 export const sendMessage = async (instituteId, to, text, msgType = "custom", templateConfig = null) => {
   const cleanNumber = formatPhoneNumber(to);
   const inst = await findInstituteDoc(instituteId);
-  const charge = Number(inst?.perMessageCharge ?? 0.10);
+  const charge = await getInstituteMessageCharge(instituteId, inst?.perMessageCharge ?? 0.10);
 
   const creds = await getMetaCredentials();
   const { accessToken, phoneNumberId, languageCode } = creds;
@@ -384,7 +428,7 @@ export const sendDocument = async (instituteId, to, fileBuffer, fileName, captio
 export const sendTemplateMessage = async (instituteId, to, templateName, parameters) => {
   const cleanNumber = formatPhoneNumber(to);
   const inst = await findInstituteDoc(instituteId);
-  const charge = Number(inst?.perMessageCharge ?? 0.10);
+  const charge = await getInstituteMessageCharge(instituteId, inst?.perMessageCharge ?? 0.10);
 
   const creds = await getMetaCredentials();
   const { accessToken, phoneNumberId, languageCode } = creds;
