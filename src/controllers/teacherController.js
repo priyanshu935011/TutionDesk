@@ -1786,7 +1786,28 @@ export const getTestResults = async (req, res) => {
       console.warn("Supabase test_marks fetch warning:", sbEx.message);
     }
 
-    const combined = [...formattedMongoResults, ...supabaseResults];
+    const rawCombined = [...formattedMongoResults, ...supabaseResults];
+    const combined = [];
+    const seenMapKeys = new Set();
+
+    for (const item of rawCombined) {
+      if (!item) continue;
+      const stId = String(item.student?._id || item.student?.id || item.studentId || item.student || "").trim().toLowerCase();
+      const rawTitle = String(item.title || item.testName || item.test_name || "").trim().toLowerCase();
+      const cleanTitle = rawTitle.replace(/\s*\([^)]*\)/g, "").trim();
+      const rawBatchId = item.batch_id || item.batchId || (typeof item.batch === "object" ? item.batch?._id || item.batch?.id : item.batch);
+      const bId = String(rawBatchId || "").trim().toLowerCase();
+      const dateStr = item.examDate ? String(item.examDate).substring(0, 10) : (item.test_date || "");
+
+      const key = `${stId}_${cleanTitle}_${bId}_${dateStr}`;
+      if (stId && key && !seenMapKeys.has(key)) {
+        seenMapKeys.add(key);
+        combined.push(item);
+      } else if (!stId) {
+        combined.push(item);
+      }
+    }
+
     return res.json(combined);
   } catch (error) {
     console.error("getTestResults error:", error);
