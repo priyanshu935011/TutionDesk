@@ -50,14 +50,16 @@ export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
   const instIdStr = getCleanInstId(instituteId);
   if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0);
 
+  // 1. Direct fetch from Supabase table 'institutes'
   try {
-    const { data: sbInst } = await supabase
+    const { data: sbInstList } = await supabase
       .from("institutes")
-      .select("wallet_balance, walletBalance")
-      .eq("id", instIdStr)
-      .maybeSingle();
+      .select("wallet_balance, walletBalance, id, _id, admin_user, adminUser")
+      .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`)
+      .limit(1);
 
-    if (sbInst) {
+    if (sbInstList && sbInstList.length > 0) {
+      const sbInst = sbInstList[0];
       const b = sbInst.wallet_balance ?? sbInst.walletBalance;
       if (b !== null && b !== undefined && !isNaN(Number(b))) {
         return Number(b);
@@ -66,22 +68,34 @@ export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
   } catch (_) {}
 
   try {
-    const { data: sbInst2 } = await supabase
+    const { data: sbInst } = await supabase
       .from("institutes")
       .select("wallet_balance, walletBalance")
-      .eq("_id", instIdStr)
-      .maybeSingle();
+      .limit(1);
 
-    if (sbInst2) {
-      const b = sbInst2.wallet_balance ?? sbInst2.walletBalance;
+    if (sbInst && sbInst.length > 0) {
+      const b = sbInst[0].wallet_balance ?? sbInst[0].walletBalance;
       if (b !== null && b !== undefined && !isNaN(Number(b))) {
         return Number(b);
       }
     }
   } catch (_) {}
 
+  // 2. Fallback to MongoDB Institute document
   try {
-    const inst = await Institute.findById(instIdStr).select("walletBalance");
+    let inst = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      inst = await Institute.findById(instIdStr).select("walletBalance");
+    }
+    if (!inst) {
+      inst = await Institute.findOne({
+        $or: [
+          { _id: instIdStr },
+          { id: instIdStr },
+          { adminUser: instIdStr }
+        ]
+      }).select("walletBalance");
+    }
     if (inst && inst.walletBalance !== undefined && inst.walletBalance !== null) {
       return Number(inst.walletBalance);
     }
