@@ -2,6 +2,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import Institute from "../models/Institute.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import { clearCachePattern } from "../utils/cache.js";
+import { supabase } from "../utils/supabaseModel.js";
 
 // Helper to format phone number to E.164 format without '+' or special characters
 const formatPhoneNumber = (to) => {
@@ -46,30 +47,102 @@ const findInstituteDoc = async (instituteId) => {
 };
 
 const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, msgType, isSuccess, errMessage = "") => {
-  const cleanInstId = inst?._id || getCleanInstId(instituteId);
-  if (inst && isSuccess && charge > 0) {
-    try {
-      inst.walletBalance = Math.max(0, Number(inst.walletBalance || 0) - charge);
-      await inst.save();
-    } catch (_) {
-      try {
-        await Institute.updateOne({ _id: inst._id }, { $inc: { walletBalance: -charge } });
-      } catch (e2) {}
-    }
-    await clearCachePattern("teacher:dashboard:*").catch(() => {});
-  }
+  const cleanInstId = String(inst?._id || inst?.id || getCleanInstId(instituteId) || "").trim();
+  const cleanTo = formatPhoneNumber(to);
+  const validMsgType = ["absent_alert", "fee_reminder", "test_mark", "custom"].includes(msgType) ? msgType : "custom";
+  const costVal = isSuccess ? charge : 0;
+  const statusVal = isSuccess ? "sent" : "failed";
 
   if (cleanInstId && cleanInstId !== "admin_test") {
-    const validMsgType = ["absent_alert", "fee_reminder", "test_mark", "custom"].includes(msgType) ? msgType : "custom";
-    await WhatsappLog.create({
-      institute: cleanInstId,
-      to: formatPhoneNumber(to),
-      messageText: messageText || "WhatsApp Message",
-      msgType: validMsgType,
-      status: isSuccess ? "sent" : "failed",
-      cost: isSuccess ? charge : 0,
-      error: errMessage || "",
-    }).catch((logErr) => console.error("[WhatsappLog Save Warning]", logErr.message));
+    let currentBalance = 0;
+    if (inst && inst.walletBalance !== undefined && inst.walletBalance !== null) {
+      currentBalance = Number(inst.walletBalance || 0);
+    } else {
+      try {
+        const { data: sbInst } = await supabase
+          .from("institutes")
+          .select("wallet_balance, walletBalance")
+          .or(`id.eq.${cleanInstId},_id.eq.${cleanInstId}`)
+          .maybeSingle();
+        if (sbInst) {
+          currentBalance = Number(sbInst.wallet_balance ?? sbInst.walletBalance ?? 0);
+        }
+      } catch (_) {}
+    }
+
+    const newBalance = Math.max(0, currentBalance - (isSuccess ? charge : 0));
+
+    // A. Update MongoDB Institute document
+    if (inst) {
+      try {
+        inst.walletBalance = newBalance;
+        await inst.save();
+      } catch (_) {
+        try {
+          await Institute.updateOne({ _id: inst._id }, { $set: { walletBalance: newBalance } });
+        } catch (_) {}
+      }
+    }
+
+    // B. Update Supabase Database Table 'institutes'
+    try {
+      await supabase
+        .from("institutes")
+        .update({
+          wallet_balance: newBalance,
+          walletBalance: newBalance
+        })
+        .or(`id.eq.${cleanInstId},_id.eq.${cleanInstId}`);
+    } catch (sbUpErr) {
+      console.warn("[Supabase Institute Table Balance Update Warning]", sbUpErr.message);
+    }
+
+    // Clear L1/Redis dashboard cache so balance updates immediately on UI refresh
+    await clearCachePattern("teacher:dashboard:*").catch(() => {});
+    await clearCachePattern("institute:*").catch(() => {});
+  }
+
+  // 2. Insert Log Row into BOTH MongoDB AND Supabase Database Table 'whatsapp_logs'
+  if (cleanInstId && cleanInstId !== "admin_test") {
+    // A. Create MongoDB Log Document
+    try {
+      await WhatsappLog.create({
+        institute: cleanInstId,
+        to: cleanTo,
+        messageText: messageText || "WhatsApp Message",
+        msgType: validMsgType,
+        status: statusVal,
+        cost: costVal,
+        error: errMessage || "",
+      });
+    } catch (mongoLogErr) {
+      console.warn("[MongoDB WhatsappLog Warning]", mongoLogErr.message);
+    }
+
+    // B. Insert Row into Supabase Database Table 'whatsapp_logs'
+    try {
+      const logPayload = {
+        institute_id: cleanInstId,
+        institute: cleanInstId,
+        to: cleanTo,
+        recipient: cleanTo,
+        message_text: messageText || "WhatsApp Message",
+        messageText: messageText || "WhatsApp Message",
+        msg_type: validMsgType,
+        msgType: validMsgType,
+        status: statusVal,
+        cost: costVal,
+        error: errMessage || "",
+        created_at: new Date().toISOString(),
+      };
+
+      const { error: sbErr1 } = await supabase.from("whatsapp_logs").insert([logPayload]);
+      if (sbErr1) {
+        await supabase.from("whatsapplogs").insert([logPayload]).catch(() => {});
+      }
+    } catch (sbLogErr) {
+      console.warn("[Supabase WhatsappLog Table Insert Warning]", sbLogErr.message);
+    }
   }
 };
 

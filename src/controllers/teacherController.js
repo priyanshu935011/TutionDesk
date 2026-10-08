@@ -2650,6 +2650,7 @@ export const getWhatsappLogs = async (req, res) => {
     }
     const rawInst = req.user.institute;
     const instituteId = rawInst?._id || rawInst?.id || rawInst;
+    const instStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
@@ -2657,32 +2658,70 @@ export const getWhatsappLogs = async (req, res) => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    let logs = [];
+    let mongoLogs = [];
     try {
-      logs = await WhatsappLog.find({ institute: instituteId }).sort({ createdAt: -1, _id: -1 }).limit(500);
-      if ((!logs || logs.length === 0) && typeof instituteId === "object") {
-        const instStr = String(instituteId._id || instituteId.id || instituteId);
-        logs = await WhatsappLog.find({ institute: instStr }).sort({ createdAt: -1, _id: -1 }).limit(500);
-      }
+      mongoLogs = await WhatsappLog.find({
+        $or: [
+          { institute: instituteId },
+          { institute: instStr }
+        ]
+      }).sort({ createdAt: -1, _id: -1 }).limit(500).lean();
     } catch (e) {
       console.warn("WhatsappLog.find query warning:", e.message);
     }
 
-    const rawLogs = Array.isArray(logs) ? logs : [];
+    let sbLogs = [];
+    try {
+      if (instStr) {
+        const { data: d1 } = await supabase
+          .from("whatsapp_logs")
+          .select("*")
+          .or(`institute_id.eq.${instStr},institute.eq.${instStr}`)
+          .order("created_at", { ascending: false })
+          .limit(500);
 
-    const mappedLogs = rawLogs.map((l) => {
-      const doc = typeof l.toObject === "function" ? l.toObject() : { ...l };
-      return {
-        ...doc,
-        _id: doc._id || doc.id || crypto.randomUUID(),
-        recipient: doc.recipient || doc.to || "-",
-        messageText: doc.messageText || doc.message || "",
-        msgType: doc.msgType || "custom",
-        status: doc.status || "sent",
-        cost: doc.cost || 0,
-        createdAt: doc.createdAt || new Date().toISOString(),
-      };
-    });
+        if (d1 && d1.length > 0) {
+          sbLogs = d1;
+        } else {
+          const { data: d2 } = await supabase
+            .from("whatsapplogs")
+            .select("*")
+            .or(`institute_id.eq.${instStr},institute.eq.${instStr}`)
+            .order("created_at", { ascending: false })
+            .limit(500);
+          if (d2) sbLogs = d2;
+        }
+      }
+    } catch (sbErr) {
+      console.warn("Supabase whatsapp_logs fetch warning:", sbErr.message);
+    }
+
+    const rawLogs = [...(mongoLogs || []), ...(sbLogs || [])];
+    const seenLogKeys = new Set();
+    const mappedLogs = [];
+
+    for (const l of rawLogs) {
+      if (!l) continue;
+      const rec = String(l.recipient || l.to || "").trim();
+      const msg = String(l.messageText || l.message_text || l.message || "").trim();
+      const dtStr = String(l.createdAt || l.created_at || "").trim();
+      const key = `${rec}_${msg}_${dtStr.substring(0, 16)}`;
+
+      if (seenLogKeys.has(key)) continue;
+      seenLogKeys.add(key);
+
+      mappedLogs.push({
+        _id: l._id || l.id || crypto.randomUUID(),
+        recipient: rec || "-",
+        to: rec || "-",
+        messageText: msg,
+        msgType: l.msgType || l.msg_type || "custom",
+        status: l.status || "sent",
+        cost: Number(l.cost || 0),
+        error: l.error || "",
+        createdAt: dtStr || new Date().toISOString(),
+      });
+    }
 
     const totalSent = mappedLogs.filter((l) => String(l.status).toLowerCase() === "sent").length;
     const totalFailed = mappedLogs.filter((l) => String(l.status).toLowerCase() === "failed").length;

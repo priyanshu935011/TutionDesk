@@ -11,8 +11,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment", "whatsapplogs",
-  "whatsapplog", "whatsapp_logs", "whatsapp_log", "system_settings", "systemsettings",
+  "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment",
+  "system_settings", "systemsettings",
   "system_setting", "systemsetting", "contactmessages", "contact_messages", "system_logs", "systemlogs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
