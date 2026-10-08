@@ -1,17 +1,12 @@
 import express from "express";
 import multer from "multer";
 import {
-  createQuiz,
   createTestResult,
   createTestResultsBulk,
-  deleteQuiz,
   getNotes,
-  getQuizzes,
   getTeacherDashboard,
   getInstituteFeatures,
   getTestResults,
-  startQuizLive,
-  updateQuiz,
   downloadNote,
   viewNote,
   uploadNote,
@@ -21,7 +16,6 @@ import {
   getHiredTeachers,
   deleteHiredTeacher,
   updateHiredTeacher,
-  getQuizLeaderboard,
   uploadBrandingLogo,
   updateBrandingSettings,
   updateInstituteUpi,
@@ -46,13 +40,6 @@ router.get("/notes/:id/download", downloadNote);
 
 router.use(protect);
 
-const checkQuizFeature = (req, res, next) => {
-  if (req.user?.role !== "super_admin" && req.user?.institute?.quizFeatureEnabled === false) {
-    return res.status(403).json({ message: "Quiz feature is disabled for this institute" });
-  }
-  next();
-};
-
 router.get("/dashboard", getTeacherDashboard);
 router.get("/sync", getTeacherDashboard);
 router.get("/quick-summary", getQuickSummary);
@@ -61,12 +48,6 @@ router.get("/whatsapp-logs", getWhatsappLogs);
 
 // Direct DB read — no cache/Redis — for always-fresh feature gating
 router.get("/features", getInstituteFeatures);
-router.get("/quizzes", checkQuizFeature, getQuizzes);
-router.post("/quizzes", checkQuizFeature, createQuiz);
-router.put("/quizzes/:id", checkQuizFeature, updateQuiz);
-router.delete("/quizzes/:id", checkQuizFeature, deleteQuiz);
-router.post("/quizzes/:id/live", checkQuizFeature, startQuizLive);
-router.get("/quizzes/:id/leaderboard", checkQuizFeature, getQuizLeaderboard);
 
 router.get("/notes", getNotes);
 router.get("/notes/:id/download", downloadNote);

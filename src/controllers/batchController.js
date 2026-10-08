@@ -1,9 +1,7 @@
 import Batch from "../models/Batch.js";
 import Student from "../models/Student.js";
-import Quiz from "../models/Quiz.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
-import QuizAttempt from "../models/QuizAttempt.js";
 import Institute from "../models/Institute.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 
@@ -299,11 +297,7 @@ export const deleteBatch = async (req, res) => {
       await Note.deleteMany({ batch: batchId });
     }
 
-    // Remove this batch from all quizzes
-    await Quiz.updateMany(
-      { batches: batchId },
-      { $pull: { batches: batchId } }
-    );
+
 
     // Finally delete the batch
     await Batch.deleteOne({ _id: batchId });

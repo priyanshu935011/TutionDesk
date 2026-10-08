@@ -5,8 +5,6 @@ import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Batch from "../models/Batch.js";
 import Institute from "../models/Institute.js";
 import Note from "../models/Note.js";
-import Quiz from "../models/Quiz.js";
-import QuizAttempt from "../models/QuizAttempt.js";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
@@ -20,12 +18,6 @@ import {
 import { supabase, supabaseBucket } from "../utils/supabase.js";
 import { toValidUUID } from "../utils/supabaseModel.js";
 import { sendStudentNotification } from "../services/notificationService.js";
-
-import {
-  forceStopLiveQuiz,
-  getActiveSessionForTeacher,
-  startLiveQuiz,
-} from "../services/quizRuntime.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { syncInstituteStorage } from "./videoController.js";
 import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
@@ -259,7 +251,8 @@ export const getTeacherDashboard = async (req, res) => {
       rawStudents = await Student.find(studentQuery)
         .select("_id name enrollmentNumber phone parentPhone batch batches enrolledBatchIds pendingAmount totalFees paidAmount paymentHistory isArchived attendanceRecords")
         .populate("batch", "name scheduleDays startTime endTime")
-        .populate("batches", "name scheduleDays startTime endTime");
+        .populate("batches", "name scheduleDays startTime endTime")
+        .lean();
       steps["step4_students"] = `found ${rawStudents.length} raw students`;
     } catch (e4) {
       steps["step4_students"] = { error: e4.message };
@@ -269,22 +262,16 @@ export const getTeacherDashboard = async (req, res) => {
       batches = await Batch.find(batchQuery)
         .select("_id name className scheduleDays startTime endTime teacher status")
         .sort({ createdAt: -1 })
-        .populate("teacher", "name email");
+        .populate("teacher", "name email")
+        .lean();
       steps["step5_batches_query"] = `found ${batches.length} batches`;
     } catch (e5) {
       steps["step5_batches_query"] = { error: e5.message };
     }
 
     try {
-      quizzes = await Quiz.find(quizQuery).select("_id title batches institute createdAt").sort({ createdAt: -1 });
-      steps["step6_quizzes"] = `found ${quizzes.length} quizzes`;
-    } catch (e6) {
-      steps["step6_quizzes"] = { error: e6.message };
-    }
-
-    try {
       if (req.user.role === "teacher") {
-        const allResults = await TestResult.find({ institute: instituteId });
+        const allResults = await TestResult.find({ institute: instituteId }).lean();
         const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
         const myBatchIds = new Set();
         myActiveBatches.forEach((b) => {
@@ -356,10 +343,10 @@ export const getTeacherDashboard = async (req, res) => {
     const summary = {
       totalStudents: students.length,
       totalBatches: (batches || []).filter((b) => b.status !== "archived").length,
-      totalQuizzes: (quizzes || []).length,
+      totalQuizzes: 0,
       totalNotes: totalNotesCount,
       totalTestResults: totalTestResultsCount,
-      liveQuiz: getActiveSessionForTeacher(instituteId),
+      liveQuiz: null,
       totalCollectedFees: req.user.role === "institute_admin" ? totalCollectedFees : undefined,
       totalPendingFees: req.user.role === "institute_admin" ? totalPendingFees : undefined,
     };
@@ -438,223 +425,12 @@ export const getTeacherDashboard = async (req, res) => {
 
 
 
-export const getQuizzes = async (req, res) => {
-  try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const quizzes = await Quiz.find({ institute: instituteId })
-      .sort({ createdAt: -1 })
-      .populate("batches", "name scheduleDays startTime endTime");
-    return res.json(quizzes);
-  } catch (error) {
-    return res.status(500).json({ message: "Could not fetch quizzes" });
-  }
-};
-
-export const createQuiz = async (req, res) => {
-  try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const {
-      title,
-      durationSeconds,
-      restSeconds,
-      negativeMarkingEnabled,
-      negativeMarkPerWrong,
-      pointsPerCorrect,
-      questions,
-      batchIds = [],
-    } = req.body;
-
-    if (
-      !title ||
-      !durationSeconds ||
-      !Array.isArray(questions) ||
-      !questions.length
-    ) {
-      return res
-        .status(400)
-        .json({ message: "Quiz title, duration, and questions are required" });
-    }
-
-    const selectedBatchIds = Array.isArray(batchIds)
-      ? batchIds.filter(Boolean)
-      : String(batchIds || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
-
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
-
-    if (selectedBatchIds.length) {
-      const existingBatches = await Batch.find({
-        _id: { $in: selectedBatchIds },
-        user: ownerId,
-      }).select("_id");
-
-      if (existingBatches.length !== selectedBatchIds.length) {
-        return res
-          .status(400)
-          .json({ message: "One or more selected batches are invalid" });
-      }
-    }
-
-    const quiz = await Quiz.create({
-      institute: instituteId,
-      createdBy: req.user._id,
-      batches: selectedBatchIds,
-      title,
-      durationSeconds: Number(durationSeconds),
-      restSeconds: Number(restSeconds || 10),
-      negativeMarkingEnabled: Boolean(negativeMarkingEnabled),
-      negativeMarkPerWrong: Number(negativeMarkPerWrong || 0),
-      pointsPerCorrect: Number(pointsPerCorrect || 10),
-      questions: questions.map((question) => ({
-        text: question.text,
-        options: (question.options || []).map((option) => ({
-          text: option.text || option,
-        })),
-        correctOptionIndex: Number(question.correctOptionIndex),
-      })),
-    });
-
-    await invalidateUserDashboard(req);
-    await clearCachePattern("student:dashboard:*");
-
-    return res.status(201).json(quiz);
-  } catch (error) {
-    return res.status(500).json({ message: "Could not create quiz" });
-  }
-};
-
-export const updateQuiz = async (req, res) => {
-  try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const quiz = await Quiz.findOne({
-      _id: req.params.id,
-      institute: instituteId,
-    });
-
-    if (!quiz) {
-      return res.status(404).json({ message: "Quiz not found" });
-    }
-
-    if (quiz.status === "completed") {
-      return res.status(400).json({ message: "Conducted/completed quizzes cannot be edited" });
-    }
-
-    const {
-      title,
-      durationSeconds,
-      restSeconds,
-      negativeMarkingEnabled,
-      negativeMarkPerWrong,
-      pointsPerCorrect,
-      questions,
-      batchIds = [],
-    } = req.body;
-
-    const selectedBatchIds = Array.isArray(batchIds)
-      ? batchIds.filter(Boolean)
-      : String(batchIds || "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean);
-
-    const ownerId = req.user.role === "teacher" ? req.user.institute?.adminUser : req.user._id;
-
-    if (selectedBatchIds.length) {
-      const existingBatches = await Batch.find({
-        _id: { $in: selectedBatchIds },
-        user: ownerId,
-      }).select("_id");
-
-      if (existingBatches.length !== selectedBatchIds.length) {
-        return res
-          .status(400)
-          .json({ message: "One or more selected batches are invalid" });
-      }
-    }
-
-    if (title !== undefined) quiz.title = title;
-    if (durationSeconds !== undefined)
-      quiz.durationSeconds = Number(durationSeconds);
-    if (restSeconds !== undefined) quiz.restSeconds = Number(restSeconds);
-    if (negativeMarkingEnabled !== undefined)
-      quiz.negativeMarkingEnabled = Boolean(negativeMarkingEnabled);
-    if (negativeMarkPerWrong !== undefined)
-      quiz.negativeMarkPerWrong = Number(negativeMarkPerWrong);
-    if (pointsPerCorrect !== undefined)
-      quiz.pointsPerCorrect = Number(pointsPerCorrect);
-    if (batchIds !== undefined) quiz.batches = selectedBatchIds;
-    if (Array.isArray(questions) && questions.length) {
-      quiz.questions = questions.map((question) => ({
-        text: question.text,
-        options: (question.options || []).map((option) => ({
-          text: option.text || option,
-        })),
-        correctOptionIndex: Number(question.correctOptionIndex),
-      }));
-    }
-
-    await quiz.save();
-
-    await invalidateUserDashboard(req);
-    await clearCachePattern("student:dashboard:*");
-
-    return res.json(quiz);
-  } catch (error) {
-    return res.status(500).json({ message: "Could not update quiz" });
-  }
-};
-
-export const deleteQuiz = async (req, res) => {
-  try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const quiz = await Quiz.findOne({
-      _id: req.params.id,
-      institute: instituteId,
-    });
-
-    if (!quiz) {
-      return res.status(404).json({ message: "Quiz not found" });
-    }
-
-    if (quiz.status === "completed") {
-      return res.status(400).json({ message: "Conducted/completed quizzes cannot be deleted" });
-    }
-
-    await Quiz.deleteOne({ _id: req.params.id });
-
-    await forceStopLiveQuiz(req.params.id);
-
-    await invalidateUserDashboard(req);
-    await clearCachePattern("student:dashboard:*");
-
-    return res.json({ message: "Quiz deleted successfully" });
-  } catch (error) {
-    return res.status(500).json({ message: "Could not delete quiz" });
-  }
-};
-
-export const startQuizLive = async (req, res) => {
-  try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    const quiz = await Quiz.findOne({
-      _id: req.params.id,
-      institute: instituteId,
-    });
-
-    if (!quiz) {
-      return res.status(404).json({ message: "Quiz not found" });
-    }
-
-    const liveState = await startLiveQuiz(quiz);
-    await invalidateUserDashboard(req);
-    await clearCachePattern("student:dashboard:*");
-    return res.json(liveState);
-  } catch (error) {
-    return res.status(500).json({ message: "Could not start live quiz" });
-  }
-};
+export const getQuizzes = async (req, res) => res.json([]);
+export const createQuiz = async (req, res) => res.status(400).json({ message: "Quiz feature is disabled" });
+export const updateQuiz = async (req, res) => res.status(400).json({ message: "Quiz feature is disabled" });
+export const deleteQuiz = async (req, res) => res.status(400).json({ message: "Quiz feature is disabled" });
+export const startQuizLive = async (req, res) => res.status(400).json({ message: "Quiz feature is disabled" });
+export const getQuizLeaderboard = async (req, res) => res.json([]);
 
 export const getNotes = async (req, res) => {
   try {
@@ -2294,26 +2070,7 @@ export const updateHiredTeacher = async (req, res) => {
   }
 };
 
-export const getQuizLeaderboard = async (req, res) => {
-  try {
-    const quizId = req.params.id;
-    const attempts = await QuizAttempt.find({ quiz: quizId })
-      .populate("student", "name")
-      .sort({ score: -1, updatedAt: 1 });
 
-    const leaderboard = attempts.map((attempt, index) => ({
-      studentId: attempt.student?._id || attempt.student,
-      studentName: attempt.student?.name || "Unknown Student",
-      score: attempt.score,
-      lastAnswerAt: attempt.updatedAt,
-    }));
-
-    return res.json(leaderboard);
-  } catch (error) {
-    console.error("getQuizLeaderboard error:", error);
-    return res.status(500).json({ message: "Could not fetch leaderboard" });
-  }
-};
 
 export const uploadBrandingLogo = async (req, res) => {
   try {

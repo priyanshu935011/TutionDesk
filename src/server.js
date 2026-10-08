@@ -23,7 +23,6 @@ import leadRoutes from "./routes/leadRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import videoRoutes from "./routes/videoRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
-import { quizRuntimeSocketHandlers, setSocketServer } from "./services/quizRuntime.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js";
@@ -72,11 +71,6 @@ const io = new Server(server, {
   },
 });
 
-setSocketServer(io);
-io.on("connection", (socket) => {
-  quizRuntimeSocketHandlers(socket);
-});
-
 app.use(
   cors({
     origin: checkOrigin,
@@ -84,8 +78,8 @@ app.use(
   })
 );
 app.use(compression());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ limit: "15mb", extended: true }));
 app.use(globalLimiter);
 app.use(errorLoggerMiddleware);
 

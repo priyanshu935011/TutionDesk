@@ -2,9 +2,21 @@ import redisClient from "../config/redis.js";
 
 // In-Memory L1 Cache for ultra-fast local responses (<1ms)
 const memoryCache = new Map();
+const MAX_MEMORY_CACHE_SIZE = 500;
 
-// Default 24 Hours TTL (86,400,000 ms) for persistent fast tab switching
-const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+// Default 2 Hours TTL (7,200,000 ms) to keep RAM lean
+const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
+
+// Helper to bound memory cache size
+const setMemoryCacheItem = (key, value) => {
+  if (memoryCache.size >= MAX_MEMORY_CACHE_SIZE && !memoryCache.has(key)) {
+    const firstKey = memoryCache.keys().next().value;
+    if (firstKey !== undefined) {
+      memoryCache.delete(firstKey);
+    }
+  }
+  memoryCache.set(key, value);
+};
 
 // Safe cache retrieval
 export const getCache = async (key) => {
@@ -14,13 +26,16 @@ export const getCache = async (key) => {
     if (local && local.expiresAt > Date.now()) {
       return local.data;
     }
+    if (local) {
+      memoryCache.delete(key);
+    }
 
     // 2. Fallback to Redis if ready
     if (redisClient.isReady) {
       const data = await redisClient.get(key);
       if (data) {
         const parsed = JSON.parse(data);
-        memoryCache.set(key, { data: parsed, expiresAt: Date.now() + DEFAULT_TTL_MS });
+        setMemoryCacheItem(key, { data: parsed, expiresAt: Date.now() + DEFAULT_TTL_MS });
         return parsed;
       }
     }
@@ -30,12 +45,12 @@ export const getCache = async (key) => {
   }
 };
 
-// Safe cache storage with TTL (default 24 hours)
-export const setCache = async (key, data, ttlSeconds = 86400) => {
+// Safe cache storage with TTL (default 2 hours)
+export const setCache = async (key, data, ttlSeconds = 7200) => {
   try {
     const ttlMs = ttlSeconds * 1000;
-    // Store in local Node.js RAM (0ms)
-    memoryCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+    // Store in local Node.js RAM with bounded size
+    setMemoryCacheItem(key, { data, expiresAt: Date.now() + ttlMs });
 
     // Store in Redis if ready
     if (redisClient.isReady) {

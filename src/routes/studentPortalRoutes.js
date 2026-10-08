@@ -9,7 +9,6 @@ import {
   getStudentTestMarks,
   getStudentVideos,
   getStudentFeePayment,
-  getQuizLeaderboard,
   getStudentNotifications,
   markNotificationRead,
   updateStudentFcmToken,
@@ -50,6 +49,5 @@ router.post("/change-password", changeStudentPassword);
 router.post("/switch-profile", switchProfile);
 router.put("/profile", updateStudentProfile);
 router.post("/profile-picture", upload.single("image"), uploadStudentProfilePicture);
-router.get("/quizzes/:id/leaderboard", getQuizLeaderboard);
 
 export default router;

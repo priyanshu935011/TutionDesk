@@ -6,8 +6,6 @@ import Institute from "../models/Institute.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
 import User from "../models/User.js";
-import Quiz from "../models/Quiz.js";
-import QuizAttempt from "../models/QuizAttempt.js";
 import SystemSetting from "../models/SystemSetting.js";
 import Notice from "../models/Notice.js";
 import VideoLecture from "../models/VideoLecture.js";
@@ -33,8 +31,6 @@ import {
   streamRemoteFileAsAttachment,
 } from "../utils/noteDownload.js";
 import { supabaseBucket } from "../utils/supabase.js";
-
-import { getLiveStateForStudent } from "../services/quizRuntime.js";
 
 const allowedFeeTypes = ["monthly", "full_course", "partial", "one_time", "yearly"];
 
@@ -3774,34 +3770,7 @@ export const sendStudentCredentialsWhatsApp = async (req, res) => {
   }
 };
 
-export const getQuizLeaderboard = async (req, res) => {
-  try {
-    const quizId = req.params.id;
-    const quiz = await Quiz.findById(quizId);
-    if (!quiz) {
-      return res.status(404).json({ message: "Quiz not found" });
-    }
-    const institute = await Institute.findById(quiz.institute);
-    if (institute?.quizFeatureEnabled === false) {
-      return res.status(403).json({ message: "Quiz feature is disabled for this institute" });
-    }
-    const attempts = await QuizAttempt.find({ quiz: quizId })
-      .populate("student", "name")
-      .sort({ score: -1, updatedAt: 1 });
-
-    const leaderboard = attempts.map((attempt, index) => ({
-      studentId: attempt.student?._id || attempt.student,
-      studentName: attempt.student?.name || "Unknown Student",
-      score: attempt.score,
-      lastAnswerAt: attempt.updatedAt,
-    }));
-
-    return res.json(leaderboard);
-  } catch (error) {
-    console.error("getQuizLeaderboard error:", error);
-    return res.status(500).json({ message: "Could not fetch leaderboard" });
-  }
-};
+export const getQuizLeaderboard = async (req, res) => res.json([]);
 
 export const sendPaymentReceiptWhatsApp = async (req, res) => {
   try {
