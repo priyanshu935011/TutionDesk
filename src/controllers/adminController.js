@@ -1234,7 +1234,6 @@ export const getInstituteFullAnalytics = async (req, res) => {
       console.error("Error computing whatsappAnalytics:", e);
     }
 
-    const instIdStr = String(institute._id || institute.id || id).trim();
     const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
     const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.10);
     const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
