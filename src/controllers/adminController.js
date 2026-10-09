@@ -296,14 +296,26 @@ export const getAdminOverview = async (req, res) => {
 
 export const getInstituteDetail = async (req, res) => {
   try {
-    const institute = await Institute.findById(req.params.id);
+    const instIdStr = String(req.params.id || "").trim();
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      try {
+        institute = await Institute.findById(instIdStr);
+      } catch (_) {}
+    }
+    if (!institute && instIdStr) {
+      try {
+        institute = await Institute.findOne({
+          $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+        });
+      } catch (_) {}
+    }
 
     if (!institute) {
       return res.status(404).json({ message: "Tution not found" });
     }
 
     const hydrated = await hydrateInstitute(institute);
-
     return res.json(hydrated);
   } catch (error) {
     return res.status(500).json({ message: "Could not load tution detail" });
@@ -1076,7 +1088,21 @@ export const updateDemoCredentials = async (req, res) => {
 export const getInstituteFullAnalytics = async (req, res) => {
   try {
     const { id } = req.params;
-    const institute = await Institute.findById(id);
+    const instIdStr = String(id || "").trim();
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      try {
+        institute = await Institute.findById(instIdStr);
+      } catch (_) {}
+    }
+    if (!institute && instIdStr) {
+      try {
+        institute = await Institute.findOne({
+          $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+        });
+      } catch (_) {}
+    }
+
     if (!institute) {
       return res.status(404).json({ message: "Tuition not found" });
     }
