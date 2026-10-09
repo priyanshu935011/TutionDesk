@@ -29,8 +29,10 @@ import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js"
 import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
 
 import { errorLoggerMiddleware, globalErrorHandler } from "./middleware/errorLoggerMiddleware.js";
+import { initTelemetry } from "./utils/telemetry.js";
 
 connectDB();
+initTelemetry();
 
 const app = express();
 app.set("trust proxy", 1); // Trust first-hop proxy (e.g. Render, Nginx, Heroku)

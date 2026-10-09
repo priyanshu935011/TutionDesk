@@ -1,4 +1,5 @@
 import { logSystemError } from "../utils/systemLogger.js";
+import { captureException } from "../utils/telemetry.js";
 
 /**
  * Middleware to automatically intercept API error responses (4xx and 5xx) across all routes,
@@ -24,6 +25,17 @@ export const errorLoggerMiddleware = (req, res, next) => {
           errorMessage = body.message || body.error || body.msg || JSON.stringify(body);
         } else if (typeof body === "string") {
           errorMessage = body;
+        }
+
+        if (res.statusCode >= 500) {
+          captureException(new Error(errorMessage), {
+            user: req.user ? { id: req.user._id || req.user.id, email: req.user.email } : null,
+            extra: {
+              statusCode: res.statusCode,
+              method: req.method,
+              path: req.originalUrl || req.url,
+            },
+          });
         }
 
         logSystemError({
@@ -61,6 +73,15 @@ export const errorLoggerMiddleware = (req, res, next) => {
  */
 export const globalErrorHandler = (err, req, res, next) => {
   console.error("Uncaught API Exception:", err);
+
+  captureException(err, {
+    user: req.user ? { id: req.user._id || req.user.id, email: req.user.email } : null,
+    extra: {
+      method: req.method,
+      path: req.originalUrl || req.url,
+      statusCode: err.status || err.statusCode || 500,
+    },
+  });
 
   if (!res.locals.errorLogged) {
     res.locals.errorLogged = true;
