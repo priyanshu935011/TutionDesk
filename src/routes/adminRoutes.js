@@ -42,6 +42,7 @@ import {
   updateInstituteMessageCharge,
   getGlobalWalletSettings,
   updateGlobalWalletSettings,
+  flushSystemCache,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -117,6 +118,8 @@ router.put("/institutes/:id/message-charge", updateInstituteMessageCharge);
 router.get("/global-wallet-settings", getGlobalWalletSettings);
 router.post("/global-wallet-settings", updateGlobalWalletSettings);
 router.put("/global-wallet-settings", updateGlobalWalletSettings);
+router.post("/flush-cache", flushSystemCache);
+router.get("/flush-cache", flushSystemCache);
 router.delete("/institutes/:id", deleteInstitute);
 
 // Custom Pages Routes

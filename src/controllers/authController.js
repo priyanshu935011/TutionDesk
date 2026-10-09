@@ -16,22 +16,61 @@ const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2
 const generateToken = (payload) =>
   jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
 
-import { getInstituteWalletBalance } from "../services/whatsappService.js";
+import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 
 const buildInstituteState = async (user) => {
   if (!user.institute) {
     return null;
   }
 
-  const institute = await Institute.findById(user.institute).select(
-    "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
-  );
+  const rawInst = user.institute;
+  const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
 
-  if (!institute) {
-    return null;
+  let institute = null;
+  if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
+    try {
+      institute = await Institute.findById(instIdStr).select(
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
+      );
+    } catch (_) {}
+  }
+  if (!institute && instIdStr) {
+    try {
+      institute = await Institute.findOne({
+        $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+      }).select(
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
+      );
+    } catch (_) {}
   }
 
-  const liveBalance = await getInstituteWalletBalance(user.institute, institute.walletBalance || 0);
+  const liveBalance = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
+  const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+
+  if (!institute) {
+    return {
+      id: instIdStr,
+      name: "Tuition Desk",
+      subscriptionPlan: "monthly",
+      subscriptionAmount: 0,
+      trialDays: 14,
+      subscriptionStart: new Date(),
+      subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      status: "active",
+      tuitionType: "solo",
+      quizFeatureEnabled: true,
+      recordedLecturesFeatureEnabled: true,
+      releaseVideosFeatureEnabled: true,
+      brandingEnabled: true,
+      logoUrl: null,
+      themeColor: "#4C3FBE",
+      allowedFeatures: ["attendance", "notes", "marks", "tests", "whatsapp"],
+      whatsappSettings: { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
+      studentCustomFields: [],
+      walletBalance: Number(liveBalance || 0),
+      perMessageCharge: Number(liveRate ?? 0.10),
+    };
+  }
 
   return {
     id: institute._id,
@@ -53,7 +92,7 @@ const buildInstituteState = async (user) => {
     whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
     studentCustomFields: institute.studentCustomFields || [],
     walletBalance: Number(liveBalance || 0),
-    perMessageCharge: Number(institute.perMessageCharge ?? 0.10),
+    perMessageCharge: Number(liveRate ?? 0.10),
   };
 };
 

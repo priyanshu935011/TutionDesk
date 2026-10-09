@@ -20,7 +20,7 @@ import { toValidUUID } from "../utils/supabaseModel.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { syncInstituteStorage } from "./videoController.js";
-import { sendMessage, getSessionStatus, sendTemplateMessage, getInstituteWalletBalance } from "../services/whatsappService.js";
+import { sendMessage, getSessionStatus, sendTemplateMessage, getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 
 const uploadBufferToCloudinary = (buffer, options = {}) =>
@@ -111,27 +111,46 @@ export const getTeacherDashboard = async (req, res) => {
   const steps = {};
   try {
     const rawInst = req.user.institute;
-    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+    const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
     const instituteId = instIdStr;
 
     let institute = null;
     try {
       if (instIdStr) {
-        institute = await Institute.findById(instIdStr)
-          .select(
-            "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge"
-          );
+        if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+          try {
+            institute = await Institute.findById(instIdStr).select(
+              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge"
+            );
+          } catch (_) {}
+        }
+        if (!institute) {
+          try {
+            institute = await Institute.findOne({
+              $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+            }).select(
+              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge"
+            );
+          } catch (_) {}
+        }
       }
-      if (institute && instIdStr) {
-        const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
+
+      const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
+      const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+
+      if (institute) {
         if (typeof institute.toObject === "function") {
           institute = institute.toObject();
         }
-        institute.walletBalance = liveBal;
-        const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
-        if (savedSettings && Object.keys(savedSettings).length > 0) {
-          institute.whatsappSettings = savedSettings;
-        }
+      } else {
+        institute = { walletBalance: liveBal, perMessageCharge: liveRate };
+      }
+      institute.walletBalance = liveBal;
+      institute.perMessageCharge = liveRate;
+
+      const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
+      if (savedSettings && Object.keys(savedSettings).length > 0) {
+        institute.whatsappSettings = savedSettings;
       }
       steps["step1_institute"] = "ok";
     } catch (e1) {
@@ -149,7 +168,9 @@ export const getTeacherDashboard = async (req, res) => {
       try {
         const cachedData = await getCache(cacheKey);
         if (cachedData) {
-          cachedData.institute = institute;
+          if (institute) {
+            cachedData.institute = institute;
+          }
           return res.json(cachedData);
         }
       } catch (_) {}

@@ -2066,3 +2066,13 @@ export const updateFcmSettings = async (req, res) => {
     return res.status(500).json({ message: "Could not update FCM settings" });
   }
 };
+
+export const flushSystemCache = async (req, res) => {
+  try {
+    await clearCachePattern("*");
+    return res.json({ message: "All system caches (in-memory & Redis) flushed successfully!" });
+  } catch (error) {
+    console.error("flushSystemCache error:", error);
+    return res.status(500).json({ message: "Could not flush system cache" });
+  }
+};
