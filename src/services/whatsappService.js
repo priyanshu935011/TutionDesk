@@ -46,35 +46,102 @@ const findInstituteDoc = async (instituteId) => {
   }
 };
 
+const isUUID = (str) => typeof str === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+
+export const getSupabaseInstituteRow = async (instituteId) => {
+  const instIdStr = getCleanInstId(instituteId);
+  if (!instIdStr || instIdStr === "admin_test") return null;
+
+  // 1. If valid UUID, try direct match on id or admin_user
+  if (isUUID(instIdStr)) {
+    try {
+      const { data } = await supabase
+        .from("institutes")
+        .select("*")
+        .or(`id.eq.${instIdStr},admin_user.eq.${instIdStr}`)
+        .limit(1);
+      if (data && data.length > 0) return data[0];
+    } catch (_) {}
+  }
+
+  // 2. Lookup Mongo Institute document to find adminEmail, adminPhone, or adminUser
+  let mongoInst = null;
+  if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+    try {
+      mongoInst = await Institute.findById(instIdStr);
+    } catch (_) {}
+  }
+  if (!mongoInst) {
+    try {
+      mongoInst = await Institute.findOne({
+        $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+      });
+    } catch (_) {}
+  }
+
+  if (mongoInst) {
+    const adminUserUuid = mongoInst.adminUser ? String(mongoInst.adminUser).trim() : "";
+    const adminEmail = mongoInst.adminEmail ? String(mongoInst.adminEmail).toLowerCase().trim() : "";
+    const adminPhone = mongoInst.adminPhone ? String(mongoInst.adminPhone).trim() : "";
+    const instName = mongoInst.name ? String(mongoInst.name).trim() : "";
+
+    if (adminUserUuid && isUUID(adminUserUuid)) {
+      try {
+        const { data } = await supabase
+          .from("institutes")
+          .select("*")
+          .or(`id.eq.${adminUserUuid},admin_user.eq.${adminUserUuid}`)
+          .limit(1);
+        if (data && data.length > 0) return data[0];
+      } catch (_) {}
+    }
+
+    if (adminEmail) {
+      try {
+        const { data } = await supabase
+          .from("institutes")
+          .select("*")
+          .ilike("admin_email", adminEmail)
+          .limit(1);
+        if (data && data.length > 0) return data[0];
+      } catch (_) {}
+    }
+
+    if (adminPhone) {
+      try {
+        const { data } = await supabase
+          .from("institutes")
+          .select("*")
+          .eq("admin_phone", adminPhone)
+          .limit(1);
+        if (data && data.length > 0) return data[0];
+      } catch (_) {}
+    }
+
+    if (instName) {
+      try {
+        const { data } = await supabase
+          .from("institutes")
+          .select("*")
+          .ilike("name", instName)
+          .limit(1);
+        if (data && data.length > 0) return data[0];
+      } catch (_) {}
+    }
+  }
+
+  return null;
+};
+
 export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
   const instIdStr = getCleanInstId(instituteId);
   if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0);
 
-  // 1. Direct fetch from Supabase table 'institutes'
+  // 1. Direct fetch from Supabase table 'institutes' using getSupabaseInstituteRow
   try {
-    const { data: sbInstList } = await supabase
-      .from("institutes")
-      .select("wallet_balance, walletBalance, id, _id, admin_user, adminUser")
-      .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`)
-      .limit(1);
-
-    if (sbInstList && sbInstList.length > 0) {
-      const sbInst = sbInstList[0];
-      const b = sbInst.wallet_balance ?? sbInst.walletBalance;
-      if (b !== null && b !== undefined && !isNaN(Number(b))) {
-        return Number(b);
-      }
-    }
-  } catch (_) {}
-
-  try {
-    const { data: sbInst } = await supabase
-      .from("institutes")
-      .select("wallet_balance, walletBalance")
-      .limit(1);
-
-    if (sbInst && sbInst.length > 0) {
-      const b = sbInst[0].wallet_balance ?? sbInst[0].walletBalance;
+    const sbInst = await getSupabaseInstituteRow(instituteId);
+    if (sbInst) {
+      const b = sbInst.wallet_balance ?? sbInst.walletbalance ?? sbInst.walletBalance;
       if (b !== null && b !== undefined && !isNaN(Number(b))) {
         return Number(b);
       }
@@ -108,17 +175,11 @@ export const getInstituteMessageCharge = async (instituteId, fallback = 0.10) =>
   const instIdStr = getCleanInstId(instituteId);
   if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0.10);
 
-  // 1. Direct fetch from Supabase table 'institutes'
+  // 1. Direct fetch from Supabase table 'institutes' using getSupabaseInstituteRow
   try {
-    const { data: sbInstList } = await supabase
-      .from("institutes")
-      .select("per_message_charge, perMessageCharge, id, _id, admin_user, adminUser")
-      .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`)
-      .limit(1);
-
-    if (sbInstList && sbInstList.length > 0) {
-      const sbInst = sbInstList[0];
-      const c = sbInst.per_message_charge ?? sbInst.perMessageCharge;
+    const sbInst = await getSupabaseInstituteRow(instituteId);
+    if (sbInst) {
+      const c = sbInst.per_message_charge ?? sbInst.permessagecharge ?? sbInst.perMessageCharge;
       if (c !== null && c !== undefined && !isNaN(Number(c))) {
         return Number(c);
       }
@@ -162,16 +223,16 @@ const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, ms
 
     // A. Update Supabase Database Table 'institutes' directly
     try {
-      const { error: sbUpErr1 } = await supabase
-        .from("institutes")
-        .update({ wallet_balance: newBalance, walletBalance: newBalance })
-        .eq("id", cleanInstId);
-
-      if (sbUpErr1) {
+      const sbRow = await getSupabaseInstituteRow(cleanInstId);
+      if (sbRow && sbRow.id) {
         await supabase
           .from("institutes")
-          .update({ wallet_balance: newBalance, walletBalance: newBalance })
-          .eq("_id", cleanInstId);
+          .update({
+            wallet_balance: newBalance,
+            walletbalance: newBalance,
+            walletBalance: newBalance
+          })
+          .eq("id", sbRow.id);
       }
     } catch (sbUpErr) {
       console.error("[Supabase Balance Update Error]", sbUpErr.message);
