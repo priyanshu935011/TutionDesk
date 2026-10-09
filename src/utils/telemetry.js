@@ -25,7 +25,11 @@ export const initTelemetry = () => {
 
   if (posthogApiKey) {
     try {
-      posthogClient = new PostHog(posthogApiKey, { host: posthogHost });
+      posthogClient = new PostHog(posthogApiKey, {
+        host: posthogHost,
+        flushAt: 1,
+        flushInterval: 0,
+      });
       console.log("✅ PostHog telemetry initialized on Backend");
     } catch (err) {
       console.error("⚠️ Failed to initialize PostHog on Backend:", err.message);
@@ -35,7 +39,7 @@ export const initTelemetry = () => {
   }
 };
 
-export const captureException = (error, context = {}) => {
+export const captureException = async (error, context = {}) => {
   if (isSentryInitialized) {
     try {
       Sentry.withScope((scope) => {
@@ -61,13 +65,14 @@ export const captureException = (error, context = {}) => {
           ...context.extra,
         },
       });
+      await posthogClient.flush().catch(() => {});
     } catch (phErr) {
       console.error("PostHog capture exception error:", phErr.message);
     }
   }
 };
 
-export const captureEvent = (eventName, properties = {}, userId = "backend_system") => {
+export const captureEvent = async (eventName, properties = {}, userId = "backend_system") => {
   if (posthogClient) {
     try {
       posthogClient.capture({
@@ -75,6 +80,7 @@ export const captureEvent = (eventName, properties = {}, userId = "backend_syste
         event: eventName,
         properties,
       });
+      await posthogClient.flush().catch(() => {});
     } catch (phErr) {
       console.error("PostHog capture event error:", phErr.message);
     }
