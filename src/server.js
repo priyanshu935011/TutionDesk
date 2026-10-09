@@ -158,8 +158,9 @@ app.use("/api/payments", paymentRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/payment", paymentRoutes);
-app.use("/videos", videoRoutes);
-app.use("/api/videos", videoRoutes);
+app.get("/debug-sentry", function mainHandler(req, res) {
+  throw new Error("My first Sentry error!");
+});
 
 app.use(globalErrorHandler);
 
