@@ -1,4 +1,6 @@
+import mongoose from "mongoose";
 import SystemSetting from "../models/SystemSetting.js";
+import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { sendRenewalReceiptEmail } from "../utils/mailer.js";
 import nodemailer from "nodemailer";
@@ -1637,19 +1639,44 @@ export const updateWebsiteSettings = async (req, res) => {
 
 export const getWalletInfo = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
-    if (!instituteId) {
+    const rawInst = req.user?.institute;
+    const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || req.user?._id || "").trim();
+    if (!instIdStr) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
-      return res.status(404).json({ message: "Institute not found." });
+
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      try {
+        institute = await Institute.findById(instIdStr);
+      } catch (_) {}
+    }
+    if (!institute && instIdStr) {
+      try {
+        institute = await Institute.findOne({
+          $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
+        });
+      } catch (_) {}
     }
 
-    const payments = await CashfreePayment.find({ institute: instituteId, type: "wallet_recharge" }).sort({ createdAt: -1 });
+    const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
+    const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+
+    let payments = [];
+    try {
+      payments = await CashfreePayment.find({
+        $or: [
+          { institute: instIdStr },
+          ...(institute?._id ? [{ institute: institute._id }] : [])
+        ],
+        type: "wallet_recharge"
+      }).sort({ createdAt: -1 });
+    } catch (_) {}
 
     return res.json({
-      history: payments
+      walletBalance: liveBal,
+      perMessageCharge: liveRate,
+      history: payments || []
     });
   } catch (error) {
     console.error("getWalletInfo error:", error);
