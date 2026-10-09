@@ -5,7 +5,7 @@ let posthogClient = null;
 let isSentryInitialized = false;
 
 export const initTelemetry = () => {
-  const sentryDsn = process.env.SENTRY_DSN;
+  const sentryDsn = process.env.SENTRY_DSN || "https://f9270927878f0a3e4028f433a5f43724@o4512227860938752.ingest.de.sentry.io/4512227920576592";
   if (sentryDsn) {
     try {
       Sentry.init({
@@ -18,8 +18,6 @@ export const initTelemetry = () => {
     } catch (err) {
       console.error("⚠️ Failed to initialize Sentry on Backend:", err.message);
     }
-  } else {
-    console.log("ℹ️ SENTRY_DSN not provided. Sentry telemetry disabled.");
   }
 
   const posthogApiKey = process.env.POSTHOG_API_KEY || process.env.POSTHOG_KEY;
