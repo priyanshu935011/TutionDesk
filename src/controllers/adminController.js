@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import mongoose from "../utils/supabaseModel.js";
+import mongoose, { updateInstituteWalletBalanceMetadata, updateInstitutePerMessageChargeMetadata } from "../utils/supabaseModel.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
@@ -13,7 +13,7 @@ import Notice from "../models/Notice.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
-import { sendMessage, sendTemplateMessage, getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
+import { sendMessage, sendTemplateMessage, getInstituteWalletBalance, getInstituteMessageCharge, getSupabaseInstituteRow } from "../services/whatsappService.js";
 import { supabase } from "../utils/supabase.js";
 import { inMemoryLogs } from "../utils/systemLogger.js";
 import { isSubscriptionExpired, resolveSubscriptionEnd } from "../utils/subscription.js";
@@ -1877,24 +1877,20 @@ export const topupInstituteWallet = async (req, res) => {
       return res.status(400).json({ message: "Valid amount or wallet balance is required." });
     }
 
-    // 1. Update Supabase 'institutes' database table directly
+    // 1. Update Supabase 'institutes' database table directly using resolved UUID
     try {
-      const { error: sbErr1 } = await supabase
-        .from("institutes")
-        .update({ wallet_balance: updatedBalance, walletBalance: updatedBalance })
-        .eq("id", instIdStr);
-
-      if (sbErr1) {
+      const sbRow = await getSupabaseInstituteRow(instIdStr);
+      if (sbRow && sbRow.id) {
         await supabase
           .from("institutes")
-          .update({ wallet_balance: updatedBalance, walletBalance: updatedBalance })
-          .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`);
+          .update({ wallet_balance: updatedBalance })
+          .eq("id", sbRow.id);
       }
     } catch (sbErr) {
       console.error("[Supabase topupInstituteWallet Error]", sbErr.message);
     }
 
-    // 2. Also update MongoDB document if available
+    // 2. Also update MongoDB document / SupabaseModel if available
     let institute = null;
     if (mongoose.Types.ObjectId.isValid(instIdStr)) {
       try {
@@ -1913,6 +1909,10 @@ export const topupInstituteWallet = async (req, res) => {
       institute.walletBalance = updatedBalance;
       await institute.save();
     }
+
+    updateInstituteWalletBalanceMetadata(instIdStr, updatedBalance);
+    if (institute && institute._id) updateInstituteWalletBalanceMetadata(institute._id, updatedBalance);
+    if (institute && institute.id) updateInstituteWalletBalanceMetadata(institute.id, updatedBalance);
 
     await clearCachePattern("teacher:dashboard:*").catch(() => {});
     await clearCachePattern("institute:*").catch(() => {});
@@ -1944,24 +1944,20 @@ export const updateInstituteMessageCharge = async (req, res) => {
 
     const newCharge = Number(rawRate);
 
-    // 1. Update Supabase 'institutes' database table directly
+    // 1. Update Supabase 'institutes' database table directly using resolved UUID
     try {
-      const { error: sbErr1 } = await supabase
-        .from("institutes")
-        .update({ per_message_charge: newCharge, perMessageCharge: newCharge })
-        .eq("id", instIdStr);
-
-      if (sbErr1) {
+      const sbRow = await getSupabaseInstituteRow(instIdStr);
+      if (sbRow && sbRow.id) {
         await supabase
           .from("institutes")
-          .update({ per_message_charge: newCharge, perMessageCharge: newCharge })
-          .or(`id.eq.${instIdStr},_id.eq.${instIdStr},admin_user.eq.${instIdStr},adminUser.eq.${instIdStr}`);
+          .update({ per_message_charge: newCharge })
+          .eq("id", sbRow.id);
       }
     } catch (sbErr) {
       console.error("[Supabase updateInstituteMessageCharge Error]", sbErr.message);
     }
 
-    // 2. Also update MongoDB document if available
+    // 2. Also update MongoDB document / SupabaseModel if available
     let institute = null;
     if (mongoose.Types.ObjectId.isValid(instIdStr)) {
       try {
@@ -1980,6 +1976,10 @@ export const updateInstituteMessageCharge = async (req, res) => {
       institute.perMessageCharge = newCharge;
       await institute.save();
     }
+
+    updateInstitutePerMessageChargeMetadata(instIdStr, newCharge);
+    if (institute && institute._id) updateInstitutePerMessageChargeMetadata(institute._id, newCharge);
+    if (institute && institute.id) updateInstitutePerMessageChargeMetadata(institute.id, newCharge);
 
     await clearCachePattern("teacher:dashboard:*").catch(() => {});
     await clearCachePattern("institute:*").catch(() => {});

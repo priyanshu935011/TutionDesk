@@ -215,6 +215,31 @@ export function updateInstituteWalletBalanceMetadata(instId, walletBalance) {
   }
 }
 
+export function updateInstitutePerMessageChargeMetadata(instId, rate) {
+  try {
+    const cleanId = String(instId || "").trim();
+    if (!cleanId) return;
+    const metadata = readInstitutesMetadata();
+    const newRate = Number(rate || 0.10);
+
+    for (const key of Object.keys(metadata)) {
+      if (key === cleanId || String(key) === cleanId) {
+        metadata[key] = {
+          ...(metadata[key] || {}),
+          perMessageCharge: newRate
+        };
+      }
+    }
+    metadata[cleanId] = {
+      ...(metadata[cleanId] || {}),
+      perMessageCharge: newRate
+    };
+    writeInstitutesMetadata(metadata);
+  } catch (e) {
+    console.error("Error updating institute per message charge metadata:", e);
+  }
+}
+
 const TESTS_METADATA_FILE = path.join(FALLBACK_DIR, "tests_metadata.json");
 
 export function readTestsMetadata() {
@@ -710,10 +735,6 @@ class SupabaseDocument {
       delete payload.subscription_history;
       delete payload.student_custom_fields;
       delete payload.student_portal_enabled;
-      delete payload.wallet_balance;
-      delete payload.walletBalance;
-      delete payload.per_message_charge;
-      delete payload.perMessageCharge;
       delete payload.whatsapp_settings;
       delete payload.whatsappSettings;
     }
@@ -1776,10 +1797,6 @@ class SupabaseModel {
       delete payload.subscription_history;
       delete payload.student_custom_fields;
       delete payload.student_portal_enabled;
-      delete payload.wallet_balance;
-      delete payload.walletBalance;
-      delete payload.per_message_charge;
-      delete payload.perMessageCharge;
       delete payload.whatsapp_settings;
       delete payload.whatsappSettings;
     }
