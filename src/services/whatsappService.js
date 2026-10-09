@@ -2,7 +2,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import Institute from "../models/Institute.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import { clearCachePattern } from "../utils/cache.js";
-import { supabase } from "../utils/supabaseModel.js";
+import { supabase, readInstitutesMetadata, updateInstituteWalletBalanceMetadata } from "../utils/supabaseModel.js";
 
 // Helper to format phone number to E.164 format without '+' or special characters
 const formatPhoneNumber = (to) => {
@@ -148,7 +148,16 @@ export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
     }
   } catch (_) {}
 
-  // 2. Fallback to MongoDB Institute document
+  // 2. Check metadata directly
+  try {
+    const metadata = readInstitutesMetadata();
+    const meta = metadata[instIdStr] || metadata[getCleanInstId(instituteId)] || {};
+    if (meta.walletBalance !== undefined && meta.walletBalance !== null && !isNaN(Number(meta.walletBalance))) {
+      return Number(meta.walletBalance);
+    }
+  } catch (_) {}
+
+  // 3. Fallback to MongoDB Institute document
   try {
     let inst = null;
     if (mongoose.Types.ObjectId.isValid(instIdStr)) {
@@ -219,7 +228,7 @@ const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, ms
   if (cleanInstId && cleanInstId !== "admin_test") {
     // 1. Fetch live balance from Supabase Database Table
     const currentBalance = await getInstituteWalletBalance(cleanInstId, inst?.walletBalance || 0);
-    const newBalance = Math.max(0, currentBalance - (isSuccess ? charge : 0));
+    const newBalance = Number(Math.max(0, currentBalance - (isSuccess ? charge : 0)).toFixed(2));
 
     // A. Update Supabase Database Table 'institutes' directly
     try {
@@ -238,15 +247,25 @@ const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, ms
       console.error("[Supabase Balance Update Error]", sbUpErr.message);
     }
 
-    // B. Update MongoDB Institute document
+    // B. Update MongoDB Institute document & metadata table
     try {
-      if (inst) {
-        inst.walletBalance = newBalance;
-        await inst.save();
+      let targetInst = inst || (await findInstituteDoc(cleanInstId));
+      if (targetInst) {
+        targetInst.walletBalance = newBalance;
+        if (typeof targetInst.save === "function") {
+          await targetInst.save();
+        }
       } else {
         await Institute.updateOne({ _id: cleanInstId }, { $set: { walletBalance: newBalance } });
       }
-    } catch (_) {}
+
+      updateInstituteWalletBalanceMetadata(cleanInstId, newBalance);
+      if (targetInst && targetInst._id) updateInstituteWalletBalanceMetadata(targetInst._id, newBalance);
+      if (targetInst && targetInst.id) updateInstituteWalletBalanceMetadata(targetInst.id, newBalance);
+      if (targetInst && targetInst.adminUser) updateInstituteWalletBalanceMetadata(targetInst.adminUser, newBalance);
+    } catch (mErr) {
+      console.error("[Institute Balance Sync Error]", mErr.message);
+    }
 
     // Flush cache so UI gets the new balance immediately
     await clearCachePattern("teacher:dashboard:*").catch(() => {});

@@ -168,7 +168,7 @@ function writeStudentMetadata(metadata) {
   } catch (e) {}
 }
 
-function readInstitutesMetadata() {
+export function readInstitutesMetadata() {
   try {
     if (!fs.existsSync(FALLBACK_DIR)) {
       fs.mkdirSync(FALLBACK_DIR, { recursive: true });
@@ -182,12 +182,37 @@ function readInstitutesMetadata() {
   }
 }
 
-function writeInstitutesMetadata(metadata) {
+export function writeInstitutesMetadata(metadata) {
   try {
     const content = JSON.stringify(metadata, null, 2);
     fs.writeFileSync(METADATA_FILE, content);
     uploadMetadataFile("institutes_metadata.json", content);
   } catch (e) {}
+}
+
+export function updateInstituteWalletBalanceMetadata(instId, walletBalance) {
+  try {
+    const cleanId = String(instId || "").trim();
+    if (!cleanId) return;
+    const metadata = readInstitutesMetadata();
+    const newBal = Number(walletBalance || 0);
+
+    for (const key of Object.keys(metadata)) {
+      if (key === cleanId || String(key) === cleanId) {
+        metadata[key] = {
+          ...(metadata[key] || {}),
+          walletBalance: newBal
+        };
+      }
+    }
+    metadata[cleanId] = {
+      ...(metadata[cleanId] || {}),
+      walletBalance: newBal
+    };
+    writeInstitutesMetadata(metadata);
+  } catch (e) {
+    console.error("Error updating institute wallet balance metadata:", e);
+  }
 }
 
 const TESTS_METADATA_FILE = path.join(FALLBACK_DIR, "tests_metadata.json");
