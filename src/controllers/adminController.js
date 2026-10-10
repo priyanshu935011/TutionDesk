@@ -479,6 +479,8 @@ export const updateInstitute = async (req, res) => {
       releaseVideosFeatureEnabled,
       maxVideoStorageGb,
       maxLeadFileSizeMb,
+      walletBalance,
+      perMessageCharge,
     } = req.body;
 
     const normalizedEmail = adminEmail !== undefined && adminEmail !== null ? adminEmail.toLowerCase().trim() : undefined;
@@ -511,6 +513,36 @@ export const updateInstitute = async (req, res) => {
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
     if (themeColor !== undefined) institute.themeColor = themeColor;
     if (allowedFeatures !== undefined) institute.allowedFeatures = allowedFeatures;
+
+    if (walletBalance !== undefined && walletBalance !== null && !isNaN(Number(walletBalance))) {
+      const newBal = Number(walletBalance);
+      institute.walletBalance = newBal;
+      updateInstituteWalletBalanceMetadata(req.params.id, newBal);
+      updateInstituteWalletBalanceMetadata(institute._id, newBal);
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ wallet_balance: newBal }).eq("id", sbRow.id);
+        }
+      } catch (sbErr) {
+        console.error("[Supabase updateInstitute wallet error]", sbErr.message);
+      }
+    }
+
+    if (perMessageCharge !== undefined && perMessageCharge !== null && !isNaN(Number(perMessageCharge))) {
+      const newRate = Number(perMessageCharge);
+      institute.perMessageCharge = newRate;
+      updateInstitutePerMessageChargeMetadata(req.params.id, newRate);
+      updateInstitutePerMessageChargeMetadata(institute._id, newRate);
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ per_message_charge: newRate }).eq("id", sbRow.id);
+        }
+      } catch (sbErr) {
+        console.error("[Supabase updateInstitute rate error]", sbErr.message);
+      }
+    }
 
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
