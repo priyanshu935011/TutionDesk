@@ -198,12 +198,10 @@ export function updateInstituteWalletBalanceMetadata(instId, walletBalance) {
     const newBal = Number(walletBalance || 0);
 
     for (const key of Object.keys(metadata)) {
-      if (key === cleanId || String(key) === cleanId) {
-        metadata[key] = {
-          ...(metadata[key] || {}),
-          walletBalance: newBal
-        };
-      }
+      metadata[key] = {
+        ...(metadata[key] || {}),
+        walletBalance: newBal
+      };
     }
     metadata[cleanId] = {
       ...(metadata[cleanId] || {}),
@@ -223,12 +221,10 @@ export function updateInstitutePerMessageChargeMetadata(instId, rate) {
     const newRate = Number(rate || 0.10);
 
     for (const key of Object.keys(metadata)) {
-      if (key === cleanId || String(key) === cleanId) {
-        metadata[key] = {
-          ...(metadata[key] || {}),
-          perMessageCharge: newRate
-        };
-      }
+      metadata[key] = {
+        ...(metadata[key] || {}),
+        perMessageCharge: newRate
+      };
     }
     metadata[cleanId] = {
       ...(metadata[cleanId] || {}),
@@ -586,10 +582,24 @@ class SupabaseDocument {
       this.studentCustomFields = meta.studentCustomFields ?? this.studentCustomFields ?? [];
       this.student_custom_fields = this.studentCustomFields;
       this.studentPortalEnabled = meta.studentPortalEnabled ?? this.studentPortalEnabled ?? true;
-      this.student_portal_enabled = this.studentPortalEnabled;
-      this.walletBalance = meta.walletBalance ?? this.walletBalance ?? 0;
+      const rawBal = data.wallet_balance ?? data.walletbalance ?? data.walletBalance;
+      if (rawBal !== undefined && rawBal !== null && !isNaN(Number(rawBal))) {
+        this.walletBalance = Number(rawBal);
+      } else if (meta.walletBalance !== undefined && meta.walletBalance !== null && !isNaN(Number(meta.walletBalance))) {
+        this.walletBalance = Number(meta.walletBalance);
+      } else {
+        this.walletBalance = this.walletBalance ?? 0;
+      }
       this.wallet_balance = this.walletBalance;
-      this.perMessageCharge = meta.perMessageCharge ?? this.perMessageCharge ?? 0.10;
+
+      const rawRate = data.per_message_charge ?? data.permessagecharge ?? data.perMessageCharge;
+      if (rawRate !== undefined && rawRate !== null && !isNaN(Number(rawRate))) {
+        this.perMessageCharge = Number(rawRate);
+      } else if (meta.perMessageCharge !== undefined && meta.perMessageCharge !== null && !isNaN(Number(meta.perMessageCharge))) {
+        this.perMessageCharge = Number(meta.perMessageCharge);
+      } else {
+        this.perMessageCharge = this.perMessageCharge ?? 0.10;
+      }
       this.per_message_charge = this.perMessageCharge;
       this.upiId = data.upi_id ?? data.upiId ?? meta.upiId ?? this.upiId ?? "";
       this.upi_id = this.upiId;
