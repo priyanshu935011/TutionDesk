@@ -353,14 +353,30 @@ Return only JSON.`;
 export async function answerInstituteIntelligence(instituteId, user, question) {
   const instIdStr = String(instituteId || "").trim();
 
-  // Gather live context from DB
-  const [students, batches, notes, notices, tests] = await Promise.all([
-    Student.find({ institute: instIdStr }).select("name phone totalFees paidAmount pendingAmount feePlanType batches status lastActiveAt").lean().catch(() => []),
-    Batch.find({ institute: instIdStr }).select("name scheduleDays startTime endTime").lean().catch(() => []),
-    Note.countDocuments({ institute: instIdStr }).catch(() => 0),
-    Notice.find({ institute: instIdStr }).sort({ createdAt: -1 }).limit(3).lean().catch(() => []),
-    TestResult.find({ institute: instIdStr }).sort({ createdAt: -1 }).limit(5).lean().catch(() => []),
-  ]);
+  // Gather live context from DB safely
+  let students = [];
+  let batches = [];
+  let notes = 0;
+  let notices = [];
+  let tests = [];
+
+  try {
+    const results = await Promise.allSettled([
+      Student.find({ institute: instIdStr }).select("name phone totalFees paidAmount pendingAmount feePlanType batches status lastActiveAt").lean(),
+      Batch.find({ institute: instIdStr }).select("name scheduleDays startTime endTime").lean(),
+      Note.countDocuments({ institute: instIdStr }),
+      Notice.find({ institute: instIdStr }).sort({ createdAt: -1 }).limit(3).lean(),
+      TestResult.find({ institute: instIdStr }).sort({ createdAt: -1 }).limit(5).lean(),
+    ]);
+
+    if (results[0].status === "fulfilled" && Array.isArray(results[0].value)) students = results[0].value;
+    if (results[1].status === "fulfilled" && Array.isArray(results[1].value)) batches = results[1].value;
+    if (results[2].status === "fulfilled" && typeof results[2].value === "number") notes = results[2].value;
+    if (results[3].status === "fulfilled" && Array.isArray(results[3].value)) notices = results[3].value;
+    if (results[4].status === "fulfilled" && Array.isArray(results[4].value)) tests = results[4].value;
+  } catch (err) {
+    console.error("Error gathering DB context for AI:", err);
+  }
 
   const totalStudents = students.length;
   let totalCollected = 0;

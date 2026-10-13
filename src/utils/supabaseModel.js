@@ -1373,6 +1373,14 @@ class SupabaseQuery {
     return this.exec().then(onFulfilled, onRejected);
   }
 
+  catch(onRejected) {
+    return this.exec().catch(onRejected);
+  }
+
+  finally(onFinally) {
+    return this.exec().finally(onFinally);
+  }
+
   async resolvePopulations(docs) {
     if (docs.length === 0 || this.populateFields.length === 0) return;
 
