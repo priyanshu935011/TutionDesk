@@ -236,6 +236,51 @@ export function updateInstitutePerMessageChargeMetadata(instId, rate) {
   }
 }
 
+export function updateInstituteAiWalletBalanceMetadata(instId, walletBalance) {
+  try {
+    const cleanId = String(instId || "").trim();
+    if (!cleanId) return;
+    const metadata = readInstitutesMetadata();
+    const newBal = Number(walletBalance || 0);
+
+    for (const key of Object.keys(metadata)) {
+      metadata[key] = {
+        ...(metadata[key] || {}),
+        aiWalletBalance: newBal
+      };
+    }
+    metadata[cleanId] = {
+      ...(metadata[cleanId] || {}),
+      aiWalletBalance: newBal
+    };
+    writeInstitutesMetadata(metadata);
+  } catch (e) {
+    console.error("Error updating institute AI wallet balance metadata:", e);
+  }
+}
+
+export function updateInstituteAiSettingsMetadata(instId, settings = {}) {
+  try {
+    const cleanId = String(instId || "").trim();
+    if (!cleanId) return;
+    const metadata = readInstitutesMetadata();
+
+    for (const key of Object.keys(metadata)) {
+      metadata[key] = {
+        ...(metadata[key] || {}),
+        ...settings
+      };
+    }
+    metadata[cleanId] = {
+      ...(metadata[cleanId] || {}),
+      ...settings
+    };
+    writeInstitutesMetadata(metadata);
+  } catch (e) {
+    console.error("Error updating institute AI settings metadata:", e);
+  }
+}
+
 const TESTS_METADATA_FILE = path.join(FALLBACK_DIR, "tests_metadata.json");
 
 export function readTestsMetadata() {
@@ -601,6 +646,32 @@ class SupabaseDocument {
         this.perMessageCharge = this.perMessageCharge ?? 0.10;
       }
       this.per_message_charge = this.perMessageCharge;
+
+      // AI Fields
+      this.aiEnabled = (data.ai_enabled ?? data.aiEnabled ?? meta.aiEnabled) === true;
+      this.ai_enabled = this.aiEnabled;
+      this.aiStudentEnabled = (data.ai_student_enabled ?? data.aiStudentEnabled ?? meta.aiStudentEnabled) === true;
+      this.ai_student_enabled = this.aiStudentEnabled;
+
+      const rawAiBal = data.ai_wallet_balance ?? data.aiwalletbalance ?? data.aiWalletBalance;
+      if (rawAiBal !== undefined && rawAiBal !== null && !isNaN(Number(rawAiBal))) {
+        this.aiWalletBalance = Number(rawAiBal);
+      } else if (meta.aiWalletBalance !== undefined && meta.aiWalletBalance !== null && !isNaN(Number(meta.aiWalletBalance))) {
+        this.aiWalletBalance = Number(meta.aiWalletBalance);
+      } else {
+        this.aiWalletBalance = this.aiWalletBalance ?? 0;
+      }
+      this.ai_wallet_balance = this.aiWalletBalance;
+
+      this.aiQueryRate = Number(data.ai_query_rate ?? meta.aiQueryRate ?? this.aiQueryRate ?? 0.20);
+      this.ai_query_rate = this.aiQueryRate;
+      this.aiVisionRate = Number(data.ai_vision_rate ?? meta.aiVisionRate ?? this.aiVisionRate ?? 0.50);
+      this.ai_vision_rate = this.aiVisionRate;
+      this.aiQuizRate = Number(data.ai_quiz_rate ?? meta.aiQuizRate ?? this.aiQuizRate ?? 0.40);
+      this.ai_quiz_rate = this.aiQuizRate;
+      this.aiDoubtRate = Number(data.ai_doubt_rate ?? meta.aiDoubtRate ?? this.aiDoubtRate ?? 0.25);
+      this.ai_doubt_rate = this.aiDoubtRate;
+
       this.upiId = data.upi_id ?? data.upiId ?? meta.upiId ?? this.upiId ?? "";
       this.upi_id = this.upiId;
       this.whatsappSettings = meta.whatsappSettings ?? this.whatsappSettings ?? {
@@ -818,6 +889,13 @@ class SupabaseDocument {
           studentPortalEnabled: this.studentPortalEnabled ?? true,
           walletBalance: this.walletBalance ?? 0,
           perMessageCharge: this.perMessageCharge ?? 0.10,
+          aiEnabled: this.aiEnabled ?? false,
+          aiStudentEnabled: this.aiStudentEnabled ?? false,
+          aiWalletBalance: this.aiWalletBalance ?? 0,
+          aiQueryRate: this.aiQueryRate ?? 0.20,
+          aiVisionRate: this.aiVisionRate ?? 0.50,
+          aiQuizRate: this.aiQuizRate ?? 0.40,
+          aiDoubtRate: this.aiDoubtRate ?? 0.25,
           upiId: this.upiId ?? "",
           whatsappSettings: this.whatsappSettings ?? {}
         };
@@ -905,6 +983,13 @@ class SupabaseDocument {
           studentPortalEnabled: this.studentPortalEnabled ?? true,
           walletBalance: this.walletBalance ?? 0,
           perMessageCharge: this.perMessageCharge ?? 0.10,
+          aiEnabled: this.aiEnabled ?? false,
+          aiStudentEnabled: this.aiStudentEnabled ?? false,
+          aiWalletBalance: this.aiWalletBalance ?? 0,
+          aiQueryRate: this.aiQueryRate ?? 0.20,
+          aiVisionRate: this.aiVisionRate ?? 0.50,
+          aiQuizRate: this.aiQuizRate ?? 0.40,
+          aiDoubtRate: this.aiDoubtRate ?? 0.25,
           whatsappSettings: this.whatsappSettings ?? {}
         };
         writeInstitutesMetadata(metadata);

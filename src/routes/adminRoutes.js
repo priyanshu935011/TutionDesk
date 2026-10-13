@@ -43,6 +43,10 @@ import {
   getGlobalWalletSettings,
   updateGlobalWalletSettings,
   flushSystemCache,
+  getAdminAiSettings,
+  updateAdminAiSettings,
+  topupInstituteAiWallet,
+  updateInstituteAiConfig,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -115,9 +119,15 @@ router.post("/institutes/:id/renew", renewInstituteSubscription);
 router.post("/institutes/:id/wallet-topup", topupInstituteWallet);
 router.post("/institutes/:id/message-charge", updateInstituteMessageCharge);
 router.put("/institutes/:id/message-charge", updateInstituteMessageCharge);
+router.post("/institutes/:id/ai-wallet-topup", topupInstituteAiWallet);
+router.post("/institutes/:id/ai-config", updateInstituteAiConfig);
+router.put("/institutes/:id/ai-config", updateInstituteAiConfig);
 router.get("/global-wallet-settings", getGlobalWalletSettings);
 router.post("/global-wallet-settings", updateGlobalWalletSettings);
 router.put("/global-wallet-settings", updateGlobalWalletSettings);
+router.get("/ai-settings", getAdminAiSettings);
+router.post("/ai-settings", updateAdminAiSettings);
+router.put("/ai-settings", updateAdminAiSettings);
 router.post("/flush-cache", flushSystemCache);
 router.get("/flush-cache", flushSystemCache);
 router.delete("/institutes/:id", deleteInstitute);

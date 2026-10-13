@@ -246,6 +246,34 @@ const instituteSchema = new mongoose.Schema(
       type: Number,
       default: 0.10,
     },
+    aiEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    aiStudentEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    aiWalletBalance: {
+      type: Number,
+      default: 0,
+    },
+    aiQueryRate: {
+      type: Number,
+      default: 0.20,
+    },
+    aiVisionRate: {
+      type: Number,
+      default: 0.50,
+    },
+    aiQuizRate: {
+      type: Number,
+      default: 0.40,
+    },
+    aiDoubtRate: {
+      type: Number,
+      default: 0.25,
+    },
     upiId: {
       type: String,
       default: "",

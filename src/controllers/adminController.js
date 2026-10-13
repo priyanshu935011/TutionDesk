@@ -1,5 +1,10 @@
 import bcrypt from "bcryptjs";
-import mongoose, { updateInstituteWalletBalanceMetadata, updateInstitutePerMessageChargeMetadata } from "../utils/supabaseModel.js";
+import mongoose, {
+  updateInstituteWalletBalanceMetadata,
+  updateInstitutePerMessageChargeMetadata,
+  updateInstituteAiWalletBalanceMetadata,
+  updateInstituteAiSettingsMetadata,
+} from "../utils/supabaseModel.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
@@ -348,6 +353,9 @@ export const createInstitute = async (req, res) => {
       releaseVideosFeatureEnabled,
       maxVideoStorageGb,
       maxLeadFileSizeMb,
+      aiEnabled,
+      aiStudentEnabled,
+      aiWalletBalance,
     } = req.body;
 
     if (
@@ -406,6 +414,9 @@ export const createInstitute = async (req, res) => {
       logoUrl: logoUrl || null,
       themeColor: themeColor || "#6366f1",
       allowedFeatures: allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+      aiEnabled: Boolean(aiEnabled),
+      aiStudentEnabled: Boolean(aiStudentEnabled),
+      aiWalletBalance: Number(aiWalletBalance || 0),
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -481,6 +492,13 @@ export const updateInstitute = async (req, res) => {
       maxLeadFileSizeMb,
       walletBalance,
       perMessageCharge,
+      aiEnabled,
+      aiStudentEnabled,
+      aiWalletBalance,
+      aiQueryRate,
+      aiVisionRate,
+      aiQuizRate,
+      aiDoubtRate,
     } = req.body;
 
     const normalizedEmail = adminEmail !== undefined && adminEmail !== null ? adminEmail.toLowerCase().trim() : undefined;
@@ -543,6 +561,46 @@ export const updateInstitute = async (req, res) => {
         console.error("[Supabase updateInstitute rate error]", sbErr.message);
       }
     }
+
+    if (aiEnabled !== undefined) {
+      institute.aiEnabled = Boolean(aiEnabled);
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ ai_enabled: Boolean(aiEnabled) }).eq("id", sbRow.id);
+        }
+      } catch (_) {}
+    }
+
+    if (aiStudentEnabled !== undefined) {
+      institute.aiStudentEnabled = Boolean(aiStudentEnabled);
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ ai_student_enabled: Boolean(aiStudentEnabled) }).eq("id", sbRow.id);
+        }
+      } catch (_) {}
+    }
+
+    if (aiWalletBalance !== undefined && aiWalletBalance !== null && !isNaN(Number(aiWalletBalance))) {
+      const newAiBal = Number(aiWalletBalance);
+      institute.aiWalletBalance = newAiBal;
+      updateInstituteAiWalletBalanceMetadata(req.params.id, newAiBal);
+      updateInstituteAiWalletBalanceMetadata(institute._id, newAiBal);
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ ai_wallet_balance: newAiBal }).eq("id", sbRow.id);
+        }
+      } catch (sbErr) {
+        console.error("[Supabase updateInstitute AI wallet error]", sbErr.message);
+      }
+    }
+
+    if (aiQueryRate !== undefined && !isNaN(Number(aiQueryRate))) institute.aiQueryRate = Number(aiQueryRate);
+    if (aiVisionRate !== undefined && !isNaN(Number(aiVisionRate))) institute.aiVisionRate = Number(aiVisionRate);
+    if (aiQuizRate !== undefined && !isNaN(Number(aiQuizRate))) institute.aiQuizRate = Number(aiQuizRate);
+    if (aiDoubtRate !== undefined && !isNaN(Number(aiDoubtRate))) institute.aiDoubtRate = Number(aiDoubtRate);
 
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
@@ -2133,3 +2191,199 @@ export const flushSystemCache = async (req, res) => {
     return res.status(500).json({ message: "Could not flush system cache" });
   }
 };
+
+export const getAdminAiSettings = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "ai_global_settings" });
+    const current = setting?.value || {
+      geminiApiKey: process.env.GEMINI_API_KEY || "",
+      openaiApiKey: process.env.OPENAI_API_KEY || "",
+      provider: "gemini",
+      model: "gemini-1.5-flash",
+      rates: {
+        query: 0.20,
+        vision: 0.50,
+        quiz: 0.40,
+        doubt: 0.25,
+      },
+      defaultEnabled: false,
+    };
+    return res.json(current);
+  } catch (error) {
+    console.error("getAdminAiSettings error:", error);
+    return res.status(500).json({ message: "Could not fetch AI settings" });
+  }
+};
+
+export const updateAdminAiSettings = async (req, res) => {
+  try {
+    const { geminiApiKey, openaiApiKey, provider, model, rates, defaultEnabled } = req.body;
+    let setting = await SystemSetting.findOne({ key: "ai_global_settings" });
+
+    const updatedValue = {
+      geminiApiKey: geminiApiKey !== undefined ? String(geminiApiKey).trim() : (setting?.value?.geminiApiKey || ""),
+      openaiApiKey: openaiApiKey !== undefined ? String(openaiApiKey).trim() : (setting?.value?.openaiApiKey || ""),
+      provider: provider || setting?.value?.provider || "gemini",
+      model: model || setting?.value?.model || "gemini-1.5-flash",
+      rates: {
+        query: Number(rates?.query ?? setting?.value?.rates?.query ?? 0.20),
+        vision: Number(rates?.vision ?? setting?.value?.rates?.vision ?? 0.50),
+        quiz: Number(rates?.quiz ?? setting?.value?.rates?.quiz ?? 0.40),
+        doubt: Number(rates?.doubt ?? setting?.value?.rates?.doubt ?? 0.25),
+      },
+      defaultEnabled: defaultEnabled !== undefined ? Boolean(defaultEnabled) : (setting?.value?.defaultEnabled || false),
+    };
+
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") setting.markModified("value");
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "ai_global_settings",
+        value: updatedValue,
+      });
+    }
+
+    return res.json({
+      message: "AI global configuration & task rates updated successfully!",
+      settings: setting.value,
+    });
+  } catch (error) {
+    console.error("updateAdminAiSettings error:", error);
+    return res.status(500).json({ message: "Could not update AI settings" });
+  }
+};
+
+export const topupInstituteAiWallet = async (req, res) => {
+  try {
+    const { amount, newBalance } = req.body;
+    const { id } = req.params;
+    const instIdStr = String(id || "").trim();
+
+    if (!instIdStr) {
+      return res.status(400).json({ message: "Institute ID is required." });
+    }
+
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      institute = await Institute.findById(instIdStr).catch(() => null);
+    }
+    if (!institute) {
+      institute = await Institute.findOne({
+        $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }],
+      }).catch(() => null);
+    }
+
+    const currentBalance = Number(institute?.aiWalletBalance || 0);
+
+    let updatedBalance;
+    if (newBalance !== undefined && !isNaN(Number(newBalance))) {
+      updatedBalance = Number(newBalance);
+    } else if (amount !== undefined && !isNaN(Number(amount))) {
+      updatedBalance = currentBalance + Number(amount);
+    } else {
+      return res.status(400).json({ message: "Valid amount or new balance is required." });
+    }
+
+    // 1. Supabase table
+    try {
+      const sbRow = await getSupabaseInstituteRow(instIdStr);
+      if (sbRow && sbRow.id) {
+        await supabase
+          .from("institutes")
+          .update({ ai_wallet_balance: updatedBalance })
+          .eq("id", sbRow.id);
+      }
+    } catch (sbErr) {
+      console.warn("[topupInstituteAiWallet] Supabase table update:", sbErr.message);
+    }
+
+    // 2. Mongo & Metadata
+    if (institute) {
+      institute.aiWalletBalance = updatedBalance;
+      await institute.save().catch(() => {});
+    }
+
+    updateInstituteAiWalletBalanceMetadata(instIdStr, updatedBalance);
+    if (institute?._id) updateInstituteAiWalletBalanceMetadata(institute._id, updatedBalance);
+
+    await clearCachePattern("teacher:dashboard:*").catch(() => {});
+    await clearCachePattern("institute:*").catch(() => {});
+
+    try {
+      await logActivity(req.user._id, "AI Wallet Topup", `Updated AI wallet balance for institute ${instIdStr} to INR ${updatedBalance}`, req.ip);
+    } catch (_) {}
+
+    return res.json({
+      message: "Institute AI Wallet balance updated successfully!",
+      aiWalletBalance: updatedBalance,
+    });
+  } catch (error) {
+    console.error("topupInstituteAiWallet error:", error);
+    return res.status(500).json({ message: "Could not top up AI wallet." });
+  }
+};
+
+export const updateInstituteAiConfig = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { aiEnabled, aiStudentEnabled, rates } = req.body;
+    const instIdStr = String(id || "").trim();
+
+    const updatePayload = {};
+    if (aiEnabled !== undefined) updatePayload.ai_enabled = Boolean(aiEnabled);
+    if (aiStudentEnabled !== undefined) updatePayload.ai_student_enabled = Boolean(aiStudentEnabled);
+    if (rates?.query !== undefined) updatePayload.ai_query_rate = Number(rates.query);
+    if (rates?.vision !== undefined) updatePayload.ai_vision_rate = Number(rates.vision);
+    if (rates?.quiz !== undefined) updatePayload.ai_quiz_rate = Number(rates.quiz);
+    if (rates?.doubt !== undefined) updatePayload.ai_doubt_rate = Number(rates.doubt);
+
+    try {
+      const sbRow = await getSupabaseInstituteRow(instIdStr);
+      if (sbRow && sbRow.id) {
+        await supabase
+          .from("institutes")
+          .update(updatePayload)
+          .eq("id", sbRow.id);
+      }
+    } catch (sbErr) {
+      console.warn("[updateInstituteAiConfig] Supabase update:", sbErr.message);
+    }
+
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(instIdStr)) {
+      institute = await Institute.findById(instIdStr).catch(() => null);
+    }
+    if (!institute) {
+      institute = await Institute.findOne({
+        $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }],
+      }).catch(() => null);
+    }
+
+    if (institute) {
+      if (aiEnabled !== undefined) institute.aiEnabled = Boolean(aiEnabled);
+      if (aiStudentEnabled !== undefined) institute.aiStudentEnabled = Boolean(aiStudentEnabled);
+      if (rates?.query !== undefined) institute.aiQueryRate = Number(rates.query);
+      if (rates?.vision !== undefined) institute.aiVisionRate = Number(rates.vision);
+      if (rates?.quiz !== undefined) institute.aiQuizRate = Number(rates.quiz);
+      if (rates?.doubt !== undefined) institute.aiDoubtRate = Number(rates.doubt);
+      await institute.save().catch(() => {});
+    }
+
+    updateInstituteAiSettingsMetadata(instIdStr, {
+      aiEnabled: aiEnabled !== undefined ? Boolean(aiEnabled) : undefined,
+      aiStudentEnabled: aiStudentEnabled !== undefined ? Boolean(aiStudentEnabled) : undefined,
+    });
+
+    return res.json({
+      message: "Institute AI configurations updated successfully!",
+      aiEnabled: institute?.aiEnabled ?? aiEnabled,
+      aiStudentEnabled: institute?.aiStudentEnabled ?? aiStudentEnabled,
+    });
+  } catch (error) {
+    console.error("updateInstituteAiConfig error:", error);
+    return res.status(500).json({ message: "Could not update Institute AI config." });
+  }
+};
+

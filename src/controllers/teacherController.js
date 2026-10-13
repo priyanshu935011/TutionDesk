@@ -129,7 +129,7 @@ export const getTeacherDashboard = async (req, res) => {
             institute = await Institute.findOne({
               $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
             }).select(
-              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge"
+              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiQueryRate aiVisionRate aiQuizRate aiDoubtRate"
             );
           } catch (_) {}
         }
@@ -137,6 +137,9 @@ export const getTeacherDashboard = async (req, res) => {
 
       const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
       const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+
+      const { getInstituteAiDetails } = await import("../services/aiService.js");
+      const aiDetails = await getInstituteAiDetails(instIdStr).catch(() => null);
 
       if (institute) {
         if (typeof institute.toObject === "function") {
@@ -147,6 +150,17 @@ export const getTeacherDashboard = async (req, res) => {
       }
       institute.walletBalance = liveBal;
       institute.perMessageCharge = liveRate;
+
+      if (aiDetails) {
+        institute.aiEnabled = aiDetails.aiEnabled;
+        institute.aiStudentEnabled = aiDetails.aiStudentEnabled;
+        institute.aiWalletBalance = aiDetails.aiWalletBalance;
+        institute.aiRates = aiDetails.rates;
+        institute.aiQueryRate = aiDetails.rates.query;
+        institute.aiVisionRate = aiDetails.rates.vision;
+        institute.aiQuizRate = aiDetails.rates.quiz;
+        institute.aiDoubtRate = aiDetails.rates.doubt;
+      }
 
       const savedSettings = await getCache(`institute:whatsapp_settings:${instIdStr}`);
       if (savedSettings && Object.keys(savedSettings).length > 0) {
