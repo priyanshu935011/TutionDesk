@@ -2200,7 +2200,7 @@ export const getAdminAiSettings = async (req, res) => {
     const vRate = Number(val.aiVisionRate ?? val.rates?.vision ?? 0.50);
     const qzRate = Number(val.aiQuizRate ?? val.rates?.quiz ?? 0.40);
     const dRate = Number(val.aiDoubtRate ?? val.rates?.doubt ?? 0.25);
-    const chosenModel = val.defaultModel || val.model || "gemini-2.5-flash";
+    const chosenModel = val.defaultModel || val.model || "gemini-3.5-flash";
     const isGloballyEnabled = val.aiEnabledGlobally !== undefined ? Boolean(val.aiEnabledGlobally) : (val.defaultEnabled !== undefined ? Boolean(val.defaultEnabled) : true);
 
     const current = {
@@ -2251,7 +2251,7 @@ export const updateAdminAiSettings = async (req, res) => {
     const vRate = Number(aiVisionRate ?? rates?.vision ?? setting?.value?.rates?.vision ?? 0.50);
     const qzRate = Number(aiQuizRate ?? rates?.quiz ?? setting?.value?.rates?.quiz ?? 0.40);
     const dRate = Number(aiDoubtRate ?? rates?.doubt ?? setting?.value?.rates?.doubt ?? 0.25);
-    const chosenModel = defaultModel || model || setting?.value?.model || "gemini-2.5-flash";
+    const chosenModel = defaultModel || model || setting?.value?.model || "gemini-3.5-flash";
     const isGloballyEnabled = aiEnabledGlobally !== undefined
       ? Boolean(aiEnabledGlobally)
       : (defaultEnabled !== undefined ? Boolean(defaultEnabled) : (setting?.value?.aiEnabledGlobally ?? true));

@@ -60,7 +60,7 @@ export async function getAiGlobalSettings() {
     geminiApiKey: process.env.GEMINI_API_KEY || "",
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     provider: "gemini",
-    model: "gemini-2.5-flash",
+    model: "gemini-3.5-flash",
     rates: {
       query: 0.20,
       vision: 0.50,
@@ -80,7 +80,7 @@ export async function getAiGlobalSettings() {
     ...val,
     geminiApiKey: (val.geminiApiKey || process.env.GEMINI_API_KEY || "").trim(),
     openaiApiKey: (val.openaiApiKey || process.env.OPENAI_API_KEY || "").trim(),
-    model: (val.model || val.defaultModel || "gemini-2.5-flash").trim(),
+    model: (val.model || val.defaultModel || "gemini-3.5-flash").trim(),
     rates: {
       query: Number(val.aiQueryRate ?? val.rates?.query ?? defaultSettings.rates.query),
       vision: Number(val.aiVisionRate ?? val.rates?.vision ?? defaultSettings.rates.vision),
@@ -317,12 +317,14 @@ async function callGeminiApiWithFallback({
   const cleanPref = (preferredModel || "").trim();
   const modelsToTry = [
     cleanPref,
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3-flash-preview",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash",
+    "gemini-flash-latest",
     "gemini-2.5-flash-lite",
-    "gemini-1.5-pro",
+    "gemini-3.1-pro-preview",
   ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
   let lastError = null;
