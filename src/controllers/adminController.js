@@ -2195,18 +2195,32 @@ export const flushSystemCache = async (req, res) => {
 export const getAdminAiSettings = async (req, res) => {
   try {
     const setting = await SystemSetting.findOne({ key: "ai_global_settings" });
-    const current = setting?.value || {
-      geminiApiKey: process.env.GEMINI_API_KEY || "",
-      openaiApiKey: process.env.OPENAI_API_KEY || "",
-      provider: "gemini",
-      model: "gemini-1.5-flash",
+    const val = setting?.value || {};
+    const qRate = Number(val.aiQueryRate ?? val.rates?.query ?? 0.20);
+    const vRate = Number(val.aiVisionRate ?? val.rates?.vision ?? 0.50);
+    const qzRate = Number(val.aiQuizRate ?? val.rates?.quiz ?? 0.40);
+    const dRate = Number(val.aiDoubtRate ?? val.rates?.doubt ?? 0.25);
+    const chosenModel = val.defaultModel || val.model || "gemini-1.5-flash";
+    const isGloballyEnabled = val.aiEnabledGlobally !== undefined ? Boolean(val.aiEnabledGlobally) : (val.defaultEnabled !== undefined ? Boolean(val.defaultEnabled) : true);
+
+    const current = {
+      geminiApiKey: val.geminiApiKey || process.env.GEMINI_API_KEY || "",
+      openaiApiKey: val.openaiApiKey || process.env.OPENAI_API_KEY || "",
+      provider: val.provider || "gemini",
+      model: chosenModel,
+      defaultModel: chosenModel,
       rates: {
-        query: 0.20,
-        vision: 0.50,
-        quiz: 0.40,
-        doubt: 0.25,
+        query: qRate,
+        vision: vRate,
+        quiz: qzRate,
+        doubt: dRate,
       },
-      defaultEnabled: false,
+      aiQueryRate: qRate,
+      aiVisionRate: vRate,
+      aiQuizRate: qzRate,
+      aiDoubtRate: dRate,
+      defaultEnabled: isGloballyEnabled,
+      aiEnabledGlobally: isGloballyEnabled,
     };
     return res.json(current);
   } catch (error) {
@@ -2217,21 +2231,49 @@ export const getAdminAiSettings = async (req, res) => {
 
 export const updateAdminAiSettings = async (req, res) => {
   try {
-    const { geminiApiKey, openaiApiKey, provider, model, rates, defaultEnabled } = req.body;
+    const {
+      geminiApiKey,
+      openaiApiKey,
+      provider,
+      model,
+      defaultModel,
+      rates,
+      aiQueryRate,
+      aiVisionRate,
+      aiQuizRate,
+      aiDoubtRate,
+      defaultEnabled,
+      aiEnabledGlobally,
+    } = req.body;
     let setting = await SystemSetting.findOne({ key: "ai_global_settings" });
+
+    const qRate = Number(aiQueryRate ?? rates?.query ?? setting?.value?.rates?.query ?? 0.20);
+    const vRate = Number(aiVisionRate ?? rates?.vision ?? setting?.value?.rates?.vision ?? 0.50);
+    const qzRate = Number(aiQuizRate ?? rates?.quiz ?? setting?.value?.rates?.quiz ?? 0.40);
+    const dRate = Number(aiDoubtRate ?? rates?.doubt ?? setting?.value?.rates?.doubt ?? 0.25);
+    const chosenModel = defaultModel || model || setting?.value?.model || "gemini-1.5-flash";
+    const isGloballyEnabled = aiEnabledGlobally !== undefined
+      ? Boolean(aiEnabledGlobally)
+      : (defaultEnabled !== undefined ? Boolean(defaultEnabled) : (setting?.value?.aiEnabledGlobally ?? true));
 
     const updatedValue = {
       geminiApiKey: geminiApiKey !== undefined ? String(geminiApiKey).trim() : (setting?.value?.geminiApiKey || ""),
       openaiApiKey: openaiApiKey !== undefined ? String(openaiApiKey).trim() : (setting?.value?.openaiApiKey || ""),
       provider: provider || setting?.value?.provider || "gemini",
-      model: model || setting?.value?.model || "gemini-1.5-flash",
+      model: chosenModel,
+      defaultModel: chosenModel,
       rates: {
-        query: Number(rates?.query ?? setting?.value?.rates?.query ?? 0.20),
-        vision: Number(rates?.vision ?? setting?.value?.rates?.vision ?? 0.50),
-        quiz: Number(rates?.quiz ?? setting?.value?.rates?.quiz ?? 0.40),
-        doubt: Number(rates?.doubt ?? setting?.value?.rates?.doubt ?? 0.25),
+        query: qRate,
+        vision: vRate,
+        quiz: qzRate,
+        doubt: dRate,
       },
-      defaultEnabled: defaultEnabled !== undefined ? Boolean(defaultEnabled) : (setting?.value?.defaultEnabled || false),
+      aiQueryRate: qRate,
+      aiVisionRate: vRate,
+      aiQuizRate: qzRate,
+      aiDoubtRate: dRate,
+      defaultEnabled: isGloballyEnabled,
+      aiEnabledGlobally: isGloballyEnabled,
     };
 
     if (setting) {
@@ -2247,7 +2289,7 @@ export const updateAdminAiSettings = async (req, res) => {
 
     return res.json({
       message: "AI global configuration & task rates updated successfully!",
-      settings: setting.value,
+      settings: updatedValue,
     });
   } catch (error) {
     console.error("updateAdminAiSettings error:", error);
