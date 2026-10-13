@@ -256,7 +256,7 @@ export const chatWithAi = async (req, res) => {
     });
   } catch (error) {
     console.error("chatWithAi error:", error);
-    const status = error.status || 500;
+    const status = (error.status && error.status !== 404) ? error.status : 502;
     return res.status(status).json({
       message: error.message || "AI request failed.",
       code: error.code || "AI_ERROR",
