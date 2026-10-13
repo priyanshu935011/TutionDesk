@@ -12,8 +12,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment",
-  "system_settings", "systemsettings",
-  "system_setting", "systemsetting", "contactmessages", "contact_messages", "system_logs", "systemlogs"
+  "contactmessages", "contact_messages", "system_logs", "systemlogs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
