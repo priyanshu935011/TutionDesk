@@ -606,13 +606,18 @@ Return only JSON. Do not include markdown preamble.`;
 export async function parseTestMarksheet(
   imageBase64,
   imageMimeType,
-  batchContext,
+  batchContext = {},
 ) {
   const students = batchContext.students || [];
+  const batches = batchContext.availableBatches || [];
+  const batchListStr = batches
+    .map((b) => `${b._id || b.id}: ${b.name}`)
+    .join(", ");
   const studentListStr = students
+    .slice(0, 100)
     .map(
       (s) =>
-        `[id: "${s._id || s.id}", name: "${s.name}", roll: "${s.enrollmentNumber || ""}"]`,
+        `[id: "${s._id || s.id}", name: "${s.name}", roll: "${s.enrollmentNumber || ""}", batchId: "${s.batchId || ""}"]`,
     )
     .join(", ");
 
@@ -621,8 +626,8 @@ TASK 1: VERIFY DOCUMENT TYPE FIRST.
 Examine whether the provided image is a genuine test marksheet, student score sheet, grading list, or exam result table.
 If the image is NOT a test marksheet or student scores table (for example: a selfie, person, animal, scenery, vehicle, food, random object, meme, admission form, or unrelated document), you MUST reject it by setting "isValidDocument": false.
 
-Enrolled Students for this Batch:
-${studentListStr}`;
+${batchListStr ? `Available Batches: [${batchListStr}].` : ""}
+${studentListStr ? `Enrolled Students:\n${studentListStr}` : ""}`;
 
   const prompt = `Analyze this image carefully.
 STEP 1: Verify if this is a test marksheet or exam score list.
@@ -633,26 +638,30 @@ If it is NOT a test marksheet, respond ONLY with:
   "reason": "The uploaded image does not appear to be a test marksheet. Please upload the correct document."
 }
 
-STEP 2: If and ONLY IF it is a valid marksheet or test score record, extract the subject, test title, total marks, and student score entries:
+STEP 2: If and ONLY IF it is a valid marksheet or test score record, extract the subject, test title, total marks, conducted date, detected batch name, and student score entries:
 {
   "isValidDocument": true,
   "documentType": "test_marksheet",
   "title": "Unit Test 1 / Weekly Test / Exam Name",
-  "subject": "Mathematics / Physics / etc.",
+  "subject": "Mathematics / Physics / Science / etc.",
   "totalMarks": 25,
   "examDate": "YYYY-MM-DD",
+  "detectedBatchName": "Name of class/batch if written on sheet or empty string",
   "entries": [
     {
-      "studentId": "matched_student_id",
-      "studentName": "student_name",
+      "studentId": "matched_student_id_or_null",
+      "studentName": "student_name_on_marksheet",
+      "rollNumber": "roll_or_serial_number_if_present",
       "score": 22,
       "isAbsent": false
     }
   ],
   "unmatchedEntries": [
     {
-      "detectedName": "name_not_found_in_roster",
-      "score": 18
+      "detectedName": "student_name_if_not_in_roster",
+      "rollNumber": "",
+      "score": 18,
+      "isAbsent": false
     }
   ]
 }
