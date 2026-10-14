@@ -114,9 +114,15 @@ export const chatWithAi = async (req, res) => {
           taskType = "MARKS_OCR";
         } else if (isStudent) {
           taskType = "STUDENT_DOUBT";
-        } else {
-          // Default image for teacher is admission form OCR
+        } else if (
+          lowerMessage.includes("admission") ||
+          lowerMessage.includes("student") ||
+          lowerMessage.includes("enroll") ||
+          lowerMessage.includes("form")
+        ) {
           taskType = "ADMISSION_FORM_OCR";
+        } else {
+          taskType = "GENERAL_IMAGE_OCR";
         }
       } else if (isStudent) {
         taskType = "STUDENT_DOUBT";
@@ -145,13 +151,30 @@ export const chatWithAi = async (req, res) => {
     switch (taskType) {
       case "ADMISSION_FORM_OCR": {
         const availableBatches = await Batch.find({ institute: instituteId }).select("_id name").lean().catch(() => []);
-        const billing = await deductAiCredits(instituteId, "vision");
         const parsedData = await parseAdmissionForm(imageBase64, imageMimeType, availableBatches);
 
+        if (
+          parsedData.isValidDocument === false ||
+          parsedData.documentType === "invalid" ||
+          (!parsedData.name && !parsedData.phone)
+        ) {
+          replyPayload = {
+            type: "TEXT",
+            reply:
+              "⚠️ **Invalid Document**: The uploaded image does not appear to be an admission form. Please upload the correct document (such as a clear photo of a student admission or enrollment form).",
+            isInvalidDocument: true,
+            creditsDeducted: 0,
+            remainingBalance: details.aiWalletBalance,
+          };
+          break;
+        }
+
+        const billing = await deductAiCredits(instituteId, "vision");
         replyPayload = {
           type: "ACTION_CARD",
           action: "CREATE_STUDENT_PREVIEW",
           data: parsedData,
+          parsedData: parsedData,
           reply: `I have scanned the admission form for **${parsedData.name || "New Student"}**! Please review the extracted details below and tap **Confirm & Add Student** to enroll them.`,
           creditsDeducted: billing.deducted,
           remainingBalance: billing.newBalance,
@@ -171,21 +194,95 @@ export const chatWithAi = async (req, res) => {
           ? await Student.find({ institute: instituteId, batches: targetBatchId }).select("_id name enrollmentNumber").lean().catch(() => [])
           : await Student.find({ institute: instituteId }).select("_id name enrollmentNumber").limit(30).lean().catch(() => []);
 
-        const billing = await deductAiCredits(instituteId, "vision");
         const parsedMarks = await parseTestMarksheet(imageBase64, imageMimeType, {
           batchId: targetBatchId,
           students: enrolledStudents,
         });
 
+        if (
+          parsedMarks.isValidDocument === false ||
+          parsedMarks.documentType === "invalid" ||
+          (!parsedMarks.entries?.length && !parsedMarks.unmatchedEntries?.length)
+        ) {
+          replyPayload = {
+            type: "TEXT",
+            reply:
+              "⚠️ **Invalid Document**: The uploaded image does not appear to be a test marksheet. Please upload the correct document (such as a clear photo of a marksheet or student scores table).",
+            isInvalidDocument: true,
+            creditsDeducted: 0,
+            remainingBalance: details.aiWalletBalance,
+          };
+          break;
+        }
+
+        const billing = await deductAiCredits(instituteId, "vision");
         parsedMarks.batchId = targetBatchId;
 
         replyPayload = {
           type: "ACTION_CARD",
           action: "TEST_MARKS_PREVIEW",
           data: parsedMarks,
+          parsedData: parsedMarks,
           reply: `Extracted marks for **${parsedMarks.title || "Test"}** (${parsedMarks.subject || "Subject"})! Check the student marks table below and tap **Confirm & Save Marks** to publish.`,
           creditsDeducted: billing.deducted,
           remainingBalance: billing.newBalance,
+        };
+        break;
+      }
+
+      case "GENERAL_IMAGE_OCR": {
+        // Automatically check if image is an admission form, marksheet, or random image
+        const availableBatches = await Batch.find({ institute: instituteId }).select("_id name").lean().catch(() => []);
+        const admissionAttempt = await parseAdmissionForm(imageBase64, imageMimeType, availableBatches);
+
+        if (admissionAttempt.isValidDocument === true && (admissionAttempt.name || admissionAttempt.phone)) {
+          const billing = await deductAiCredits(instituteId, "vision");
+          replyPayload = {
+            type: "ACTION_CARD",
+            action: "CREATE_STUDENT_PREVIEW",
+            data: admissionAttempt,
+            parsedData: admissionAttempt,
+            reply: `I have scanned the admission form for **${admissionAttempt.name || "New Student"}**! Please review the extracted details below and tap **Confirm & Add Student** to enroll them.`,
+            creditsDeducted: billing.deducted,
+            remainingBalance: billing.newBalance,
+          };
+          break;
+        }
+
+        // Try test marksheet
+        const firstBatch = await Batch.findOne({ institute: instituteId }).select("_id").lean().catch(() => null);
+        const enrolledStudents = firstBatch?._id
+          ? await Student.find({ institute: instituteId, batches: firstBatch._id }).select("_id name enrollmentNumber").lean().catch(() => [])
+          : await Student.find({ institute: instituteId }).select("_id name enrollmentNumber").limit(30).lean().catch(() => []);
+
+        const marksAttempt = await parseTestMarksheet(imageBase64, imageMimeType, {
+          batchId: firstBatch?._id,
+          students: enrolledStudents,
+        });
+
+        if (marksAttempt.isValidDocument === true && (marksAttempt.entries?.length || marksAttempt.unmatchedEntries?.length)) {
+          const billing = await deductAiCredits(instituteId, "vision");
+          marksAttempt.batchId = firstBatch?._id;
+          replyPayload = {
+            type: "ACTION_CARD",
+            action: "TEST_MARKS_PREVIEW",
+            data: marksAttempt,
+            parsedData: marksAttempt,
+            reply: `Extracted marks for **${marksAttempt.title || "Test"}** (${marksAttempt.subject || "Subject"})! Check the student marks table below and tap **Confirm & Save Marks** to publish.`,
+            creditsDeducted: billing.deducted,
+            remainingBalance: billing.newBalance,
+          };
+          break;
+        }
+
+        // Neither: Random image uploaded
+        replyPayload = {
+          type: "TEXT",
+          reply:
+            "⚠️ **Incorrect Document**: The uploaded image does not appear to be an admission form or a test marksheet. Please upload the correct document to proceed.",
+          isInvalidDocument: true,
+          creditsDeducted: 0,
+          remainingBalance: details.aiWalletBalance,
         };
         break;
       }

@@ -539,14 +539,27 @@ export async function parseAdmissionForm(
   const batchListStr = availableBatches
     .map((b) => `${b._id || b.id}: ${b.name}`)
     .join(", ");
-  const systemInstruction = `You are a high-precision OCR assistant for tuition admissions in India.
-Your task is to analyze photos of student admission forms, handwritten receipts, or student enrollment slips.
-Extract all details accurately and map to a strict JSON structure.
+  const systemInstruction = `You are a high-precision OCR and document verification assistant for tuition admissions in India.
+TASK 1: VERIFY DOCUMENT TYPE FIRST.
+Examine whether the provided image is a genuine student admission form, enrollment application, student registration slip, or tuition admission receipt.
+If the image is NOT an admission form (for example: a selfie, person, animal, scenery, vehicle, food, random object, meme, test marksheet, or unrelated document), you MUST reject it by setting "isValidDocument": false.
+
 Available Batches: [${batchListStr}].
 Select the closest matching batch ID if mentioned in the form.`;
 
-  const prompt = `Analyze this admission form image carefully. Extract all fields and respond ONLY with a valid JSON object with the following schema:
+  const prompt = `Analyze this image carefully.
+STEP 1: Verify if this is an admission form.
+If it is NOT an admission form or enrollment slip, respond ONLY with:
 {
+  "isValidDocument": false,
+  "documentType": "invalid",
+  "reason": "The uploaded image does not appear to be an admission form. Please upload the correct document."
+}
+
+STEP 2: If and ONLY IF it is a valid admission form or enrollment slip, extract all fields and respond ONLY with:
+{
+  "isValidDocument": true,
+  "documentType": "admission_form",
   "name": "Full Student Name",
   "phone": "10-digit mobile number or empty string",
   "parentName": "Father or Mother name or empty string",
@@ -573,9 +586,11 @@ Return only JSON. Do not include markdown preamble.`;
 
   const parsed = extractJsonFromText(rawResponse);
   if (!parsed) {
-    throw new Error(
-      "Failed to parse admission form data. Please ensure the photo is clear and readable.",
-    );
+    return {
+      isValidDocument: false,
+      documentType: "invalid",
+      reason: "Could not read document. Please upload a clear photo of an admission form.",
+    };
   }
   return parsed;
 }
@@ -594,17 +609,27 @@ export async function parseTestMarksheet(
     )
     .join(", ");
 
-  const systemInstruction = `You are an OCR assistant for tuition teachers grading test papers and marksheets.
-Match handwritten or printed student marks to the enrolled student roster.
-Enrolled Students for this Batch:
-${studentListStr}
-Return a strict JSON object with test title, maxMarks, subject, and student score entries.`;
+  const systemInstruction = `You are a high-precision OCR and document verification assistant for tuition teachers grading test papers and marksheets.
+TASK 1: VERIFY DOCUMENT TYPE FIRST.
+Examine whether the provided image is a genuine test marksheet, student score sheet, grading list, or exam result table.
+If the image is NOT a test marksheet or student scores table (for example: a selfie, person, animal, scenery, vehicle, food, random object, meme, admission form, or unrelated document), you MUST reject it by setting "isValidDocument": false.
 
-  const prompt = `Analyze this marksheet or test score slip.
-Extract the subject, test title, maximum total marks, and match each student with their score.
-For absent students, set score to -1 and isAbsent to true.
-Respond ONLY with a valid JSON object:
+Enrolled Students for this Batch:
+${studentListStr}`;
+
+  const prompt = `Analyze this image carefully.
+STEP 1: Verify if this is a test marksheet or exam score list.
+If it is NOT a test marksheet, respond ONLY with:
 {
+  "isValidDocument": false,
+  "documentType": "invalid",
+  "reason": "The uploaded image does not appear to be a test marksheet. Please upload the correct document."
+}
+
+STEP 2: If and ONLY IF it is a valid marksheet or test score record, extract the subject, test title, total marks, and student score entries:
+{
+  "isValidDocument": true,
+  "documentType": "test_marksheet",
   "title": "Unit Test 1 / Weekly Test / Exam Name",
   "subject": "Mathematics / Physics / etc.",
   "totalMarks": 25,
@@ -624,7 +649,7 @@ Respond ONLY with a valid JSON object:
     }
   ]
 }
-Return only JSON.`;
+Return only JSON. Do not include markdown preamble.`;
 
   const rawResponse = await callGeminiRaw({
     prompt,
@@ -636,9 +661,11 @@ Return only JSON.`;
 
   const parsed = extractJsonFromText(rawResponse);
   if (!parsed) {
-    throw new Error(
-      "Failed to parse marksheet image. Please ensure handwriting or score column is legible.",
-    );
+    return {
+      isValidDocument: false,
+      documentType: "invalid",
+      reason: "Could not read marksheet. Please upload a clear photo of a test marksheet.",
+    };
   }
   return parsed;
 }
@@ -656,22 +683,22 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
 
   try {
     const results = await Promise.allSettled([
-      Student.find({ institute: instIdStr })
+      Student.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
         .select(
-          "name phone totalFees paidAmount pendingAmount feePlanType batches status lastActiveAt",
+          "name phone enrollmentNumber totalFees paidAmount pendingAmount feePlanType batch batches status isArchived lastActiveAt",
         )
         .lean(),
-      Batch.find({ institute: instIdStr })
-        .select("name scheduleDays startTime endTime")
+      Batch.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
+        .select("_id name status scheduleDays startTime endTime")
         .lean(),
-      Note.countDocuments({ institute: instIdStr }),
-      Notice.find({ institute: instIdStr })
-        .sort({ createdAt: -1 })
-        .limit(3)
-        .lean(),
-      TestResult.find({ institute: instIdStr })
+      Note.countDocuments({ $or: [{ institute: instIdStr }, { user: instIdStr }] }),
+      Notice.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
         .sort({ createdAt: -1 })
         .limit(5)
+        .lean(),
+      TestResult.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
+        .sort({ createdAt: -1 })
+        .limit(10)
         .lean(),
     ]);
 
@@ -692,12 +719,62 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
     console.error("Error gathering DB context for AI:", err);
   }
 
-  const totalStudents = students.length;
+  // Active batches & Batch map
+  const activeBatches = batches.filter((b) => b.status !== "archived");
+  const activeBatchIds = new Set(activeBatches.map((b) => String(b._id || b.id)));
+  const batchNameMap = new Map();
+  batches.forEach((b) => {
+    batchNameMap.set(String(b._id || b.id), b.name);
+  });
+
+  const getStudentBatchNames = (s) => {
+    const names = [];
+    const sBatchId = s.batch ? String(s.batch._id || s.batch) : null;
+    if (sBatchId && batchNameMap.has(sBatchId)) {
+      names.push(batchNameMap.get(sBatchId));
+    }
+    if (Array.isArray(s.batches)) {
+      s.batches.forEach((b) => {
+        const bId = String(b._id || b);
+        const bName = batchNameMap.get(bId);
+        if (bName && !names.includes(bName)) names.push(bName);
+      });
+    }
+    return names.length > 0 ? names.join(", ") : "No Batch";
+  };
+
+  // Filter Active Enrolled Students (exclude archived / inactive)
+  const activeStudents = [];
+  const inactiveStudents = [];
+
+  students.forEach((s) => {
+    const isArchived =
+      s.isArchived === true || s.status === "archived" || s.status === "inactive";
+    const sBatchIds = [];
+    if (s.batch) sBatchIds.push(String(s.batch._id || s.batch));
+    if (Array.isArray(s.batches))
+      s.batches.forEach((b) => sBatchIds.push(String(b._id || b)));
+    if (Array.isArray(s.enrolledBatchIds))
+      s.enrolledBatchIds.forEach((b) => sBatchIds.push(String(b)));
+
+    if (isArchived) {
+      inactiveStudents.push(s);
+    } else if (
+      sBatchIds.length > 0 &&
+      !sBatchIds.some((bId) => activeBatchIds.has(bId))
+    ) {
+      inactiveStudents.push(s);
+    } else {
+      activeStudents.push(s);
+    }
+  });
+
+  // Calculate fees on active students
   let totalCollected = 0;
   let totalPending = 0;
   const defaulters = [];
 
-  students.forEach((s) => {
+  activeStudents.forEach((s) => {
     const due = Number(s.pendingAmount || 0);
     const paid = Number(s.paidAmount || 0);
     totalPending += due;
@@ -706,44 +783,96 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
       defaulters.push({
         name: s.name,
         phone: s.phone,
+        batch: getStudentBatchNames(s),
         due,
       });
     }
   });
 
-  // Sort top defaulters
   defaulters.sort((a, b) => b.due - a.due);
-  const topDefaulters = defaulters.slice(0, 5);
+
+  // Complete Student Roster (All active students irrespective of fees)
+  const fullRosterFormatted = activeStudents
+    .map((s, idx) => {
+      const bNames = getStudentBatchNames(s);
+      const due = Number(s.pendingAmount || 0);
+      const feeStatus = due > 0 ? `Pending: ₹${due.toLocaleString("en-IN")}` : "Paid / No Due";
+      return `${idx + 1}. **${s.name}** | Batch: ${bNames} | Phone: ${s.phone || "N/A"} | Fees: ${feeStatus}`;
+    })
+    .join("\n");
+
+  // Batch-wise Student Breakdown
+  const batchWiseRoster = activeBatches
+    .map((b) => {
+      const bId = String(b._id || b.id);
+      const inThisBatch = activeStudents.filter((s) => {
+        const sBatch = s.batch ? String(s.batch._id || s.batch) : null;
+        const inBatches =
+          Array.isArray(s.batches) &&
+          s.batches.some((x) => String(x._id || x) === bId);
+        return sBatch === bId || inBatches;
+      });
+      const names = inThisBatch.map((s) => s.name).join(", ");
+      return `• Batch: **${b.name}** (${inThisBatch.length} students): ${names || "No students enrolled"}`;
+    })
+    .join("\n");
 
   const contextStr = `
 Institute Live Snapshot:
-- Total Enrolled Students: ${totalStudents}
-- Active Batches: ${batches.map((b) => b.name).join(", ") || "None"}
-- Total Fees Collected: ₹${totalCollected.toLocaleString("en-IN")}
-- Total Outstanding Fees: ₹${totalPending.toLocaleString("en-IN")}
-- Top Fee Defaulters: ${topDefaulters.map((d) => `${d.name} (₹${d.due})`).join(", ") || "None"}
-- Total Study Notes Uploaded: ${notes}
-- Recent Notices: ${notices.map((n) => n.title).join(", ") || "None"}
-- User Asking: ${user.name} (${user.role})
+• Total Enrolled Students (Active): ${activeStudents.length}
+• Total Active Batches: ${activeBatches.map((b) => b.name).join(", ") || "None"}
+• Total Fees Collected: ₹${totalCollected.toLocaleString("en-IN")}
+• Total Outstanding Fees: ₹${totalPending.toLocaleString("en-IN")}
+• Total Fee Defaulters: ${defaulters.length} active students
+• Top Defaulters: ${defaulters.slice(0, 8).map((d) => `${d.name} (${d.batch}, ₹${d.due.toLocaleString("en-IN")})`).join(", ") || "None"}
+• Total Study Notes Uploaded: ${notes}
+• Recent Notices: ${notices.map((n) => n.title).join(", ") || "None"}
+• User Inquiring: ${user.name} (${user.role})
+
+Students Roster by Batch:
+${batchWiseRoster || "No active batches."}
+
+Complete Active Student Roster (${activeStudents.length} Active Students):
+${fullRosterFormatted || "No enrolled students."}
 `;
 
-  const systemInstruction = `You are DeskAI, the direct and friendly AI tuition assistant for this institute.
-Use the real-time context below to answer accurately.
-Formatting rules:
-- Write in a natural, clean, professional style.
-- Use clean bullet points with bullet markers (• or -).
-- Highlight key metrics cleanly with bold text (e.g. • Total Enrolled Students: **15**).
-- Avoid redundant double asterisks like "**Label:** **Value**" (bold only the value or label, not both separately).
-- Do not use markdown headers with hashtags (### or ##); instead, write clean section titles on their own line with a colon or emoji (e.g. 👥 Student Overview:).
-- Keep answers crisp, helpful, and focused on coaching/tuition operations.
-- Answer in the language requested (English or Hinglish).
-Context:
+  const systemInstruction = `You are ClassTech AI, the intelligent, friendly, and ultra-accurate management assistant for this coaching institute.
+Use the real-time context above to answer all questions accurately, concisely, and cleanly.
+
+CRITICAL OPERATIONAL RULES:
+1. SUMMARY OF ENROLLED STUDENTS:
+   - When asked for a "summary", "overview", or "total enrolled students":
+   - ALWAYS report the count of ACTIVE students (**${activeStudents.length}**) as Total Enrolled Students. Never report archived or inactive students in the total enrolled figure.
+
+2. LIST DOWN ALL STUDENTS:
+   - When asked to "list down all students", "show all students", "give student roster", or "list students":
+   - You MUST list ALL ${activeStudents.length} active students from the "Complete Active Student Roster" above!
+   - List EVERY SINGLE student IRRESPECTIVE of their pending fees (both students who paid full fees and students who owe pending fees).
+   - Show their sequential number, name, and batch.
+
+3. STUDENTS OF A PARTICULAR BATCH:
+   - When asked for students of any particular batch (e.g. "show students of Neet batch", "who is in [batch name]", "students in Class 10"):
+   - Identify the requested batch name from "Students Roster by Batch" or the student roster.
+   - List all students who are in that specific batch.
+   - If that batch has students, list them clearly with their names.
+   - If that batch has no students, clearly state that no students are currently enrolled in that batch.
+
+4. FORMATTING RULES:
+   - Write in a natural, clean, professional style.
+   - Use clean bullet points (• or -).
+   - Highlight key metrics with single bold (e.g. • Total Enrolled Students: **${activeStudents.length}**).
+   - Never use double bold syntax like "**Label:** **Value**" (bold only the value or label, not both).
+   - Do NOT use markdown headers with hashtags (### or ##); use emoji headings or clear labels instead.
+   - Keep answers crisp, helpful, and focused on coaching/tuition operations.
+   - Answer in the language requested (English or Hinglish).
+
+Real-time Context:
 ${contextStr}`;
 
   return await callGeminiRaw({
     prompt: question,
     systemInstruction,
-    temperature: 0.3,
+    temperature: 0.2,
   });
 }
 
