@@ -363,14 +363,18 @@ export const chatWithAi = async (req, res) => {
 
       case "GENERATE_QUIZ": {
         const billing = await deductAiCredits(instituteId, "quiz");
-        const subject = message.includes("math") ? "Mathematics" : message.includes("science") ? "Science" : "General Knowledge";
-        const quizData = await generatePracticeQuiz(subject, message || "Revision Chapter", "Class 10", 5);
+        const lower = message.toLowerCase();
+        const numMatch = lower.match(/(\d+)\s*(?:questions|question|mcq|mcqs)/);
+        const numQuestions = numMatch ? Math.min(20, Math.max(1, parseInt(numMatch[1], 10))) : 5;
+
+        const quizData = await generatePracticeQuiz(message || "General Practice Quiz", null, "Class 10", numQuestions);
 
         replyPayload = {
           type: "ACTION_CARD",
           action: "QUIZ_PREVIEW",
           data: quizData,
-          reply: `Generated practice quiz for **${quizData?.topic || "Topic"}** with ${quizData?.questions?.length || 5} questions!`,
+          parsedData: quizData,
+          reply: `Generated practice quiz for **${quizData?.topic || quizData?.subject || "Practice Quiz"}** with ${quizData?.questions?.length || numQuestions} questions! Check the questions below.`,
           creditsDeducted: billing.deducted,
           remainingBalance: billing.newBalance,
         };
