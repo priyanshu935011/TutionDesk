@@ -62,9 +62,9 @@ export async function getAiGlobalSettings() {
     provider: "gemini",
     model: "gemini-3.5-flash",
     rates: {
-      query: 0.20,
-      vision: 0.50,
-      quiz: 0.40,
+      query: 0.2,
+      vision: 0.5,
+      quiz: 0.4,
       doubt: 0.25,
     },
     defaultEnabled: false,
@@ -82,10 +82,18 @@ export async function getAiGlobalSettings() {
     openaiApiKey: (val.openaiApiKey || process.env.OPENAI_API_KEY || "").trim(),
     model: (val.model || val.defaultModel || "gemini-3.5-flash").trim(),
     rates: {
-      query: Number(val.aiQueryRate ?? val.rates?.query ?? defaultSettings.rates.query),
-      vision: Number(val.aiVisionRate ?? val.rates?.vision ?? defaultSettings.rates.vision),
-      quiz: Number(val.aiQuizRate ?? val.rates?.quiz ?? defaultSettings.rates.quiz),
-      doubt: Number(val.aiDoubtRate ?? val.rates?.doubt ?? defaultSettings.rates.doubt),
+      query: Number(
+        val.aiQueryRate ?? val.rates?.query ?? defaultSettings.rates.query,
+      ),
+      vision: Number(
+        val.aiVisionRate ?? val.rates?.vision ?? defaultSettings.rates.vision,
+      ),
+      quiz: Number(
+        val.aiQuizRate ?? val.rates?.quiz ?? defaultSettings.rates.quiz,
+      ),
+      doubt: Number(
+        val.aiDoubtRate ?? val.rates?.doubt ?? defaultSettings.rates.doubt,
+      ),
     },
   };
 }
@@ -114,23 +122,41 @@ export async function getInstituteAiDetails(instituteId) {
 
   const globalSettings = await getAiGlobalSettings();
   const defaultRates = globalSettings?.rates || {
-    query: 0.20,
-    vision: 0.50,
-    quiz: 0.40,
+    query: 0.2,
+    vision: 0.5,
+    quiz: 0.4,
     doubt: 0.25,
   };
 
   const aiEnabled = sbRow?.ai_enabled ?? mongoInst?.aiEnabled ?? false;
-  const aiStudentEnabled = sbRow?.ai_student_enabled ?? mongoInst?.aiStudentEnabled ?? false;
+  const aiStudentEnabled =
+    sbRow?.ai_student_enabled ?? mongoInst?.aiStudentEnabled ?? false;
 
   const rawBal = sbRow?.ai_wallet_balance ?? mongoInst?.aiWalletBalance ?? 0;
   const aiWalletBalance = Number(rawBal || 0);
 
   const rates = {
-    query: Number(sbRow?.ai_query_rate ?? mongoInst?.aiQueryRate ?? defaultRates.query ?? 0.20),
-    vision: Number(sbRow?.ai_vision_rate ?? mongoInst?.aiVisionRate ?? defaultRates.vision ?? 0.50),
-    quiz: Number(sbRow?.ai_quiz_rate ?? mongoInst?.aiQuizRate ?? defaultRates.quiz ?? 0.40),
-    doubt: Number(sbRow?.ai_doubt_rate ?? mongoInst?.aiDoubtRate ?? defaultRates.doubt ?? 0.25),
+    query: Number(
+      sbRow?.ai_query_rate ??
+        mongoInst?.aiQueryRate ??
+        defaultRates.query ??
+        0.2,
+    ),
+    vision: Number(
+      sbRow?.ai_vision_rate ??
+        mongoInst?.aiVisionRate ??
+        defaultRates.vision ??
+        0.5,
+    ),
+    quiz: Number(
+      sbRow?.ai_quiz_rate ?? mongoInst?.aiQuizRate ?? defaultRates.quiz ?? 0.4,
+    ),
+    doubt: Number(
+      sbRow?.ai_doubt_rate ??
+        mongoInst?.aiDoubtRate ??
+        defaultRates.doubt ??
+        0.25,
+    ),
   };
 
   return {
@@ -146,23 +172,34 @@ export async function getInstituteAiDetails(instituteId) {
 }
 
 // 3. Atomically Deduct AI Credits
-export async function deductAiCredits(instituteId, taskType, customCost = null) {
+export async function deductAiCredits(
+  instituteId,
+  taskType,
+  customCost = null,
+) {
   const details = await getInstituteAiDetails(instituteId);
   if (!details) {
     throw new Error("Institute not found for AI billing");
   }
 
   if (!details.aiEnabled) {
-    const error = new Error("AI feature is locked for this institution. Please contact Super Admin.");
+    const error = new Error(
+      "AI feature is locked for this institution. Please contact Super Admin.",
+    );
     error.status = 403;
     error.code = "AI_LOCKED";
     throw error;
   }
 
-  const cost = customCost !== null ? Number(customCost) : (details.rates[taskType] || details.rates.query || 0.20);
+  const cost =
+    customCost !== null
+      ? Number(customCost)
+      : details.rates[taskType] || details.rates.query || 0.2;
 
   if (details.aiWalletBalance < cost) {
-    const error = new Error(`Insufficient AI credits. Current balance: ₹${details.aiWalletBalance.toFixed(2)}, required: ₹${cost.toFixed(2)}.`);
+    const error = new Error(
+      `Insufficient AI credits. Current balance: ₹${details.aiWalletBalance.toFixed(2)}, required: ₹${cost.toFixed(2)}.`,
+    );
     error.status = 402;
     error.code = "INSUFFICIENT_CREDITS";
     error.currentBalance = details.aiWalletBalance;
@@ -170,7 +207,10 @@ export async function deductAiCredits(instituteId, taskType, customCost = null) 
     throw error;
   }
 
-  const newBalance = Math.max(0, Number((details.aiWalletBalance - cost).toFixed(2)));
+  const newBalance = Math.max(
+    0,
+    Number((details.aiWalletBalance - cost).toFixed(2)),
+  );
 
   // Update Supabase
   try {
@@ -181,7 +221,10 @@ export async function deductAiCredits(instituteId, taskType, customCost = null) 
         .eq("id", details.sbRow.id);
     }
   } catch (sbErr) {
-    console.warn("[deductAiCredits] Supabase column update skipped/failed:", sbErr.message);
+    console.warn(
+      "[deductAiCredits] Supabase column update skipped/failed:",
+      sbErr.message,
+    );
   }
 
   // Update Mongo/Metadata
@@ -225,7 +268,10 @@ async function callOpenAiRaw({
   }
 
   if (imageBase64) {
-    const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+    const cleanBase64 = imageBase64.replace(
+      /^data:image\/[a-zA-Z]+;base64,/,
+      "",
+    );
     messages.push({
       role: "user",
       content: [
@@ -257,7 +303,7 @@ async function callOpenAiRaw({
           Authorization: `Bearer ${apiKey}`,
         },
         timeout: 35000,
-      }
+      },
     );
 
     const reply = response.data?.choices?.[0]?.message?.content;
@@ -364,7 +410,7 @@ async function callGeminiApiWithFallback({
           errMsg.toLowerCase().includes("permission_denied")
         ) {
           const customErr = new Error(
-            `Google AI Studio Authentication Error: ${errMsg || "Invalid API key"}. Please check your Gemini API key in Super Admin > AI & Models.`
+            `Google AI Studio Authentication Error: ${errMsg || "Invalid API key"}. Please check your Gemini API key in Super Admin > AI & Models.`,
           );
           customErr.status = 502;
           customErr.code = "AI_AUTH_FAILED";
@@ -374,7 +420,7 @@ async function callGeminiApiWithFallback({
         // If quota exceeded (429)
         if (status === 429) {
           const customErr = new Error(
-            `Gemini Rate Limit / Quota Exceeded: ${errMsg || "Too many requests"}. Please wait a moment or check your Google AI Studio quota.`
+            `Gemini Rate Limit / Quota Exceeded: ${errMsg || "Too many requests"}. Please wait a moment or check your Google AI Studio quota.`,
           );
           customErr.status = 429;
           customErr.code = "AI_QUOTA_EXCEEDED";
@@ -389,7 +435,7 @@ async function callGeminiApiWithFallback({
     lastError?.message ||
     "Google Generative AI service did not respond.";
   const friendlyErr = new Error(
-    `AI Provider Error: ${rawMsg}. Please verify your API Key and active models in Super Admin > AI & Models.`
+    `AI Provider Error: ${rawMsg}. Please verify your API Key and active models in Super Admin > AI & Models.`,
   );
   friendlyErr.status = 502;
   friendlyErr.code = "UPSTREAM_AI_FAILED";
@@ -405,10 +451,25 @@ export async function callGeminiRaw({
   temperature = 0.2,
 }) {
   const globalSettings = await getAiGlobalSettings();
-  const geminiKey = (globalSettings.geminiApiKey || process.env.GEMINI_API_KEY || "").trim();
-  const openaiKey = (globalSettings.openaiApiKey || process.env.OPENAI_API_KEY || "").trim();
-  const chosenModel = (globalSettings.model || globalSettings.defaultModel || "gemini-2.5-flash").trim();
-  const provider = (globalSettings.provider || (chosenModel.startsWith("gpt") ? "openai" : "gemini")).toLowerCase();
+  const geminiKey = (
+    globalSettings.geminiApiKey ||
+    process.env.GEMINI_API_KEY ||
+    ""
+  ).trim();
+  const openaiKey = (
+    globalSettings.openaiApiKey ||
+    process.env.OPENAI_API_KEY ||
+    ""
+  ).trim();
+  const chosenModel = (
+    globalSettings.model ||
+    globalSettings.defaultModel ||
+    "gemini-2.5-flash"
+  ).trim();
+  const provider = (
+    globalSettings.provider ||
+    (chosenModel.startsWith("gpt") ? "openai" : "gemini")
+  ).toLowerCase();
 
   // If OpenAI is selected or model is GPT
   if ((provider === "openai" || chosenModel.startsWith("gpt")) && openaiKey) {
@@ -426,7 +487,10 @@ export async function callGeminiRaw({
       if (!geminiKey) {
         throw openAiErr;
       }
-      console.warn("[callGeminiRaw] OpenAI call failed, falling back to Gemini:", openAiErr.message);
+      console.warn(
+        "[callGeminiRaw] OpenAI call failed, falling back to Gemini:",
+        openAiErr.message,
+      );
     }
   }
 
@@ -439,7 +503,9 @@ export async function callGeminiRaw({
       imageMimeType,
       temperature,
       apiKey: geminiKey,
-      preferredModel: chosenModel.startsWith("gpt") ? "gemini-2.5-flash" : chosenModel,
+      preferredModel: chosenModel.startsWith("gpt")
+        ? "gemini-2.5-flash"
+        : chosenModel,
     });
   }
 
@@ -457,7 +523,7 @@ export async function callGeminiRaw({
   }
 
   const missingErr = new Error(
-    "No AI API Key is configured. Please enter your Google Gemini or OpenAI API Key in Super Admin Settings > AI & Models."
+    "No AI API Key is configured. Please enter your Google Gemini or OpenAI API Key in Super Admin Settings > AI & Models.",
   );
   missingErr.status = 502;
   missingErr.code = "AI_KEY_NOT_CONFIGURED";
@@ -465,8 +531,14 @@ export async function callGeminiRaw({
 }
 
 // 5. Task A: Admission Form OCR
-export async function parseAdmissionForm(imageBase64, imageMimeType, availableBatches = []) {
-  const batchListStr = availableBatches.map((b) => `${b._id || b.id}: ${b.name}`).join(", ");
+export async function parseAdmissionForm(
+  imageBase64,
+  imageMimeType,
+  availableBatches = [],
+) {
+  const batchListStr = availableBatches
+    .map((b) => `${b._id || b.id}: ${b.name}`)
+    .join(", ");
   const systemInstruction = `You are a high-precision OCR assistant for tuition admissions in India.
 Your task is to analyze photos of student admission forms, handwritten receipts, or student enrollment slips.
 Extract all details accurately and map to a strict JSON structure.
@@ -501,16 +573,25 @@ Return only JSON. Do not include markdown preamble.`;
 
   const parsed = extractJsonFromText(rawResponse);
   if (!parsed) {
-    throw new Error("Failed to parse admission form data. Please ensure the photo is clear and readable.");
+    throw new Error(
+      "Failed to parse admission form data. Please ensure the photo is clear and readable.",
+    );
   }
   return parsed;
 }
 
 // 6. Task B: Marksheet OCR
-export async function parseTestMarksheet(imageBase64, imageMimeType, batchContext) {
+export async function parseTestMarksheet(
+  imageBase64,
+  imageMimeType,
+  batchContext,
+) {
   const students = batchContext.students || [];
   const studentListStr = students
-    .map((s) => `[id: "${s._id || s.id}", name: "${s.name}", roll: "${s.enrollmentNumber || ""}"]`)
+    .map(
+      (s) =>
+        `[id: "${s._id || s.id}", name: "${s.name}", roll: "${s.enrollmentNumber || ""}"]`,
+    )
     .join(", ");
 
   const systemInstruction = `You are an OCR assistant for tuition teachers grading test papers and marksheets.
@@ -555,7 +636,9 @@ Return only JSON.`;
 
   const parsed = extractJsonFromText(rawResponse);
   if (!parsed) {
-    throw new Error("Failed to parse marksheet image. Please ensure handwriting or score column is legible.");
+    throw new Error(
+      "Failed to parse marksheet image. Please ensure handwriting or score column is legible.",
+    );
   }
   return parsed;
 }
@@ -573,18 +656,38 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
 
   try {
     const results = await Promise.allSettled([
-      Student.find({ institute: instIdStr }).select("name phone totalFees paidAmount pendingAmount feePlanType batches status lastActiveAt").lean(),
-      Batch.find({ institute: instIdStr }).select("name scheduleDays startTime endTime").lean(),
+      Student.find({ institute: instIdStr })
+        .select(
+          "name phone totalFees paidAmount pendingAmount feePlanType batches status lastActiveAt",
+        )
+        .lean(),
+      Batch.find({ institute: instIdStr })
+        .select("name scheduleDays startTime endTime")
+        .lean(),
       Note.countDocuments({ institute: instIdStr }),
-      Notice.find({ institute: instIdStr }).sort({ createdAt: -1 }).limit(3).lean(),
-      TestResult.find({ institute: instIdStr }).sort({ createdAt: -1 }).limit(5).lean(),
+      Notice.find({ institute: instIdStr })
+        .sort({ createdAt: -1 })
+        .limit(3)
+        .lean(),
+      TestResult.find({ institute: instIdStr })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .lean(),
     ]);
 
-    if (results[0].status === "fulfilled" && Array.isArray(results[0].value)) students = results[0].value;
-    if (results[1].status === "fulfilled" && Array.isArray(results[1].value)) batches = results[1].value;
-    if (results[2].status === "fulfilled" && typeof results[2].value === "number") notes = results[2].value;
-    if (results[3].status === "fulfilled" && Array.isArray(results[3].value)) notices = results[3].value;
-    if (results[4].status === "fulfilled" && Array.isArray(results[4].value)) tests = results[4].value;
+    if (results[0].status === "fulfilled" && Array.isArray(results[0].value))
+      students = results[0].value;
+    if (results[1].status === "fulfilled" && Array.isArray(results[1].value))
+      batches = results[1].value;
+    if (
+      results[2].status === "fulfilled" &&
+      typeof results[2].value === "number"
+    )
+      notes = results[2].value;
+    if (results[3].status === "fulfilled" && Array.isArray(results[3].value))
+      notices = results[3].value;
+    if (results[4].status === "fulfilled" && Array.isArray(results[4].value))
+      tests = results[4].value;
   } catch (err) {
     console.error("Error gathering DB context for AI:", err);
   }
@@ -626,9 +729,14 @@ Institute Live Snapshot:
 
   const systemInstruction = `You are DeskAI, the direct and friendly AI tuition assistant for this institute.
 Use the real-time context below to answer accurately.
-Format with clean bullet points, bold highlights, and rupee symbols (₹).
-Keep answers crisp, helpful, and focused on coaching/tuition operations.
-Answer in the language requested (English or Hinglish).
+Formatting rules:
+- Write in a natural, clean, professional style.
+- Use clean bullet points with bullet markers (• or -).
+- Highlight key metrics cleanly with bold text (e.g. • Total Enrolled Students: **15**).
+- Avoid redundant double asterisks like "**Label:** **Value**" (bold only the value or label, not both separately).
+- Do not use markdown headers with hashtags (### or ##); instead, write clean section titles on their own line with a colon or emoji (e.g. 👥 Student Overview:).
+- Keep answers crisp, helpful, and focused on coaching/tuition operations.
+- Answer in the language requested (English or Hinglish).
 Context:
 ${contextStr}`;
 
@@ -652,19 +760,27 @@ Return ONLY valid JSON:
 
   const raw = await callGeminiRaw({
     prompt,
-    systemInstruction: "You are an expert communicator for educational coaching centers.",
+    systemInstruction:
+      "You are an expert communicator for educational coaching centers.",
     temperature: 0.4,
   });
 
   const parsed = extractJsonFromText(raw);
-  return parsed || {
-    title: "Institute Announcement",
-    whatsappText: raw,
-  };
+  return (
+    parsed || {
+      title: "Institute Announcement",
+      whatsappText: raw,
+    }
+  );
 }
 
 // 9. Task E: Quiz / Question Paper Generator
-export async function generatePracticeQuiz(subject, topic, classLevel = "Class 10", numQuestions = 5) {
+export async function generatePracticeQuiz(
+  subject,
+  topic,
+  classLevel = "Class 10",
+  numQuestions = 5,
+) {
   const prompt = `Create a high-quality practice quiz for ${classLevel} on Subject: "${subject}", Topic: "${topic}".
 Generate exactly ${numQuestions} multiple choice questions with answers and explanations.
 Return ONLY valid JSON:
@@ -685,7 +801,8 @@ Return ONLY valid JSON:
 
   const raw = await callGeminiRaw({
     prompt,
-    systemInstruction: "You are an expert curriculum and exam question creator.",
+    systemInstruction:
+      "You are an expert curriculum and exam question creator.",
     temperature: 0.3,
   });
 
@@ -693,15 +810,25 @@ Return ONLY valid JSON:
 }
 
 // 10. Task F: Student Doubt Solver
-export async function solveStudentDoubt(questionText, imageBase64, imageMimeType, studentName = "Student") {
+export async function solveStudentDoubt(
+  questionText,
+  imageBase64,
+  imageMimeType,
+  studentName = "Student",
+) {
   const systemInstruction = `You are a supportive, friendly AI tutor for students.
 Your goal is to explain concepts clearly, provide step-by-step solutions, highlight formulas, and encourage learning.
 If the student uploaded a math, science, or physics question photo, solve it step-by-step.
 Address student by name: ${studentName}.
-Use easy-to-understand language with markdown formatting.`;
+Formatting rules:
+- Present steps with clear numbering (Step 1, Step 2).
+- Use clean bullet points (•) and highlight final answers and formulas cleanly.
+- Do not use hashtag headers (### or ##); use clean headings like 📌 Concept: or 💡 Solution:`;
 
   return await callGeminiRaw({
-    prompt: questionText || "Please explain this question step by step and give the solution.",
+    prompt:
+      questionText ||
+      "Please explain this question step by step and give the solution.",
     systemInstruction,
     imageBase64,
     imageMimeType,
