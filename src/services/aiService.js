@@ -535,17 +535,23 @@ export async function parseAdmissionForm(
   imageBase64,
   imageMimeType,
   availableBatches = [],
+  instituteCustomFields = [],
 ) {
   const batchListStr = availableBatches
     .map((b) => `${b._id || b.id}: ${b.name}`)
     .join(", ");
+  const customFieldsStr = (instituteCustomFields || [])
+    .map((f) => `${f.name || f.label} (${f.label || f.name})`)
+    .join(", ");
+
   const systemInstruction = `You are a high-precision OCR and document verification assistant for tuition admissions in India.
 TASK 1: VERIFY DOCUMENT TYPE FIRST.
 Examine whether the provided image is a genuine student admission form, enrollment application, student registration slip, or tuition admission receipt.
 If the image is NOT an admission form (for example: a selfie, person, animal, scenery, vehicle, food, random object, meme, test marksheet, or unrelated document), you MUST reject it by setting "isValidDocument": false.
 
 Available Batches: [${batchListStr}].
-Select the closest matching batch ID if mentioned in the form.`;
+Select the closest matching batch ID if mentioned in the form.
+${customFieldsStr ? `Active Custom Fields for this Institute: [${customFieldsStr}]. If any of these custom fields are found on the form, extract them into "customFields" dictionary with the exact field name as the key.` : ""}`;
 
   const prompt = `Analyze this image carefully.
 STEP 1: Verify if this is an admission form.
@@ -556,7 +562,7 @@ If it is NOT an admission form or enrollment slip, respond ONLY with:
   "reason": "The uploaded image does not appear to be an admission form. Please upload the correct document."
 }
 
-STEP 2: If and ONLY IF it is a valid admission form or enrollment slip, extract all fields and respond ONLY with:
+STEP 2: If and ONLY IF it is a valid admission form or enrollment slip, extract only the fields that will be stored in the student database record and respond ONLY with:
 {
   "isValidDocument": true,
   "documentType": "admission_form",
@@ -568,11 +574,12 @@ STEP 2: If and ONLY IF it is a valid admission form or enrollment slip, extract 
   "address": "Residential address or empty string",
   "batchId": "Matching batch ID from available batches or null",
   "batchName": "Name of class/batch/grade mentioned",
-  "feePlanType": "monthly | quarterly | yearly | one_time",
+  "feePlanType": "monthly | full_course | partial",
   "totalFees": 10000,
-  "paidAmount": 2000,
+  "paidAmount": 0,
+  "feeStatus": "paid | unpaid",
   "dueDate": "YYYY-MM-DD or empty string",
-  "notes": "Any other detected notes (e.g. school name, board, discount, reference)"
+  "customFields": {}
 }
 Return only JSON. Do not include markdown preamble.`;
 
