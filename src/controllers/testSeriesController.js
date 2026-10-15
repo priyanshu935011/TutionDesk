@@ -1,5 +1,6 @@
 import TestSeriesFolder from "../models/TestSeriesFolder.js";
 import TestSeries from "../models/TestSeries.js";
+import TestSeriesCategory from "../models/TestSeriesCategory.js";
 import InstituteTestSeriesAccess from "../models/InstituteTestSeriesAccess.js";
 import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
 import Institute from "../models/Institute.js";
@@ -8,16 +9,16 @@ import Batch from "../models/Batch.js";
 import mongoose from "../utils/supabaseModel.js";
 
 const DEFAULT_CATEGORIES = [
-  "Class 10",
-  "Class 11",
-  "Class 12",
-  "JEE Main & Advanced",
-  "NEET",
-  "Bank & SSC",
-  "CUET",
-  "Foundation",
-  "Olympiad",
-  "General",
+  { name: "Class 10", icon: "🎓" },
+  { name: "Class 11", icon: "📚" },
+  { name: "Class 12", icon: "🏆" },
+  { name: "JEE Main & Advanced", icon: "⚛️" },
+  { name: "NEET", icon: "🩺" },
+  { name: "Bank & SSC", icon: "🏛️" },
+  { name: "CUET", icon: "🎯" },
+  { name: "Foundation", icon: "🌱" },
+  { name: "Olympiad", icon: "🥇" },
+  { name: "General", icon: "📝" },
 ];
 
 // Helper to sanitize questions for student taking test (hide answers)
@@ -38,26 +39,89 @@ function sanitizeQuestionsForStudent(questions = []) {
 }
 
 // -------------------------------------------------------------
-// CATEGORIES & FOLDERS
+// CATEGORIES (DATABASE-STORED)
 // -------------------------------------------------------------
 
 export const getCategories = async (req, res) => {
   try {
-    const folders = await TestSeriesFolder.find({}).select("category");
-    const tests = await TestSeries.find({}).select("category");
+    let dbCategories = await TestSeriesCategory.find({}).sort({ name: 1 });
 
-    const categorySet = new Set(DEFAULT_CATEGORIES);
-    folders.forEach((f) => {
-      if (f.category) categorySet.add(f.category.trim());
-    });
-    tests.forEach((t) => {
-      if (t.category) categorySet.add(t.category.trim());
-    });
+    // Seed defaults into database if table is empty
+    if (!dbCategories || dbCategories.length === 0) {
+      try {
+        for (const item of DEFAULT_CATEGORIES) {
+          await TestSeriesCategory.create(item);
+        }
+        dbCategories = await TestSeriesCategory.find({}).sort({ name: 1 });
+      } catch (_) {}
+    }
 
-    res.json({ categories: Array.from(categorySet).sort() });
+    const categories = (dbCategories || []).map((c) => ({
+      id: c._id || c.id,
+      name: c.name,
+      icon: c.icon || "📝",
+    }));
+
+    res.json({
+      categories: categories.map((c) => c.name),
+      categoryList: categories,
+    });
   } catch (error) {
     console.error("Error fetching categories:", error);
     res.status(500).json({ message: "Failed to fetch categories" });
+  }
+};
+
+export const createCategory = async (req, res) => {
+  try {
+    const { name, icon } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Category name is required" });
+    }
+
+    const cleanName = name.trim();
+    const existing = await TestSeriesCategory.findOne({ name: cleanName });
+    if (existing) {
+      return res.status(400).json({ message: "Category with this name already exists" });
+    }
+
+    const newCat = await TestSeriesCategory.create({
+      name: cleanName,
+      icon: icon ? icon.trim() : "📝",
+    });
+
+    res.status(201).json({
+      message: "Category created successfully",
+      category: {
+        id: newCat._id || newCat.id,
+        name: newCat.name,
+        icon: newCat.icon,
+      },
+    });
+  } catch (error) {
+    console.error("Error creating category:", error);
+    res.status(500).json({ message: "Failed to create category" });
+  }
+};
+
+export const deleteCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    await TestSeriesCategory.deleteOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+
+    res.json({ message: "Category deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting category:", error);
+    res.status(500).json({ message: "Failed to delete category" });
   }
 };
 

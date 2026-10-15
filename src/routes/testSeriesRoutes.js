@@ -3,6 +3,8 @@ import protect from "../middleware/authMiddleware.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
 import {
   getCategories,
+  createCategory,
+  deleteCategory,
   getFolders,
   createFolder,
   updateFolder,
@@ -41,8 +43,12 @@ router.get("/student/attempt/:attemptId", studentAuth, getStudentAttemptResult);
 // ---------------- COMMON / TEACHER / ADMIN ROUTES ----------------
 router.use(protect);
 
-// Categories & Folders
+// Categories
 router.get("/categories", getCategories);
+router.post("/categories", createCategory);
+router.delete("/categories/:id", deleteCategory);
+
+// Folders
 router.get("/folders", getFolders);
 router.post("/folders", createFolder);
 router.put("/folders/:id", updateFolder);

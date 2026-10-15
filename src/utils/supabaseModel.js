@@ -14,7 +14,8 @@ const MISSING_TABLES = new Set([
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment",
   "contactmessages", "contact_messages", "system_logs", "systemlogs",
   "test_series_folders", "testseriesfolders", "test_series", "testseries",
-  "test_series_attempts", "testseriesattempts", "institute_test_series", "institutetestseries"
+  "test_series_attempts", "testseriesattempts", "institute_test_series", "institutetestseries",
+  "test_series_categories", "testseriescategories"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -2578,6 +2579,7 @@ const mockMongoose = {
     else if (modelName === "TestSeries") tableName = "test_series";
     else if (modelName === "InstituteTestSeriesAccess") tableName = "institute_test_series";
     else if (modelName === "TestSeriesAttempt") tableName = "test_series_attempts";
+    else if (modelName === "TestSeriesCategory") tableName = "test_series_categories";
     else tableName = modelName.toLowerCase() + "s";
 
     return new SupabaseModel(tableName);
