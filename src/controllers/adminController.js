@@ -353,6 +353,8 @@ export const createInstitute = async (req, res) => {
       releaseVideosFeatureEnabled,
       maxVideoStorageGb,
       maxLeadFileSizeMb,
+      testSeriesFeatureEnabled,
+      allowedTestSeriesCategories,
       aiEnabled,
       aiStudentEnabled,
       aiWalletBalance,
@@ -414,6 +416,8 @@ export const createInstitute = async (req, res) => {
       logoUrl: logoUrl || null,
       themeColor: themeColor || "#6366f1",
       allowedFeatures: allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
+      testSeriesFeatureEnabled: testSeriesFeatureEnabled !== undefined ? Boolean(testSeriesFeatureEnabled) : (allowedFeatures?.includes("test_series") || false),
+      allowedTestSeriesCategories: Array.isArray(allowedTestSeriesCategories) ? allowedTestSeriesCategories : [],
       aiEnabled: Boolean(aiEnabled),
       aiStudentEnabled: Boolean(aiStudentEnabled),
       aiWalletBalance: Number(aiWalletBalance || 0),
@@ -493,6 +497,8 @@ export const updateInstitute = async (req, res) => {
       walletBalance,
       perMessageCharge,
       aiEnabled,
+      testSeriesFeatureEnabled,
+      allowedTestSeriesCategories,
       aiStudentEnabled,
       aiWalletBalance,
       aiQueryRate,
@@ -531,6 +537,14 @@ export const updateInstitute = async (req, res) => {
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
     if (themeColor !== undefined) institute.themeColor = themeColor;
     if (allowedFeatures !== undefined) institute.allowedFeatures = allowedFeatures;
+    if (testSeriesFeatureEnabled !== undefined) {
+      institute.testSeriesFeatureEnabled = Boolean(testSeriesFeatureEnabled);
+    } else if (allowedFeatures !== undefined) {
+      institute.testSeriesFeatureEnabled = allowedFeatures.includes("test_series");
+    }
+    if (allowedTestSeriesCategories !== undefined) {
+      institute.allowedTestSeriesCategories = Array.isArray(allowedTestSeriesCategories) ? allowedTestSeriesCategories : [];
+    }
 
     if (walletBalance !== undefined && walletBalance !== null && !isNaN(Number(walletBalance))) {
       const newBal = Number(walletBalance);

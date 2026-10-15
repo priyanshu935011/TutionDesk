@@ -31,7 +31,7 @@ const buildInstituteState = async (user) => {
   if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
     try {
       institute = await Institute.findById(instIdStr).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
       );
     } catch (_) {}
   }
@@ -40,7 +40,7 @@ const buildInstituteState = async (user) => {
       institute = await Institute.findOne({
         $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
       }).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
       );
     } catch (_) {}
   }
@@ -60,6 +60,8 @@ const buildInstituteState = async (user) => {
       status: "active",
       tuitionType: "solo",
       quizFeatureEnabled: true,
+      testSeriesFeatureEnabled: false,
+      allowedTestSeriesCategories: [],
       recordedLecturesFeatureEnabled: true,
       releaseVideosFeatureEnabled: true,
       brandingEnabled: true,
@@ -84,6 +86,8 @@ const buildInstituteState = async (user) => {
     status: institute.status,
     tuitionType: institute.tuitionType || "solo",
     quizFeatureEnabled: institute.quizFeatureEnabled !== false,
+    testSeriesFeatureEnabled: institute.testSeriesFeatureEnabled === true || (Array.isArray(institute.allowedFeatures) && institute.allowedFeatures.includes("test_series")),
+    allowedTestSeriesCategories: institute.allowedTestSeriesCategories || [],
     recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled !== false,
     releaseVideosFeatureEnabled: institute.releaseVideosFeatureEnabled !== false,
     brandingEnabled: institute.brandingEnabled !== false,

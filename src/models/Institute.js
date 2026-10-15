@@ -93,6 +93,14 @@ const instituteSchema = new mongoose.Schema(
       type: [String],
       default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads", "recorded_lectures", "release_videos"],
     },
+    testSeriesFeatureEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    allowedTestSeriesCategories: {
+      type: [String],
+      default: [],
+    },
     flexibleDueDate: {
       type: Boolean,
       default: false,
