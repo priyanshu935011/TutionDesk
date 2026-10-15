@@ -12,10 +12,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment",
-  "contactmessages", "contact_messages", "system_logs", "systemlogs",
-  "test_series_folders", "testseriesfolders", "test_series", "testseries",
-  "test_series_attempts", "testseriesattempts", "institute_test_series", "institutetestseries",
-  "test_series_categories", "testseriescategories"
+  "contactmessages", "contact_messages", "system_logs", "systemlogs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -616,6 +613,18 @@ class SupabaseDocument {
     if (data.file_url !== undefined) this.pdfUrl = data.file_url;
     if (data.student_ids !== undefined) this.students = data.student_ids;
     if (data.batch_ids !== undefined) this.batches = data.batch_ids;
+    if (data.folder_id !== undefined) {
+      this.folder = data.folder_id;
+      this.folder_id = data.folder_id;
+    }
+    if (data.test_series_id !== undefined) {
+      this.testSeries = data.test_series_id;
+      this.test_series_id = data.test_series_id;
+    }
+    if (data.created_by !== undefined) {
+      this.createdBy = data.created_by;
+      this.created_by = data.created_by;
+    }
 
     if (tableName === "whatsapp_logs") {
       this.recipient = data.recipient || data.to || this.to || "";
@@ -851,6 +860,58 @@ class SupabaseDocument {
 
     if (this._tableName === "batches") {
       delete payload.status;
+    }
+
+    if (this._tableName === "test_series") {
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.folder !== undefined || payload.folder_id !== undefined) {
+        const f = payload.folder_id || payload.folder;
+        payload.folder_id = f ? toValidUUID(f) : null;
+        delete payload.folder;
+      }
+      if (payload.created_by !== undefined || payload.createdBy !== undefined) {
+        const cb = payload.created_by || payload.createdBy;
+        payload.created_by = cb ? toValidUUID(cb) : null;
+        delete payload.createdBy;
+      }
+    }
+
+    if (this._tableName === "test_series_folders") {
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.created_by !== undefined || payload.createdBy !== undefined) {
+        const cb = payload.created_by || payload.createdBy;
+        payload.created_by = cb ? toValidUUID(cb) : null;
+        delete payload.createdBy;
+      }
+      if (payload.parent_folder !== undefined || payload.parentFolder !== undefined) {
+        const pf = payload.parent_folder || payload.parentFolder;
+        payload.parent_folder = pf ? toValidUUID(pf) : null;
+        delete payload.parentFolder;
+      }
+    }
+
+    if (this._tableName === "institute_test_series") {
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.test_series !== undefined || payload.test_series_id !== undefined || payload.testSeries !== undefined) {
+        const ts = payload.test_series_id || payload.test_series || payload.testSeries;
+        payload.test_series_id = toValidUUID(ts);
+        delete payload.test_series;
+        delete payload.testSeries;
+      }
+      if (payload.assigned_by !== undefined || payload.assignedBy !== undefined) {
+        const ab = payload.assigned_by || payload.assignedBy;
+        payload.assigned_by = ab ? toValidUUID(ab) : null;
+        delete payload.assignedBy;
+      }
     }
 
     if (this._id) {
@@ -1629,6 +1690,29 @@ class SupabaseModel {
               else if (dbSubKey === "video") dbSubKey = "video_id";
             }
 
+            if (this.tableName === "test_series") {
+              if (dbSubKey === "institute") dbSubKey = "institute_id";
+              else if (dbSubKey === "folder") dbSubKey = "folder_id";
+              else if (dbSubKey === "created_by" || dbSubKey === "createdBy") dbSubKey = "created_by";
+            }
+
+            if (this.tableName === "test_series_folders") {
+              if (dbSubKey === "institute") dbSubKey = "institute_id";
+              else if (dbSubKey === "parent_folder" || dbSubKey === "parentFolder") dbSubKey = "parent_folder";
+            }
+
+            if (this.tableName === "institute_test_series") {
+              if (dbSubKey === "institute") dbSubKey = "institute_id";
+              else if (dbSubKey === "test_series" || dbSubKey === "testSeries") dbSubKey = "test_series_id";
+            }
+
+            if (this.tableName === "test_series_attempts") {
+              if (dbSubKey === "student") dbSubKey = "student_id";
+              else if (dbSubKey === "institute") dbSubKey = "institute_id";
+              else if (dbSubKey === "batch") dbSubKey = "batch_id";
+              else if (dbSubKey === "test_series" || dbSubKey === "testSeries") dbSubKey = "test_series_id";
+            }
+
             let subVal = cleanValue(rawSubVal);
             if (subVal && typeof subVal === "object" && subVal.$in !== undefined) {
               subVal = subVal.$in;
@@ -1669,7 +1753,8 @@ class SupabaseModel {
                 if (cleanItem && String(cleanItem) !== "[object Object]") {
                   const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
                   const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbSubKey);
-                  if (!isUuidCol || isUuid) {
+                  const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbSubKey === "institute_id" || dbSubKey === "created_by");
+                  if (!isUuidCol || isUuid || isTextIdCol) {
                     orParts.push(`${dbSubKey}.eq.${cleanItem}`);
                   }
                 }
@@ -1705,6 +1790,25 @@ class SupabaseModel {
       if (this.tableName === "video_playlist_items") {
         if (dbKey === "playlist") dbKey = "playlist_id";
         else if (dbKey === "video") dbKey = "video_id";
+      }
+      if (this.tableName === "test_series") {
+        if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "folder") dbKey = "folder_id";
+        else if (dbKey === "created_by" || dbKey === "createdBy") dbKey = "created_by";
+      }
+      if (this.tableName === "test_series_folders") {
+        if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "parent_folder" || dbKey === "parentFolder") dbKey = "parent_folder";
+      }
+      if (this.tableName === "institute_test_series") {
+        if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "test_series" || dbKey === "testSeries") dbKey = "test_series_id";
+      }
+      if (this.tableName === "test_series_attempts") {
+        if (dbKey === "student") dbKey = "student_id";
+        else if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "batch") dbKey = "batch_id";
+        else if (dbKey === "test_series" || dbKey === "testSeries") dbKey = "test_series_id";
       }
 
       if (val === null) {
@@ -1982,6 +2086,58 @@ class SupabaseModel {
       delete payload.type;
     }
 
+    if (this.tableName === "test_series") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.folder || payload.folder_id) {
+        const f = payload.folder_id || payload.folder;
+        payload.folder_id = f ? toValidUUID(f) : null;
+        delete payload.folder;
+      }
+      if (payload.created_by || payload.createdBy) {
+        const cb = payload.created_by || payload.createdBy;
+        payload.created_by = cb ? toValidUUID(cb) : null;
+        delete payload.createdBy;
+      }
+    }
+
+    if (this.tableName === "test_series_folders") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.created_by || payload.createdBy) {
+        const cb = payload.created_by || payload.createdBy;
+        payload.created_by = cb ? toValidUUID(cb) : null;
+        delete payload.createdBy;
+      }
+      if (payload.parent_folder || payload.parentFolder) {
+        const pf = payload.parent_folder || payload.parentFolder;
+        payload.parent_folder = pf ? toValidUUID(pf) : null;
+        delete payload.parentFolder;
+      }
+    }
+
+    if (this.tableName === "institute_test_series") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.test_series || payload.test_series_id || payload.testSeries) {
+        const ts = payload.test_series_id || payload.test_series || payload.testSeries;
+        payload.test_series_id = toValidUUID(ts);
+        delete payload.test_series;
+        delete payload.testSeries;
+      }
+      if (payload.assigned_by || payload.assignedBy) {
+        const ab = payload.assigned_by || payload.assignedBy;
+        payload.assigned_by = ab ? toValidUUID(ab) : null;
+        delete payload.assignedBy;
+      }
+    }
+
     const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
     for (const key of uuidPayloadKeys) {
       if (payload[key] && typeof payload[key] === "string") {
@@ -2003,7 +2159,7 @@ class SupabaseModel {
         .maybeSingle();
 
       if (error && error.message) {
-        const strictTables = ["notes", "institutes", "students", "batches"];
+        const strictTables = ["notes", "institutes", "students", "batches", "test_series", "test_series_folders", "institute_test_series", "test_series_categories", "test_series_attempts"];
         const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
 
         if (!isStrictTable && (

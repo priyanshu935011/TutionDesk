@@ -6,7 +6,7 @@ import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
-import mongoose from "../utils/supabaseModel.js";
+import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
 
 const DEFAULT_CATEGORIES = [
   { name: "Class 10", icon: "🎓" },
@@ -268,6 +268,11 @@ export const getTestSeriesList = async (req, res) => {
 
     // Teacher Request
     const instituteId = req.user?.institute?._id || req.user?.institute || req.instituteId;
+    const instStr = String(instituteId || "").trim();
+    const instUuid = toValidUUID(instStr);
+    const userId = String(req.user?._id || req.user?.id || "").trim();
+    const userUuid = toValidUUID(userId);
+
     const institute = await Institute.findById(instituteId);
 
     const isFeatureEnabled =
@@ -304,35 +309,78 @@ export const getTestSeriesList = async (req, res) => {
       globalTestCondition = { isGlobal: true };
     }
 
-    // Filter tests: global tests matching allowed series/categories + institute's custom tests
-    const query = {
+    // Query global tests
+    const globalQuery = { ...globalTestCondition };
+    if (folder) globalQuery.folder = folder;
+    if (category) globalQuery.category = category;
+    if (search) globalQuery.title = { $regex: search, $options: "i" };
+
+    // Query custom tests for this institute or created by this teacher
+    const customQuery = {
       $or: [
-        globalTestCondition,
-        { institute: instituteId },
+        { institute: instStr },
+        { institute_id: instStr },
+        { institute: instUuid },
+        { institute_id: instUuid },
+        { createdBy: userId },
+        { created_by: userId },
+        { createdBy: userUuid },
+        { created_by: userUuid },
       ],
     };
+    if (folder) customQuery.folder = folder;
+    if (category) customQuery.category = category;
+    if (search) customQuery.title = { $regex: search, $options: "i" };
 
-    if (folder) query.folder = folder;
-    if (category) query.category = category;
-    if (search) query.title = { $regex: search, $options: "i" };
+    const [globalTests, customTests] = await Promise.all([
+      TestSeries.find(globalQuery).sort({ createdAt: -1 }),
+      TestSeries.find(customQuery).sort({ createdAt: -1 }),
+    ]);
 
-    const tests = await TestSeries.find(query).sort({ createdAt: -1 });
+    // Combine custom tests (top) and global tests (deduplicated)
+    const testMap = new Map();
+    for (const t of customTests) {
+      const idStr = String(t._id || t.id);
+      if (idStr) testMap.set(idStr, t);
+    }
+    for (const t of globalTests) {
+      const idStr = String(t._id || t.id);
+      if (idStr && !testMap.has(idStr)) testMap.set(idStr, t);
+    }
+    const tests = Array.from(testMap.values());
 
     // Attach institute access info (isEnabled & assignedBatches)
     const accessRecords = await InstituteTestSeriesAccess.find({
-      institute: instituteId,
+      $or: [
+        { institute: instStr },
+        { institute_id: instStr },
+        { institute: instUuid },
+        { institute_id: instUuid },
+      ],
     });
     const accessMap = new Map();
     accessRecords.forEach((acc) => {
-      accessMap.set(String(acc.testSeries), acc);
+      const seriesId = String(acc.test_series_id || acc.testSeries || acc.test_series || "");
+      if (seriesId) accessMap.set(seriesId, acc);
     });
 
     const enrichedTests = tests.map((t) => {
       const tObj = t.toObject ? t.toObject() : { ...t };
-      const access = accessMap.get(String(t._id));
+      const tId = String(t._id || t.id);
+      const access = accessMap.get(tId);
+      const isOwnTest =
+        !t.isGlobal ||
+        String(t.institute_id || t.institute) === instStr ||
+        String(t.institute_id || t.institute) === instUuid ||
+        String(t.created_by || t.createdBy) === userId ||
+        String(t.created_by || t.createdBy) === userUuid;
+
       tObj.access = access
-        ? { isEnabled: access.isEnabled, assignedBatches: access.assignedBatches }
-        : { isEnabled: false, assignedBatches: [] };
+        ? {
+            isEnabled: access.isEnabled ?? access.is_enabled ?? true,
+            assignedBatches: access.assignedBatches ?? access.assigned_batches ?? [],
+          }
+        : { isEnabled: isOwnTest ? true : false, assignedBatches: [] };
       return tObj;
     });
 
@@ -434,6 +482,7 @@ export const createTestSeries = async (req, res) => {
       title: title.trim(),
       description: description || "",
       folder: folder || null,
+      folder_id: folder || null,
       folderPath,
       category: resolvedCategory,
       durationMinutes: Number(durationMinutes || 60),
@@ -442,10 +491,28 @@ export const createTestSeries = async (req, res) => {
       instructions: instructions || "",
       questions: formattedQuestions,
       isGlobal: isSuperAdmin ? (isGlobal !== false) : false,
-      institute: instituteId,
-      createdBy: req.user?._id,
+      institute: instituteId ? String(instituteId) : null,
+      institute_id: instituteId ? String(instituteId) : null,
+      createdBy: req.user?._id ? String(req.user._id) : null,
+      created_by: req.user?._id ? String(req.user._id) : null,
       isPublished: true,
     });
+
+    if (!isSuperAdmin && instituteId) {
+      try {
+        await InstituteTestSeriesAccess.create({
+          institute: String(instituteId),
+          institute_id: String(instituteId),
+          testSeries: String(testSeries._id || testSeries.id),
+          test_series_id: String(testSeries._id || testSeries.id),
+          isEnabled: true,
+          assignedBatches: [],
+          assignedBy: req.user?._id ? String(req.user._id) : null,
+        });
+      } catch (accErr) {
+        console.warn("Could not auto-create InstituteTestSeriesAccess:", accErr?.message);
+      }
+    }
 
     res.status(201).json({ testSeries });
   } catch (error) {
