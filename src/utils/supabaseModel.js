@@ -2574,6 +2574,10 @@ const mockMongoose = {
     else if (modelName === "SystemLog") tableName = "system_logs";
     else if (modelName === "Lead") tableName = "leads";
     else if (modelName === "LeadForm") tableName = "lead_forms";
+    else if (modelName === "TestSeriesFolder") tableName = "test_series_folders";
+    else if (modelName === "TestSeries") tableName = "test_series";
+    else if (modelName === "InstituteTestSeriesAccess") tableName = "institute_test_series";
+    else if (modelName === "TestSeriesAttempt") tableName = "test_series_attempts";
     else tableName = modelName.toLowerCase() + "s";
 
     return new SupabaseModel(tableName);

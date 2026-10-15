@@ -218,15 +218,32 @@ export const getTestSeriesList = async (req, res) => {
       });
     }
 
-    const allowedCategories = institute?.allowedTestSeriesCategories || [];
+    const allowedSeriesIds = Array.isArray(institute?.allowedTestSeries)
+      ? institute.allowedTestSeries.map(String).filter(Boolean)
+      : [];
+    const allowedCategories = Array.isArray(institute?.allowedTestSeriesCategories)
+      ? institute.allowedTestSeriesCategories
+      : [];
 
-    // Filter tests: global tests matching allowed categories + institute's custom tests
+    let globalTestCondition;
+    if (allowedSeriesIds.length > 0) {
+      globalTestCondition = {
+        isGlobal: true,
+        _id: { $in: allowedSeriesIds },
+      };
+    } else if (allowedCategories.length > 0) {
+      globalTestCondition = {
+        isGlobal: true,
+        category: { $in: allowedCategories },
+      };
+    } else {
+      globalTestCondition = { isGlobal: true };
+    }
+
+    // Filter tests: global tests matching allowed series/categories + institute's custom tests
     const query = {
       $or: [
-        {
-          isGlobal: true,
-          category: allowedCategories.length > 0 ? { $in: allowedCategories } : { $exists: true },
-        },
+        globalTestCondition,
         { institute: instituteId },
       ],
     };

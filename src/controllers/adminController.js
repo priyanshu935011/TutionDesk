@@ -355,6 +355,7 @@ export const createInstitute = async (req, res) => {
       maxLeadFileSizeMb,
       testSeriesFeatureEnabled,
       allowedTestSeriesCategories,
+      allowedTestSeries,
       aiEnabled,
       aiStudentEnabled,
       aiWalletBalance,
@@ -418,6 +419,7 @@ export const createInstitute = async (req, res) => {
       allowedFeatures: allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp"],
       testSeriesFeatureEnabled: testSeriesFeatureEnabled !== undefined ? Boolean(testSeriesFeatureEnabled) : (allowedFeatures?.includes("test_series") || false),
       allowedTestSeriesCategories: Array.isArray(allowedTestSeriesCategories) ? allowedTestSeriesCategories : [],
+      allowedTestSeries: Array.isArray(allowedTestSeries) ? allowedTestSeries : [],
       aiEnabled: Boolean(aiEnabled),
       aiStudentEnabled: Boolean(aiStudentEnabled),
       aiWalletBalance: Number(aiWalletBalance || 0),
@@ -499,6 +501,7 @@ export const updateInstitute = async (req, res) => {
       aiEnabled,
       testSeriesFeatureEnabled,
       allowedTestSeriesCategories,
+      allowedTestSeries,
       aiStudentEnabled,
       aiWalletBalance,
       aiQueryRate,
@@ -544,6 +547,9 @@ export const updateInstitute = async (req, res) => {
     }
     if (allowedTestSeriesCategories !== undefined) {
       institute.allowedTestSeriesCategories = Array.isArray(allowedTestSeriesCategories) ? allowedTestSeriesCategories : [];
+    }
+    if (allowedTestSeries !== undefined) {
+      institute.allowedTestSeries = Array.isArray(allowedTestSeries) ? allowedTestSeries : [];
     }
 
     if (walletBalance !== undefined && walletBalance !== null && !isNaN(Number(walletBalance))) {

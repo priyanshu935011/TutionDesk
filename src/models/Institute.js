@@ -101,6 +101,10 @@ const instituteSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    allowedTestSeries: {
+      type: [String],
+      default: [],
+    },
     flexibleDueDate: {
       type: Boolean,
       default: false,
