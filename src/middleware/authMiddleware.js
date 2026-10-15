@@ -169,7 +169,7 @@ const protect = async (req, res, next) => {
       req.user.role === "student_parent";
 
     if (req.user && !skipSubscriptionCheck && req.user.institute) {
-      const isPaymentRoute = req.originalUrl && req.originalUrl.includes("/payments/");
+      const isPaymentRoute = req.originalUrl && (req.originalUrl.includes("/payments") || req.originalUrl.includes("/payment"));
       const rawInst = req.user.institute;
       const instId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
 

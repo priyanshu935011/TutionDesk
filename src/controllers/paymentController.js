@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import SystemSetting from "../models/SystemSetting.js";
-import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
+import { getInstituteWalletBalance, getInstituteMessageCharge, getSupabaseInstituteRow } from "../services/whatsappService.js";
+import { supabase, updateInstituteWalletBalanceMetadata } from "../utils/supabaseModel.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { sendRenewalReceiptEmail } from "../utils/mailer.js";
 import nodemailer from "nodemailer";
@@ -29,9 +30,143 @@ const getCashfreeConfig = async () => {
 };
 
 const getBaseUrl = (environment) => {
-  return environment === "production"
+  const env = String(environment || "").trim().toLowerCase();
+  return env === "production" || env === "live"
     ? "https://api.cashfree.com/pg"
     : "https://sandbox.cashfree.com/pg";
+};
+
+export const creditInstituteWallet = async (instituteId, amount) => {
+  const addAmount = Number(amount || 0);
+  if (addAmount <= 0) return 0;
+
+  const cleanInstId = String(instituteId?._id || instituteId?.id || instituteId || "").trim();
+  if (!cleanInstId) return 0;
+
+  let institute = null;
+  try {
+    institute = await Institute.findById(cleanInstId);
+  } catch (_) {}
+  if (!institute) {
+    try {
+      institute = await Institute.findOne({
+        $or: [{ _id: cleanInstId }, { id: cleanInstId }, { adminUser: cleanInstId }]
+      });
+    } catch (_) {}
+  }
+
+  const currentBal = await getInstituteWalletBalance(cleanInstId, institute?.walletBalance || 0);
+  const newBal = Number((currentBal + addAmount).toFixed(2));
+
+  // 1. Direct update to Supabase 'institutes' table
+  try {
+    const sbRow = await getSupabaseInstituteRow(cleanInstId);
+    const targetSbId = sbRow?.id || cleanInstId;
+    await supabase
+      .from("institutes")
+      .update({
+        wallet_balance: newBal,
+        walletbalance: newBal,
+        walletBalance: newBal
+      })
+      .eq("id", targetSbId);
+  } catch (sbErr) {
+    console.error("[creditInstituteWallet] Supabase balance update error:", sbErr.message);
+  }
+
+  // 2. Update MongoDB / Model Institute document
+  try {
+    if (institute) {
+      institute.walletBalance = newBal;
+      if (typeof institute.save === "function") {
+        await institute.save();
+      }
+    } else {
+      await Institute.updateOne({ _id: cleanInstId }, { $set: { walletBalance: newBal } });
+    }
+  } catch (mErr) {
+    console.error("[creditInstituteWallet] Institute document update error:", mErr.message);
+  }
+
+  // 3. Update metadata JSON
+  updateInstituteWalletBalanceMetadata(cleanInstId, newBal);
+  if (institute && institute._id) updateInstituteWalletBalanceMetadata(institute._id, newBal);
+  if (institute && institute.id) updateInstituteWalletBalanceMetadata(institute.id, newBal);
+
+  // 4. Invalidate caches
+  await clearCachePattern("teacher:dashboard:*").catch(() => {});
+  await clearCachePattern("institute:*").catch(() => {});
+
+  return newBal;
+};
+
+export const checkCashfreeOrderStatus = async (cfOrderId, config) => {
+  if (!cfOrderId) return { status: "pending", rawData: {} };
+  const { appId, secretKey, environment } = config;
+  const cleanEnv = String(environment || "").trim().toLowerCase();
+  const primaryBaseUrl = (cleanEnv === "production" || cleanEnv === "live")
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
+  const alternateBaseUrl = primaryBaseUrl.includes("sandbox")
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
+
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-version": "2023-08-01",
+    "x-client-id": appId,
+    "x-client-secret": secretKey,
+  };
+
+  const tryUrls = [primaryBaseUrl, alternateBaseUrl];
+
+  for (const baseUrl of tryUrls) {
+    try {
+      // 1. Check order payments list (v2023-08-01)
+      let paymentsData = [];
+      try {
+        const payRes = await axios.get(`${baseUrl}/orders/${cfOrderId}/payments`, { headers, timeout: 10000 });
+        paymentsData = Array.isArray(payRes.data) ? payRes.data : [];
+      } catch (payErr) {
+        if (payErr.response?.status === 404) {
+          continue;
+        }
+      }
+
+      const hasSuccessPayment = paymentsData.some(
+        (p) => String(p?.payment_status || "").toUpperCase() === "SUCCESS"
+      );
+
+      // 2. Check main order entity
+      const orderRes = await axios.get(`${baseUrl}/orders/${cfOrderId}`, { headers, timeout: 10000 });
+      const orderData = orderRes.data || {};
+      const orderStatus = String(orderData.order_status || "").toUpperCase();
+
+      if (orderStatus === "PAID" || hasSuccessPayment) {
+        return {
+          status: "success",
+          rawData: { ...orderData, payments: paymentsData },
+        };
+      } else if (["EXPIRED", "CANCELLED", "FAILED"].includes(orderStatus)) {
+        return {
+          status: "failed",
+          rawData: { ...orderData, payments: paymentsData },
+        };
+      } else {
+        return {
+          status: "pending",
+          rawData: { ...orderData, payments: paymentsData },
+        };
+      }
+    } catch (err) {
+      if (err.response?.status === 404) {
+        continue;
+      }
+      console.error(`checkCashfreeOrderStatus error on ${baseUrl}:`, err.response?.data || err.message);
+    }
+  }
+
+  return { status: "pending", rawData: {} };
 };
 
 const getCoveragePlan = (planStr) => {
@@ -243,46 +378,69 @@ export const verifyPayment = async (req, res) => {
     if (!cfOrderId) {
       return res.status(400).json({ message: "cfOrderId is required." });
     }
+    const cleanOrderId = String(cfOrderId).trim();
 
-    const payment = await CashfreePayment.findOne({ cfOrderId });
+    const payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId }
+      ]
+    });
+
     if (!payment) {
       return res.status(404).json({ message: "Payment transaction record not found." });
     }
 
-    const config = await getCashfreeConfig();
-    const { appId, secretKey, environment } = config;
-    const baseUrl = getBaseUrl(environment);
-
-    const headers = {
-      "Content-Type": "application/json",
-      "x-api-version": "2023-08-01",
-      "x-client-id": appId,
-      "x-client-secret": secretKey,
+    const getPopulatedUser = async () => {
+      if (req.user && (req.user._id || req.user.id)) {
+        try {
+          return await User.findById(req.user._id || req.user.id).populate("institute").select("-password");
+        } catch (_) {}
+      }
+      return null;
     };
 
+    // If already verified and marked as success, return immediately
+    if (payment.status === "success") {
+      const populatedUser = await getPopulatedUser();
+      return res.json({ status: "success", payment, user: populatedUser });
+    }
+
+    const config = await getCashfreeConfig();
     let status = "pending";
     let rawData = {};
 
     if (payment.type === "recurring") {
-      const response = await axios.get(`${baseUrl}/subscriptions/${cfOrderId}`, { headers });
-      rawData = response.data;
-      if (response.data.subscription_status === "ACTIVE") {
-        status = "success";
-      } else if (["CANCELLED", "COMPLETED", "SUSPENDED"].includes(response.data.subscription_status)) {
-        status = "cancelled";
+      const { appId, secretKey, environment } = config;
+      const baseUrl = getBaseUrl(environment);
+      const headers = {
+        "Content-Type": "application/json",
+        "x-api-version": "2023-08-01",
+        "x-client-id": appId,
+        "x-client-secret": secretKey,
+      };
+      try {
+        const response = await axios.get(`${baseUrl}/subscriptions/${payment.cfOrderId || cleanOrderId}`, { headers, timeout: 10000 });
+        rawData = response.data;
+        if (response.data.subscription_status === "ACTIVE") {
+          status = "success";
+        } else if (["CANCELLED", "COMPLETED", "SUSPENDED"].includes(response.data.subscription_status)) {
+          status = "cancelled";
+        }
+      } catch (subErr) {
+        console.error("verifyPayment recurring error:", subErr.response?.data || subErr.message);
       }
     } else {
-      const response = await axios.get(`${baseUrl}/orders/${cfOrderId}`, { headers });
-      rawData = response.data;
-      if (response.data.order_status === "PAID") {
-        status = "success";
-      } else if (["EXPIRED", "CANCELLED", "FAILED"].includes(response.data.order_status)) {
-        status = "failed";
-      }
+      const result = await checkCashfreeOrderStatus(payment.cfOrderId || cleanOrderId, config);
+      status = result.status;
+      rawData = result.rawData;
     }
 
     payment.status = status;
-    payment.cfPaymentDetails = rawData;
+    if (rawData && Object.keys(rawData).length > 0) {
+      payment.cfPaymentDetails = rawData;
+    }
     await payment.save();
 
     if (status === "success") {
@@ -308,7 +466,7 @@ export const verifyPayment = async (req, res) => {
         }
 
         const alreadyAdded = institute.subscriptionHistory.some(
-          (h) => String(h.note).includes(cfOrderId)
+          (h) => String(h.note).includes(payment.cfOrderId || cleanOrderId)
         );
 
         if (!alreadyAdded) {
@@ -318,11 +476,32 @@ export const verifyPayment = async (req, res) => {
             startDate: nextStart,
             endDate: nextEnd,
             trialDays: 0,
-            note: `Paid Cashfree transaction Order ID: ${cfOrderId}`,
+            note: `Paid Cashfree transaction Order ID: ${payment.cfOrderId || cleanOrderId}`,
           });
         }
 
         await institute.save();
+
+        // Direct update to Supabase 'institutes' table
+        try {
+          const sbRow = await getSupabaseInstituteRow(String(payment.institute));
+          const targetSbId = sbRow?.id || String(payment.institute);
+          await supabase
+            .from("institutes")
+            .update({
+              status: "active",
+              subscription_plan: coveragePlan,
+              subscriptionplan: coveragePlan,
+              subscription_start: nextStart,
+              subscriptionstart: nextStart,
+              subscription_end: nextEnd,
+              subscriptionend: nextEnd,
+            })
+            .eq("id", targetSbId);
+        } catch (sbInstErr) {
+          console.error("Supabase institute subscription update error:", sbInstErr.message);
+        }
+
         try {
           await sendRenewalReceiptEmail(institute.adminEmail, institute.name, payment);
         } catch (receiptErr) {
@@ -331,21 +510,18 @@ export const verifyPayment = async (req, res) => {
         try {
           await clearCachePattern("teacher:dashboard:*");
           await clearCachePattern("student:dashboard:*");
+          await clearCachePattern("institute:*");
         } catch (cacheErr) {
           console.error("Cache clear error in payment verify:", cacheErr);
         }
       }
     }
 
-    let populatedUser = null;
-    if (req.user && req.user._id) {
-      populatedUser = await User.findById(req.user._id).populate("institute").select("-password");
-    }
-
+    const populatedUser = await getPopulatedUser();
     return res.json({ status, payment, user: populatedUser });
   } catch (error) {
     console.error("verifyPayment error:", error.response?.data || error.message);
-    return res.status(500).json({ message: "Could not verify subscription transaction." });
+    return res.status(500).json({ message: error.response?.data?.message || error.message || "Could not verify subscription transaction." });
   }
 };
 
@@ -353,11 +529,17 @@ export const verifyPayment = async (req, res) => {
 export const handleCashfreeWebhook = async (req, res) => {
   try {
     const rawBody = req.body;
-    // Basic signature verification can be added here depending on header signature tokens.
-    // For integration testing simplicity, parse transaction fields:
     const cfOrderId = rawBody?.data?.order?.order_id || rawBody?.data?.subscription?.subscription_id;
     if (cfOrderId) {
-      const payment = await CashfreePayment.findOne({ cfOrderId });
+      const cleanOrderId = String(cfOrderId).trim();
+      const payment = await CashfreePayment.findOne({
+        $or: [
+          { cfOrderId: cleanOrderId },
+          { paymentSessionId: cleanOrderId },
+          { _id: cleanOrderId }
+        ]
+      });
+
       if (payment) {
         const type = rawBody?.type;
         if (type === "ORDER_PAID" || type === "SUBSCRIPTION_ACTIVE") {
@@ -369,49 +551,73 @@ export const handleCashfreeWebhook = async (req, res) => {
         await payment.save();
 
         if (payment.status === "success") {
-          const institute = await Institute.findById(payment.institute);
-          if (institute) {
-            const coveragePlan = getCoveragePlan(payment.plan);
-            const nextStart = getNextStartDate(institute);
-            const nextEnd = resolveSubscriptionEnd({
-              subscriptionPlan: coveragePlan,
-              subscriptionStart: nextStart,
-              trialDays: 0,
-            });
-
-            institute.subscriptionPlan = coveragePlan;
-            institute.subscriptionAmount = payment.amount;
-            institute.subscriptionStart = nextStart;
-            institute.subscriptionEnd = nextEnd;
-            institute.status = "active";
-
-            if (!Array.isArray(institute.subscriptionHistory)) {
-              institute.subscriptionHistory = [];
-            }
-            const alreadyAdded = institute.subscriptionHistory.some(
-              (h) => String(h.note).includes(cfOrderId)
-            );
-            if (!alreadyAdded) {
-              institute.subscriptionHistory.unshift({
-                plan: coveragePlan,
-                amount: payment.amount,
-                startDate: nextStart,
-                endDate: nextEnd,
+          if (payment.type === "wallet_recharge") {
+            // Correctly topup wallet balance
+            await creditInstituteWallet(payment.institute, payment.amount);
+          } else {
+            const institute = await Institute.findById(payment.institute);
+            if (institute) {
+              const coveragePlan = getCoveragePlan(payment.plan);
+              const nextStart = getNextStartDate(institute);
+              const nextEnd = resolveSubscriptionEnd({
+                subscriptionPlan: coveragePlan,
+                subscriptionStart: nextStart,
                 trialDays: 0,
-                note: `Paid Cashfree Webhook transaction Order ID: ${cfOrderId}`,
               });
-            }
-            await institute.save();
-            try {
-              await sendRenewalReceiptEmail(institute.adminEmail, institute.name, payment);
-            } catch (receiptErr) {
-              console.error("Receipt email error in webhook:", receiptErr);
-            }
-            try {
-              await clearCachePattern("teacher:dashboard:*");
-              await clearCachePattern("student:dashboard:*");
-            } catch (cacheErr) {
-              console.error("Cache clear error in payment webhook:", cacheErr);
+
+              institute.subscriptionPlan = coveragePlan;
+              institute.subscriptionAmount = payment.amount;
+              institute.subscriptionStart = nextStart;
+              institute.subscriptionEnd = nextEnd;
+              institute.status = "active";
+
+              if (!Array.isArray(institute.subscriptionHistory)) {
+                institute.subscriptionHistory = [];
+              }
+              const alreadyAdded = institute.subscriptionHistory.some(
+                (h) => String(h.note).includes(cleanOrderId)
+              );
+              if (!alreadyAdded) {
+                institute.subscriptionHistory.unshift({
+                  plan: coveragePlan,
+                  amount: payment.amount,
+                  startDate: nextStart,
+                  endDate: nextEnd,
+                  trialDays: 0,
+                  note: `Paid Cashfree Webhook transaction Order ID: ${cleanOrderId}`,
+                });
+              }
+              await institute.save();
+
+              try {
+                const sbRow = await getSupabaseInstituteRow(String(payment.institute));
+                const targetSbId = sbRow?.id || String(payment.institute);
+                await supabase
+                  .from("institutes")
+                  .update({
+                    status: "active",
+                    subscription_plan: coveragePlan,
+                    subscriptionplan: coveragePlan,
+                    subscription_start: nextStart,
+                    subscriptionstart: nextStart,
+                    subscription_end: nextEnd,
+                    subscriptionend: nextEnd,
+                  })
+                  .eq("id", targetSbId);
+              } catch (_) {}
+
+              try {
+                await sendRenewalReceiptEmail(institute.adminEmail, institute.name, payment);
+              } catch (receiptErr) {
+                console.error("Receipt email error in webhook:", receiptErr);
+              }
+              try {
+                await clearCachePattern("teacher:dashboard:*");
+                await clearCachePattern("student:dashboard:*");
+                await clearCachePattern("institute:*");
+              } catch (cacheErr) {
+                console.error("Cache clear error in payment webhook:", cacheErr);
+              }
             }
           }
         }
@@ -1814,55 +2020,55 @@ export const verifyWalletRecharge = async (req, res) => {
     if (!cfOrderId) {
       return res.status(400).json({ message: "cfOrderId is required." });
     }
+    const cleanOrderId = String(cfOrderId).trim();
 
-    const payment = await CashfreePayment.findOne({ cfOrderId, type: "wallet_recharge" });
+    let payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId }
+      ],
+      type: "wallet_recharge"
+    });
+
+    if (!payment) {
+      payment = await CashfreePayment.findOne({
+        $or: [
+          { cfOrderId: cleanOrderId },
+          { paymentSessionId: cleanOrderId },
+          { _id: cleanOrderId }
+        ]
+      });
+    }
+
     if (!payment) {
       return res.status(404).json({ message: "Recharge transaction record not found." });
     }
 
     if (payment.status === "success") {
       const institute = await Institute.findById(payment.institute);
-      return res.json({ status: "success", walletBalance: institute?.walletBalance || 0 });
+      const currentBal = await getInstituteWalletBalance(payment.institute, institute?.walletBalance || 0);
+      return res.json({ status: "success", walletBalance: currentBal });
     }
 
     const config = await getCashfreeConfig();
-    const { appId, secretKey, environment } = config;
-    const baseUrl = getBaseUrl(environment);
+    const result = await checkCashfreeOrderStatus(payment.cfOrderId || cleanOrderId, config);
 
-    const headers = {
-      "Content-Type": "application/json",
-      "x-api-version": "2023-08-01",
-      "x-client-id": appId,
-      "x-client-secret": secretKey,
-    };
-
-    const response = await axios.get(`${baseUrl}/orders/${cfOrderId}`, { headers });
-    const rawData = response.data;
-    let status = "pending";
-
-    if (rawData.order_status === "PAID") {
-      status = "success";
-    } else if (["EXPIRED", "CANCELLED", "FAILED"].includes(rawData.order_status)) {
-      status = "failed";
+    payment.status = result.status;
+    if (result.rawData && Object.keys(result.rawData).length > 0) {
+      payment.cfPaymentDetails = result.rawData;
     }
-
-    payment.status = status;
-    payment.cfPaymentDetails = rawData;
     await payment.save();
 
-    if (status === "success") {
-      const institute = await Institute.findById(payment.institute);
-      if (institute) {
-        institute.walletBalance = (institute.walletBalance || 0) + Number(payment.amount);
-        await institute.save();
-        return res.json({ status: "success", walletBalance: institute.walletBalance });
-      }
+    if (result.status === "success") {
+      const updatedBalance = await creditInstituteWallet(payment.institute, payment.amount);
+      return res.json({ status: "success", walletBalance: updatedBalance });
     }
 
-    return res.json({ status });
+    return res.json({ status: result.status });
   } catch (error) {
     console.error("verifyWalletRecharge error:", error);
-    return res.status(500).json({ message: "Could not verify wallet recharge." });
+    return res.status(500).json({ message: error.response?.data?.message || error.message || "Could not verify wallet recharge." });
   }
 };
 
@@ -1883,42 +2089,21 @@ export const cronVerifyPendingRecharges = async (req, res) => {
     }
 
     const config = await getCashfreeConfig();
-    const { appId, secretKey, environment } = config;
-    const baseUrl = getBaseUrl(environment);
-
-    const headers = {
-      "Content-Type": "application/json",
-      "x-api-version": "2023-08-01",
-      "x-client-id": appId,
-      "x-client-secret": secretKey,
-    };
-
     let updatedCount = 0;
 
     for (const payment of pendingRecharges) {
       try {
-        const response = await axios.get(`${baseUrl}/orders/${payment.cfOrderId}`, { headers });
-        const rawData = response.data;
-        let status = "pending";
-
-        if (rawData.order_status === "PAID") {
-          status = "success";
-        } else if (["EXPIRED", "CANCELLED", "FAILED"].includes(rawData.order_status)) {
-          status = "failed";
-        }
-
-        if (status !== "pending") {
-          payment.status = status;
-          payment.cfPaymentDetails = rawData;
+        const result = await checkCashfreeOrderStatus(payment.cfOrderId, config);
+        if (result.status !== "pending") {
+          payment.status = result.status;
+          if (result.rawData && Object.keys(result.rawData).length > 0) {
+            payment.cfPaymentDetails = result.rawData;
+          }
           await payment.save();
 
-          if (status === "success") {
-            const institute = await Institute.findById(payment.institute);
-            if (institute) {
-              institute.walletBalance = (institute.walletBalance || 0) + Number(payment.amount);
-              await institute.save();
-              updatedCount++;
-            }
+          if (result.status === "success") {
+            await creditInstituteWallet(payment.institute, payment.amount);
+            updatedCount++;
           }
         }
       } catch (err) {
