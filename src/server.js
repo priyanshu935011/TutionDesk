@@ -160,6 +160,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/api/payment", paymentRoutes);
 app.use("/payment", paymentRoutes);
+app.use(["/videos", "/api/videos"], videoRoutes);
 app.use("/ai", aiRoutes);
 app.use("/api/ai", aiRoutes);
 app.use(["/test-series", "/api/test-series"], testSeriesRoutes);

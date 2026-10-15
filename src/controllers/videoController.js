@@ -2490,3 +2490,29 @@ export const updateInstituteVideoSettings = async (req, res) => {
     return res.status(500).json({ message: "Could not update institute video settings" });
   }
 };
+
+export const extendVideoValidity = async (req, res) => {
+  try {
+    const { id: videoId } = req.params;
+    const { days } = req.body;
+    const addDays = Number(days) || 7;
+
+    const releases = await VideoRelease.find({
+      $or: [{ video: videoId }, { video_id: videoId }],
+      status: "ACTIVE",
+    });
+
+    for (const rel of releases) {
+      const baseDate = rel.expiresAt && new Date(rel.expiresAt) > new Date() ? new Date(rel.expiresAt) : new Date();
+      baseDate.setDate(baseDate.getDate() + addDays);
+      rel.expiresAt = baseDate;
+      await rel.save();
+    }
+
+    res.json({ message: `Validity extended by ${addDays} days`, updated: releases.length });
+  } catch (error) {
+    console.error("Error extending video validity:", error);
+    res.status(500).json({ message: "Failed to extend validity" });
+  }
+};
+

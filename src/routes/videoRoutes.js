@@ -24,15 +24,35 @@ import {
   recordStudentWatchProgress,
   getVideoWatchAnalytics,
   uploadThumbnail,
+  extendVideoValidity,
 } from "../controllers/videoController.js";
 import protect from "../middleware/authMiddleware.js";
+import protectStudent from "../middleware/studentAuthMiddleware.js";
 
 const router = express.Router();
+
+// Middleware to accept either student portal token or general user token
+const studentAuth = (req, res, next) => {
+  protectStudent(req, res, (err) => {
+    if (!err && req.student) {
+      if (!req.user) req.user = req.student;
+      return next();
+    }
+    protect(req, res, next);
+  });
+};
 
 // Public Webhook from Bunny Stream
 router.post("/bunny/webhook", express.json(), handleBunnyWebhook);
 
-// Protected API Routes
+// Student Released Lectures & Playback Authorization (Supports Student & Teacher Auth)
+router.get("/student/released", studentAuth, getStudentReleasedLectures);
+router.get("/student", studentAuth, getStudentReleasedLectures); // Legacy compatibility alias
+router.get("/student/:id/playback", studentAuth, getStudentPlaybackAuthorization);
+router.post("/student/watch-progress", studentAuth, recordStudentWatchProgress);
+router.post("/student/:id/watch-progress", studentAuth, recordStudentWatchProgress);
+
+// Protected Teacher & Super Admin Routes
 router.use(protect);
 
 // Super Admin Settings
@@ -50,6 +70,7 @@ router.get("/teacher/:id/status", checkVideoStatus);
 router.get("/teacher", getTeacherVideos);
 router.get("/teacher/:id/analytics", getVideoWatchAnalytics);
 router.put("/teacher/:id", updateVideoLecture);
+router.post("/teacher/:id/extend", extendVideoValidity);
 router.post("/teacher/:id/archive", archiveVideoLecture);
 router.post("/teacher/:id/restore", restoreVideoLecture);
 router.delete("/teacher/:id", deleteVideoLecture);
@@ -69,12 +90,5 @@ router.get("/playlist/:id/videos", getPlaylistVideos);
 router.post("/releases", createVideoRelease);
 router.get("/releases", getVideoReleases);
 router.post("/releases/:id/revoke", revokeVideoRelease);
-
-// Student Released Lectures & Playback Authorization
-router.get("/student/released", getStudentReleasedLectures);
-router.get("/student", getStudentReleasedLectures); // Legacy compatibility alias
-router.get("/student/:id/playback", getStudentPlaybackAuthorization);
-router.post("/student/watch-progress", recordStudentWatchProgress);
-router.post("/student/:id/watch-progress", recordStudentWatchProgress);
 
 export default router;
