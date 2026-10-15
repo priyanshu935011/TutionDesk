@@ -617,6 +617,15 @@ class SupabaseDocument {
     if (data.student_ids !== undefined) this.students = data.student_ids;
     if (data.batch_ids !== undefined) this.batches = data.batch_ids;
 
+    if (tableName === "whatsapp_logs") {
+      this.recipient = data.recipient || data.to || this.to || "";
+      this.to = this.recipient;
+      this.messageText = data.message_text || data.messageText || data.message || this.messageText || "";
+      this.message_text = this.messageText;
+      this.msgType = data.msg_type || data.msgType || this.msgType || "custom";
+      this.msg_type = this.msgType;
+    }
+
     if (tableName === "institutes" && this._id) {
       const metadata = readInstitutesMetadata();
       const meta = metadata[this._id] || {};
@@ -2580,6 +2589,12 @@ const mockMongoose = {
     else if (modelName === "InstituteTestSeriesAccess") tableName = "institute_test_series";
     else if (modelName === "TestSeriesAttempt") tableName = "test_series_attempts";
     else if (modelName === "TestSeriesCategory") tableName = "test_series_categories";
+    else if (modelName === "WhatsappLog") tableName = "whatsapp_logs";
+    else if (modelName === "ActivityLog") tableName = "activity_logs";
+    else if (modelName === "CashfreePayment") tableName = "cashfree_payments";
+    else if (modelName === "ContactMessage") tableName = "contact_messages";
+    else if (modelName === "CustomPage") tableName = "custom_pages";
+    else if (modelName === "Notification") tableName = "notifications";
     else tableName = modelName.toLowerCase() + "s";
 
     return new SupabaseModel(tableName);

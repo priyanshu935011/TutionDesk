@@ -2741,16 +2741,8 @@ export const getWhatsappLogs = async (req, res) => {
           .order("created_at", { ascending: false })
           .limit(500);
 
-        if (d1 && d1.length > 0) {
+        if (d1) {
           sbLogs = d1;
-        } else {
-          const { data: d2 } = await supabase
-            .from("whatsapplogs")
-            .select("*")
-            .or(`institute_id.eq.${instStr},institute.eq.${instStr}`)
-            .order("created_at", { ascending: false })
-            .limit(500);
-          if (d2) sbLogs = d2;
         }
       }
     } catch (sbErr) {
