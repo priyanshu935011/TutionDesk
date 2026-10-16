@@ -63,6 +63,8 @@ router.delete("/:id", deleteTestSeries);
 
 // Teacher Batch Assignment & Analytics
 router.post("/:id/assignment", assignTestSeries);
+router.post("/:id/access", assignTestSeries);
+router.put("/:id/access", assignTestSeries);
 router.get("/:id/analytics", getTestSeriesAnalytics);
 
 export default router;

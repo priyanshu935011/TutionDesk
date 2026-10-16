@@ -1542,7 +1542,7 @@ export const getTestResults = async (req, res) => {
             if (matchedKey !== null) {
               const val = marksObj[matchedKey];
               const isAbsent = val === -1 || Number(val) === -1 || String(val).toLowerCase() === "absent" || String(val).toLowerCase() === "a";
-              const scoreVal = isAbsent ? "Absent" : Number(val || 0);
+              const scoreVal = isAbsent ? -1 : Number(val || 0);
 
               supabaseResults.push({
                 _id: `${row.id}_${matchedKey}`,
@@ -1570,7 +1570,7 @@ export const getTestResults = async (req, res) => {
           } else {
             for (const [stKey, val] of Object.entries(marksObj)) {
               const isAbsent = val === -1 || Number(val) === -1 || String(val).toLowerCase() === "absent" || String(val).toLowerCase() === "a";
-              const scoreVal = isAbsent ? "Absent" : Number(val || 0);
+              const scoreVal = isAbsent ? -1 : Number(val || 0);
 
               supabaseResults.push({
                 _id: `${row.id}_${stKey}`,
@@ -1791,7 +1791,9 @@ export const createTestResultsBulk = async (req, res) => {
         subject: subject.trim(),
         testType: resolvedTestType,
         chapter: resolvedChapter,
-        score: isAbsent ? "Absent" : (rawSc ?? 0),
+        score: isAbsent ? -1 : Number(rawSc ?? 0),
+        marksObtained: isAbsent ? -1 : Number(rawSc ?? 0),
+        isAbsent,
         totalMarks: Number(totalMarks),
         examDate,
       };
