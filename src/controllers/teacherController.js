@@ -78,6 +78,8 @@ const invalidateUserDashboard = async (req) => {
     if (adminId) {
       await deleteCache(`teacher:dashboard:${adminId}`);
     }
+    await clearCachePattern("teacher:quick-summary:*");
+    await clearCachePattern("teacher:tests:*");
   } catch (e) {
     console.error("Cache invalidation error:", e);
   }

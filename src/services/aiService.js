@@ -295,7 +295,7 @@ async function callOpenAiRaw({
         model: model || "gpt-4o-mini",
         messages,
         temperature,
-        max_tokens: 2048,
+        max_tokens: 8192,
       },
       {
         headers: {
@@ -328,7 +328,7 @@ async function callGeminiApiWithFallback({
   imageMimeType = "image/jpeg",
   temperature = 0.2,
   apiKey,
-  preferredModel = "gemini-2.5-flash",
+  preferredModel = "gemini-3.5-flash",
 }) {
   const cleanBase64 = imageBase64
     ? imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "")
@@ -351,7 +351,10 @@ async function callGeminiApiWithFallback({
     contents,
     generationConfig: {
       temperature,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 16384,
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
     },
   };
   if (systemInstruction) {
@@ -364,13 +367,11 @@ async function callGeminiApiWithFallback({
   const modelsToTry = [
     cleanPref,
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
     "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-2.5-flash",
     "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
-    "gemini-3.1-pro-preview",
   ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
   let lastError = null;
@@ -379,10 +380,34 @@ async function callGeminiApiWithFallback({
     for (const apiVersion of ["v1beta", "v1"]) {
       const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
       try {
-        const response = await axios.post(url, payload, {
-          headers: { "Content-Type": "application/json" },
-          timeout: 30000,
-        });
+        let response;
+        try {
+          response = await axios.post(url, payload, {
+            headers: { "Content-Type": "application/json" },
+            timeout: 35000,
+          });
+        } catch (postErr) {
+          const postErrMsg = postErr.response?.data?.error?.message || "";
+          if (
+            payload.generationConfig?.thinkingConfig &&
+            (postErrMsg.toLowerCase().includes("thinkingconfig") ||
+             postErrMsg.toLowerCase().includes("thinking_config"))
+          ) {
+            const fallbackPayload = {
+              ...payload,
+              generationConfig: {
+                temperature,
+                maxOutputTokens: 16384,
+              },
+            };
+            response = await axios.post(url, fallbackPayload, {
+              headers: { "Content-Type": "application/json" },
+              timeout: 35000,
+            });
+          } else {
+            throw postErr;
+          }
+        }
 
         const candidates = response.data?.candidates;
         if (candidates && candidates.length > 0) {
@@ -614,7 +639,7 @@ export async function parseTestMarksheet(
     .map((b) => `${b._id || b.id}: ${b.name}`)
     .join(", ");
   const studentListStr = students
-    .slice(0, 100)
+    .slice(0, 500)
     .map(
       (s) =>
         `[id: "${s._id || s.id}", name: "${s.name}", roll: "${s.enrollmentNumber || ""}", batchId: "${s.batchId || ""}"]`,
