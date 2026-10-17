@@ -11,7 +11,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment"
+  "activity_logs", "activitylogs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -2943,6 +2943,7 @@ const mockMongoose = {
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
     if (tableName === "contact_messages") tableName = "contactmessages";
+    if (tableName === "cashfreepayments" || tableName === "cashfreepayment") tableName = "cashfree_payments";
 
     return new SupabaseModel(tableName);
   },
