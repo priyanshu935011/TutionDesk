@@ -165,6 +165,11 @@ const protect = async (req, res, next) => {
     const skipSubscriptionCheck =
       isStudentToken ||
       req.user.role === "super_admin" ||
+      req.user.role === "tech_admin" ||
+      req.user.role === "sales_admin" ||
+      req.user.role === "sales_person" ||
+      req.user.role === "marketing_admin" ||
+      req.user.role === "marketing_person" ||
       req.user.role === "student" ||
       req.user.role === "student_parent";
 

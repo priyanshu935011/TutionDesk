@@ -183,9 +183,20 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ message: "Invalid email/phone or password" });
     }
 
-    const allowedAppRoles = ["institute_admin", "admin", "teacher", "super_admin"];
+    const allowedAppRoles = [
+      "institute_admin",
+      "admin",
+      "teacher",
+      "super_admin",
+      "tech_admin",
+      "sales_admin",
+      "sales_person",
+      "marketing_admin",
+      "marketing_person",
+      "owner",
+    ];
     if (!allowedAppRoles.includes(user.role?.toLowerCase())) {
-      return res.status(403).json({ message: "Access denied. Only Institute Owners and Teachers are permitted to log in." });
+      return res.status(403).json({ message: "Access denied. Role not permitted to log in." });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -199,7 +210,7 @@ export const loginUser = async (req, res) => {
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
     user.currentSessionId = sessionId;
     user.lastActiveAt = new Date();
-    await user.save();
+    await user.save().catch(() => {});
 
     if (redisClient.isReady) {
       try {
@@ -213,11 +224,14 @@ export const loginUser = async (req, res) => {
       token: generateToken({
         id: user._id,
         email: user.email,
+        name: user.name,
         role: user.role,
         sessionId,
       }),
       user: {
         id: user._id,
+        _id: user._id,
+        name: user.name,
         email: user.email,
         role: user.role,
         institute,
