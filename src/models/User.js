@@ -59,6 +59,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    payoutConfig: {
+      type: Object,
+      default: null,
+    },
   },
   {
     timestamps: true,

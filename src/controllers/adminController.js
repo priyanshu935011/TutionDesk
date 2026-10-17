@@ -1653,7 +1653,7 @@ export const getStaff = async (req, res) => {
     }
 
     const staffList = await User.find(query)
-      .select("name email role parentAdmin createdAt")
+      .select("name email role parentAdmin payoutConfig createdAt")
       .populate("parentAdmin", "name email");
 
     return res.json(staffList);
@@ -1665,7 +1665,7 @@ export const getStaff = async (req, res) => {
 
 export const createStaff = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, payoutConfig } = req.body;
     if (!name || !email || !password || !role) {
       return res.status(400).json({ message: "All fields are required." });
     }
@@ -1696,6 +1696,7 @@ export const createStaff = async (req, res) => {
       role,
       parentAdmin: req.user._id,
       institute: null,
+      payoutConfig: payoutConfig || null,
     });
 
     await logActivity(req.user._id, "Create Staff", `Created staff member ${email} with role ${role}`, req.ip);
@@ -1705,6 +1706,7 @@ export const createStaff = async (req, res) => {
       name: staff.name,
       email: staff.email,
       role: staff.role,
+      payoutConfig: staff.payoutConfig,
       createdAt: staff.createdAt,
     });
   } catch (err) {
@@ -1715,7 +1717,7 @@ export const createStaff = async (req, res) => {
 
 export const updateStaff = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, payoutConfig } = req.body;
     const staff = await User.findById(req.params.id);
     if (!staff) {
       return res.status(404).json({ message: "Staff member not found." });
@@ -1757,6 +1759,10 @@ export const updateStaff = async (req, res) => {
       staff.password = await bcrypt.hash(password, 10);
     }
 
+    if (payoutConfig !== undefined) {
+      staff.payoutConfig = payoutConfig;
+    }
+
     await staff.save();
     await logActivity(req.user._id, "Update Staff", `Updated staff member ${staff.email}`, req.ip);
 
@@ -1765,6 +1771,7 @@ export const updateStaff = async (req, res) => {
       name: staff.name,
       email: staff.email,
       role: staff.role,
+      payoutConfig: staff.payoutConfig,
       createdAt: staff.createdAt,
     });
   } catch (err) {

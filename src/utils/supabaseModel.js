@@ -17,6 +17,7 @@ const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scrat
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
 const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
 const BATCHES_METADATA_FILE = path.join(FALLBACK_DIR, "batches_metadata.json");
+const USER_METADATA_FILE = path.join(FALLBACK_DIR, "user_metadata.json");
 
 const uploadMetadataFile = (filename, contentString) => {
   if (filename && (filename.toLowerCase().includes("video") || filename.toLowerCase().includes("note"))) {
@@ -345,6 +346,28 @@ export function readFallbackData(tableName) {
     console.error(`Error reading fallback data for ${tableName}:`, err);
     return [];
   }
+}
+
+export function readUserMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(USER_METADATA_FILE)) {
+      fs.writeFileSync(USER_METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(USER_METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+export function writeUserMetadata(metadata) {
+  try {
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(USER_METADATA_FILE, content);
+    uploadMetadataFile("user_metadata.json", content);
+  } catch (e) {}
 }
 
 export function toValidUUID(str) {
@@ -749,6 +772,16 @@ class SupabaseDocument {
       this.status = meta.status ?? this.status ?? "active";
     }
 
+    if (tableName === "users" && this._id) {
+      const metadata = readUserMetadata();
+      const meta = metadata[this._id] || {};
+      const rawPayout = data.payout_config ?? data.payoutconfig ?? data.payoutConfig ?? meta.payoutConfig;
+      if (rawPayout) {
+        this.payoutConfig = typeof rawPayout === "string" ? JSON.parse(rawPayout) : rawPayout;
+      }
+      this.payout_config = this.payoutConfig;
+    }
+
     if (tableName === "error_logs") {
       const ctx = (typeof data.context === "object" && data.context !== null) ? data.context : {};
       this.level = data.level || ctx.level || "error";
@@ -1071,6 +1104,14 @@ class SupabaseDocument {
         };
         writeTestsMetadata(metadata);
       }
+      if (this._tableName === "users" && this._id) {
+        const metadata = readUserMetadata();
+        metadata[this._id] = {
+          ...(metadata[this._id] || {}),
+          payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
+        };
+        writeUserMetadata(metadata);
+      }
       syncVideoFallback(this);
       return this;
     } else {
@@ -1143,6 +1184,14 @@ class SupabaseDocument {
           status: this.status ?? "active"
         };
         writeBatchesMetadata(metadata);
+      }
+      if (this._tableName === "users" && this._id) {
+        const metadata = readUserMetadata();
+        metadata[this._id] = {
+          ...(metadata[this._id] || {}),
+          payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
+        };
+        writeUserMetadata(metadata);
       }
       syncVideoFallback(this);
       return this;
@@ -2361,6 +2410,14 @@ class SupabaseModel {
         paymentHistory: doc.paymentHistory ?? []
       };
       writeStudentMetadata(metadata);
+    }
+
+    if (this.tableName === "users" && data && data.id) {
+      const metadata = readUserMetadata();
+      metadata[data.id] = {
+        payoutConfig: doc.payoutConfig ?? null,
+      };
+      writeUserMetadata(metadata);
     }
 
     if (data && ["video_lectures", "video_playlists", "video_uploads"].includes(this.tableName)) {

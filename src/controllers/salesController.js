@@ -23,8 +23,26 @@ const DEFAULT_PAYOUT_CONFIG = {
   ],
 };
 
-const getEffectivePayoutConfig = async () => {
+const getEffectivePayoutConfig = async (userId = null) => {
   try {
+    if (userId) {
+      const user = await User.findById(userId);
+      if (
+        user &&
+        user.payoutConfig &&
+        typeof user.payoutConfig === "object" &&
+        (user.payoutConfig.minSalesToQualify !== undefined || user.payoutConfig.fixedBasePayout !== undefined)
+      ) {
+        return {
+          minSalesToQualify: Number(user.payoutConfig.minSalesToQualify ?? DEFAULT_PAYOUT_CONFIG.minSalesToQualify),
+          fixedBasePayout: Number(user.payoutConfig.fixedBasePayout ?? DEFAULT_PAYOUT_CONFIG.fixedBasePayout),
+          incentiveSlabs:
+            Array.isArray(user.payoutConfig.incentiveSlabs) && user.payoutConfig.incentiveSlabs.length > 0
+              ? user.payoutConfig.incentiveSlabs
+              : DEFAULT_PAYOUT_CONFIG.incentiveSlabs,
+        };
+      }
+    }
     const setting = await SystemSetting.findOne({ key: "sales_payout_config" });
     if (setting && setting.value) {
       const parsed = typeof setting.value === "string" ? JSON.parse(setting.value) : setting.value;
@@ -53,7 +71,7 @@ export const getSalesOverview = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
     const userRole = req.user.role;
-    const config = await getEffectivePayoutConfig();
+    const config = await getEffectivePayoutConfig(userId);
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -502,7 +520,8 @@ export const topupSalesInstituteAiWallet = async (req, res) => {
 // GET /api/sales/payout-config
 export const getPayoutConfig = async (req, res) => {
   try {
-    const config = await getEffectivePayoutConfig();
+    const targetUserId = req.query.userId || req.user._id || req.user.id;
+    const config = await getEffectivePayoutConfig(targetUserId);
     return res.json(config);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch payout configuration" });
@@ -516,12 +535,21 @@ export const updatePayoutConfig = async (req, res) => {
       return res.status(403).json({ message: "Only Super Admin can update payout criteria" });
     }
 
-    const { minSalesToQualify, fixedBasePayout, incentiveSlabs } = req.body;
+    const { minSalesToQualify, fixedBasePayout, incentiveSlabs, userId } = req.body;
     const payload = {
       minSalesToQualify: Number(minSalesToQualify ?? 1),
       fixedBasePayout: Number(fixedBasePayout ?? 10000),
       incentiveSlabs: Array.isArray(incentiveSlabs) ? incentiveSlabs : DEFAULT_PAYOUT_CONFIG.incentiveSlabs,
     };
+
+    if (userId) {
+      const user = await User.findById(userId);
+      if (user) {
+        user.payoutConfig = payload;
+        await user.save();
+        return res.json({ message: "Employee payout criteria saved successfully", config: payload });
+      }
+    }
 
     let setting = await SystemSetting.findOne({ key: "sales_payout_config" });
     if (setting) {
