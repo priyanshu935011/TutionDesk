@@ -26,6 +26,7 @@ import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { logActivity } from "../utils/activityLogger.js";
 import ActivityLog from "../models/ActivityLog.js";
+import SystemLog from "../models/SystemLog.js";
 
 const getAdminEmails = async () => {
   try {
@@ -1390,14 +1391,22 @@ export const getSystemLogs = async (req, res) => {
   try {
     let dbLogs = [];
     try {
-      dbLogs = await SystemLog.find().sort({ createdAt: -1 }).limit(100);
-    } catch (e) {}
+      dbLogs = await SystemLog.find().sort({ createdAt: -1 }).limit(150);
+    } catch (e) {
+      console.error("getSystemLogs fetch error:", e);
+    }
 
     const combinedMap = new Map();
-    for (const log of [...inMemoryLogs, ...dbLogs]) {
-      const id = String(log._id || log.id || Math.random());
-      if (!combinedMap.has(id)) {
-        combinedMap.set(id, log);
+    for (const log of dbLogs) {
+      const id = String(log._id || log.id || "");
+      if (id) {
+        combinedMap.set(id, typeof log.toObject === "function" ? log.toObject() : log);
+      }
+    }
+    for (const log of inMemoryLogs) {
+      const id = String(log._id || log.id || "");
+      if (id) {
+        combinedMap.set(id, typeof log.toObject === "function" ? log.toObject() : log);
       }
     }
 
@@ -1416,7 +1425,9 @@ export const clearSystemLogs = async (req, res) => {
     inMemoryLogs.length = 0;
     try {
       await SystemLog.deleteMany({});
-    } catch (e) {}
+    } catch (e) {
+      console.error("clearSystemLogs DB error:", e);
+    }
 
     return res.json({ message: "System error logs cleared successfully." });
   } catch (error) {
@@ -1429,7 +1440,7 @@ export const markSystemLogAsRead = async (req, res) => {
     const { id } = req.params;
 
     // Update in-memory
-    const memLog = inMemoryLogs.find(log => String(log._id) === String(id));
+    const memLog = inMemoryLogs.find(log => String(log._id || log.id) === String(id));
     if (memLog) {
       memLog.isRead = true;
     }
@@ -1437,7 +1448,9 @@ export const markSystemLogAsRead = async (req, res) => {
     // Update database
     try {
       await SystemLog.findByIdAndUpdate(id, { isRead: true });
-    } catch (e) {}
+    } catch (e) {
+      console.error("markSystemLogAsRead DB error:", e);
+    }
 
     return res.json({ message: "Log marked as read successfully." });
   } catch (error) {
@@ -1456,7 +1469,9 @@ export const markAllSystemLogsAsRead = async (req, res) => {
     // Update database
     try {
       await SystemLog.updateMany({}, { isRead: true });
-    } catch (e) {}
+    } catch (e) {
+      console.error("markAllSystemLogsAsRead DB error:", e);
+    }
 
     return res.json({ message: "All logs marked as read successfully." });
   } catch (error) {

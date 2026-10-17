@@ -12,7 +12,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs", "cashfreepayments", "cashfreepayment",
-  "contactmessages", "contact_messages", "system_logs", "systemlogs"
+  "contactmessages", "contact_messages"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -749,6 +749,23 @@ class SupabaseDocument {
       const meta = metadata[this._id] || {};
       this.status = meta.status ?? this.status ?? "active";
     }
+
+    if (tableName === "error_logs") {
+      const ctx = (typeof data.context === "object" && data.context !== null) ? data.context : {};
+      this.level = data.level || ctx.level || "error";
+      this.category = data.category || ctx.category || "System Error";
+      this.userName = data.userName || ctx.userName || ctx.name || "Unknown";
+      this.userEmail = data.userEmail || ctx.userEmail || ctx.email || "N/A";
+      this.userPhone = data.userPhone || ctx.userPhone || ctx.phone || "N/A";
+      this.userRole = data.userRole || ctx.userRole || ctx.role || "user";
+      this.instituteName = data.instituteName || ctx.instituteName || ctx.institute || "General System";
+      this.metadata = ctx.metadata || data.metadata || {};
+      this.isRead = ctx.isRead !== undefined ? ctx.isRead : (data.isRead !== undefined ? data.isRead : false);
+      this.stack = data.stack || ctx.stack || "";
+      this.message = data.message || ctx.message || "";
+      this.createdAt = data.created_at || data.createdAt || new Date();
+      this.context = ctx;
+    }
   }
 
   async save() {
@@ -763,6 +780,53 @@ class SupabaseDocument {
       }
       writeFallbackData(this._tableName, fallbackData);
       return this;
+    }
+
+    if (this._tableName === "error_logs") {
+      const ctx = {
+        level: this.level || "error",
+        category: this.category || "System Error",
+        userName: this.userName || "Unknown",
+        userEmail: this.userEmail || "N/A",
+        userPhone: this.userPhone || "N/A",
+        userRole: this.userRole || "user",
+        instituteName: this.instituteName || "General System",
+        metadata: this.metadata || {},
+        isRead: this.isRead ?? false,
+        ...(typeof this.context === "object" && this.context !== null ? this.context : {})
+      };
+      const targetId = this._id || this.id;
+      const dbPayload = {
+        message: String(this.message || "Unknown error"),
+        stack: String(this.stack || this.metadata?.stack || ""),
+        context: ctx
+      };
+      if (targetId && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(targetId))) {
+        dbPayload.id = targetId;
+        const { data, error } = await this._model.supabase
+          .from("error_logs")
+          .update(dbPayload)
+          .eq("id", dbPayload.id)
+          .select()
+          .maybeSingle();
+        if (error) throw error;
+        if (data) Object.assign(this, data);
+        return this;
+      } else {
+        dbPayload.id = crypto.randomUUID();
+        const { data, error } = await this._model.supabase
+          .from("error_logs")
+          .insert(dbPayload)
+          .select()
+          .maybeSingle();
+        if (error) throw error;
+        if (data) {
+          Object.assign(this, data);
+          this._id = data.id;
+          this.id = data.id;
+        }
+        return this;
+      }
     }
 
     if (this._tableName === "test_marks") {
@@ -1961,6 +2025,48 @@ class SupabaseModel {
   }
 
   async create(doc) {
+    if (this.tableName === "error_logs") {
+      const items = Array.isArray(doc) ? doc : [doc];
+      const createdDocs = [];
+      for (const item of items) {
+        const ctx = {
+          level: item.level || "error",
+          category: item.category || "System Error",
+          userName: item.userName || item.name || "Unknown",
+          userEmail: item.userEmail || item.email || "N/A",
+          userPhone: item.userPhone || item.phone || "N/A",
+          userRole: item.userRole || item.role || "user",
+          instituteName: item.instituteName || item.institute || "General System",
+          metadata: item.metadata || {},
+          isRead: item.isRead ?? false,
+          ...(typeof item.context === "object" && item.context !== null ? item.context : {})
+        };
+        const rawId = item.id || item._id;
+        const validId = (rawId && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(rawId)))
+          ? String(rawId)
+          : crypto.randomUUID();
+
+        const rowPayload = {
+          id: validId,
+          message: String(item.message || "Unknown error"),
+          stack: String(item.stack || item.metadata?.stack || ""),
+          context: ctx,
+          created_at: item.createdAt || item.created_at || new Date().toISOString()
+        };
+        const { data, error } = await this.supabase
+          .from("error_logs")
+          .insert(rowPayload)
+          .select()
+          .maybeSingle();
+        if (error) {
+          console.error("[SupabaseModel] Error inserting into error_logs:", error);
+          throw error;
+        }
+        createdDocs.push(new SupabaseDocument("error_logs", data || rowPayload, this));
+      }
+      return Array.isArray(doc) ? createdDocs : createdDocs[0];
+    }
+
     if (MISSING_TABLES.has(this.tableName)) {
       const data = Array.isArray(doc) ? doc : [doc];
       const fallbackData = readFallbackData(this.tableName);
@@ -2281,6 +2387,34 @@ class SupabaseModel {
   }
 
   async updateOne(filter = {}, update = {}) {
+    if (this.tableName === "error_logs") {
+      const payload = update.$set ? update.$set : update;
+      const isReadVal = payload.isRead !== undefined ? payload.isRead : payload.is_read;
+      if (isReadVal !== undefined) {
+        let query = this.supabase.from("error_logs").select("id, context");
+        query = this.applyFilters(query, filter);
+        const { data: rows, error: selectErr } = await query.limit(200);
+        if (selectErr) throw selectErr;
+        let modifiedCount = 0;
+        if (rows && rows.length > 0) {
+          for (const row of rows) {
+            const ctx = (typeof row.context === "object" && row.context !== null) ? row.context : {};
+            const { error: updErr } = await this.supabase
+              .from("error_logs")
+              .update({
+                context: {
+                  ...ctx,
+                  isRead: isReadVal
+                }
+              })
+              .eq("id", row.id);
+            if (!updErr) modifiedCount++;
+          }
+        }
+        return { matchedCount: rows?.length || 0, modifiedCount };
+      }
+    }
+
     if (MISSING_TABLES.has(this.tableName)) {
       const fallbackData = readFallbackData(this.tableName);
       let matchedCount = 0;
@@ -2327,6 +2461,20 @@ class SupabaseModel {
   }
 
   async deleteOne(filter = {}) {
+    if (this.tableName === "error_logs") {
+      let query = this.supabase.from("error_logs").delete();
+      if (!filter || Object.keys(filter).length === 0) {
+        query = query.neq("id", "00000000-0000-0000-0000-000000000000");
+      } else if (filter._id || filter.id) {
+        query = query.eq("id", filter._id || filter.id);
+      } else {
+        query = this.applyFilters(query, filter);
+      }
+      const { data, error } = await query.select();
+      if (error) throw error;
+      return { deletedCount: data?.length || 0 };
+    }
+
     if (MISSING_TABLES.has(this.tableName)) {
       const fallbackData = readFallbackData(this.tableName);
       const remaining = [];
@@ -2397,6 +2545,47 @@ class SupabaseModel {
   }
 
   async findByIdAndUpdate(id, update = {}, options = {}) {
+    if (this.tableName === "error_logs") {
+      const { data: existing, error: findErr } = await this.supabase
+        .from("error_logs")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (findErr) throw findErr;
+      if (!existing) return null;
+
+      const existingContext = (typeof existing.context === "object" && existing.context !== null) ? existing.context : {};
+      const payload = update.$set ? update.$set : update;
+      const updatedContext = { ...existingContext };
+
+      for (const [k, v] of Object.entries(payload)) {
+        if (k === "isRead" || k === "is_read") {
+          updatedContext.isRead = v;
+        } else if (k === "message") {
+          existing.message = v;
+        } else if (k === "stack") {
+          existing.stack = v;
+        } else {
+          updatedContext[k] = v;
+        }
+      }
+
+      const { data: updated, error } = await this.supabase
+        .from("error_logs")
+        .update({
+          message: existing.message,
+          stack: existing.stack,
+          context: updatedContext
+        })
+        .eq("id", id)
+        .select()
+        .maybeSingle();
+
+      if (error) throw error;
+      return updated ? new SupabaseDocument("error_logs", updated, this) : null;
+    }
+
     if (MISSING_TABLES.has(this.tableName)) {
       const fallbackData = readFallbackData(this.tableName);
       const index = fallbackData.findIndex(doc => String(doc.id) === String(id) || String(doc._id) === String(id));
@@ -2737,7 +2926,7 @@ const mockMongoose = {
     else if (modelName === "InstituteVideoStorage") tableName = "institute_video_storage";
     else if (modelName === "VideoWatchLog") tableName = "video_watch_logs";
     else if (modelName === "Notice") tableName = "notices";
-    else if (modelName === "SystemLog") tableName = "system_logs";
+    else if (modelName === "SystemLog" || modelName === "SystemLogs") tableName = "error_logs";
     else if (modelName === "Lead") tableName = "leads";
     else if (modelName === "LeadForm") tableName = "lead_forms";
     else if (modelName === "TestSeriesFolder") tableName = "test_series_folders";
@@ -2752,6 +2941,8 @@ const mockMongoose = {
     else if (modelName === "CustomPage") tableName = "custom_pages";
     else if (modelName === "Notification") tableName = "notifications";
     else tableName = modelName.toLowerCase() + "s";
+
+    if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
 
     return new SupabaseModel(tableName);
   },

@@ -1,5 +1,6 @@
 import SystemLog from "../models/SystemLog.js";
 import { sendMessage } from "../services/whatsappService.js";
+import crypto from "crypto";
 
 // In-memory log cache store for instant access & fallback
 export const inMemoryLogs = [];
@@ -87,8 +88,10 @@ export const logSystemError = async ({
   role = role || (req?.originalUrl?.includes("/student") ? "student" : req?.originalUrl?.includes("/teacher") ? "teacher" : req?.originalUrl?.includes("/admin") ? "super_admin" : "user");
   instName = instName || "General System";
 
+  const logId = crypto.randomUUID();
   const newLog = {
-    _id: "log-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7),
+    _id: logId,
+    id: logId,
     level,
     category,
     message: message || "Unknown error occurred",
@@ -113,7 +116,11 @@ export const logSystemError = async ({
 
   // Save to Database
   try {
-    await SystemLog.create(newLog);
+    const savedDoc = await SystemLog.create(newLog);
+    if (savedDoc && (savedDoc._id || savedDoc.id)) {
+      newLog._id = String(savedDoc._id || savedDoc.id);
+      newLog.id = newLog._id;
+    }
   } catch (err) {
     console.error("SystemLog DB Save Error:", err.message);
   }
