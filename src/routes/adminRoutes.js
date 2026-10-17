@@ -62,6 +62,15 @@ import {
   deleteContactMessage,
   updateContactDetails,
 } from "../controllers/contactController.js";
+import {
+  getLeadFolders,
+  getAdminLeads,
+  createAdminLead,
+  updateAdminLead,
+  deleteAdminLead,
+  assignTerritory,
+  bulkImportAdminLeads,
+} from "../controllers/adminLeadsController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -151,5 +160,14 @@ router.route("/staff/:id")
   .delete(deleteStaff);
 
 router.get("/activity-logs", getActivityLogs);
+
+// Super Admin Leads Management & Territory Folder Structure
+router.get("/leads/folders", getLeadFolders);
+router.get("/leads", getAdminLeads);
+router.post("/leads", createAdminLead);
+router.put("/leads/:id", updateAdminLead);
+router.delete("/leads/:id", deleteAdminLead);
+router.post("/leads/assign-territory", assignTerritory);
+router.post("/leads/bulk-import", bulkImportAdminLeads);
 
 export default router;

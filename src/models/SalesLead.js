@@ -23,7 +23,22 @@ const salesLeadSchema = new mongoose.Schema(
       lowercase: true,
       default: "",
     },
+    state: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    district: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     city: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    address: {
       type: String,
       trim: true,
       default: "",
@@ -48,8 +63,7 @@ const salesLeadSchema = new mongoose.Schema(
       default: "Self-Added",
     },
     salesPerson: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      type: String,
       default: null,
     },
     salesPersonName: {
@@ -57,8 +71,7 @@ const salesLeadSchema = new mongoose.Schema(
       default: "",
     },
     addedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      type: String,
       default: null,
     },
     nextFollowUpDate: {

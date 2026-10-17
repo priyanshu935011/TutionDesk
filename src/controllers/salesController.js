@@ -1,6 +1,7 @@
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import SalesLead from "../models/SalesLead.js";
+import SalesTerritory from "../models/SalesTerritory.js";
 import SystemSetting from "../models/SystemSetting.js";
 import bcrypt from "bcryptjs";
 import { resolveSubscriptionEnd } from "../utils/subscription.js";
@@ -92,6 +93,13 @@ export const getSalesOverview = async (req, res) => {
       return d >= startOfMonth && inst.subscriptionPlan !== "trial";
     });
 
+    // Sort month institutes chronologically (earliest to latest)
+    monthInstitutes.sort((a, b) => {
+      const da = new Date(a.subscriptionStart || a.createdAt || 0);
+      const db = new Date(b.subscriptionStart || b.createdAt || 0);
+      return da - db;
+    });
+
     // Today Sales
     const todayInstitutes = myInstitutes.filter((inst) => {
       const d = new Date(inst.subscriptionStart || inst.createdAt);
@@ -102,12 +110,17 @@ export const getSalesOverview = async (req, res) => {
     const monthSalesCount = monthInstitutes.length;
     const monthSalesVolume = monthInstitutes.reduce((sum, inst) => sum + Number(inst.subscriptionAmount || 0), 0);
 
-    const isQualified = monthSalesCount >= config.minSalesToQualify;
-    const fixedPayoutEarned = isQualified ? config.fixedBasePayout : 0;
+    const minSales = Number(config.minSalesToQualify ?? 1);
+    const isQualified = monthSalesCount >= minSales;
+    const fixedPayoutEarned = isQualified ? Number(config.fixedBasePayout ?? 10000) : 0;
 
-    const salesBreakdown = monthInstitutes.map((inst) => {
+    // Incentive starts applying ONLY AFTER minimum qualifying sales are achieved!
+    // E.g., if minSales is 2, first 2 sales qualify the fixed base payout (earn ₹0 incentive).
+    // Deals from sale #3 onwards unlock deal incentive slabs.
+    const salesBreakdown = monthInstitutes.map((inst, index) => {
       const amount = Number(inst.subscriptionAmount || 0);
-      const incentive = calculateIncentiveForAmount(amount, config.incentiveSlabs);
+      const isQualifyingDeal = index < minSales;
+      const incentive = isQualifyingDeal ? 0 : calculateIncentiveForAmount(amount, config.incentiveSlabs);
       return {
         _id: inst._id || inst.id,
         instituteName: inst.name,
@@ -115,6 +128,8 @@ export const getSalesOverview = async (req, res) => {
         plan: inst.subscriptionPlan,
         amount,
         incentive,
+        isQualifyingDeal,
+        saleNumber: index + 1,
         date: inst.subscriptionStart || inst.createdAt,
       };
     });
@@ -124,10 +139,27 @@ export const getSalesOverview = async (req, res) => {
 
     // 2. Fetch Leads for Today's Follow-ups and Call Counts
     const allLeads = await SalesLead.find();
+    // Lookup territory assignments for this user
+    const assignments = await SalesTerritory.find();
+    const myAssignments = (assignments || []).filter((t) => String(t.salesPersonId) === String(userId));
+    const assignedStates = myAssignments.filter((t) => !t.city).map((t) => (t.state || "").trim().toLowerCase());
+    const assignedCities = myAssignments.filter((t) => t.city).map((t) => `${(t.state || "").trim().toLowerCase()}::${(t.city || "").trim().toLowerCase()}`);
+
     const myLeads = allLeads.filter((lead) => {
-      if (userRole === "super_admin" || userRole === "tech_admin") return true;
-      const leadSpId = String(lead.salesPerson || lead.addedBy || "");
-      return !leadSpId || leadSpId === String(userId) || lead.source === "Super Admin";
+      if (userRole === "super_admin" || userRole === "tech_admin") {
+        return lead.source !== "Self-Added" || String(lead.addedBy) === String(userId);
+      }
+      // Staff's own self-added lead
+      if (String(lead.addedBy || "") === String(userId)) return true;
+      // Directly assigned lead
+      if (String(lead.salesPerson || "") === String(userId)) return true;
+      // Territory assigned
+      const lState = (lead.state || "").trim().toLowerCase();
+      const lCity = (lead.district || lead.city || "").trim().toLowerCase();
+      if (lState && lCity && assignedCities.includes(`${lState}::${lCity}`)) return true;
+      if (lState && assignedStates.includes(lState)) return true;
+
+      return false;
     });
 
     // Count calls logged today
@@ -186,10 +218,31 @@ export const getSalesLeads = async (req, res) => {
 
     const leads = await SalesLead.find().sort({ updatedAt: -1, createdAt: -1 });
 
+    // Lookup territory assignments for this sales person
+    const assignments = await SalesTerritory.find();
+    const myAssignments = (assignments || []).filter((t) => String(t.salesPersonId) === String(userId));
+    const assignedStates = myAssignments.filter((t) => !t.city).map((t) => (t.state || "").trim().toLowerCase());
+    const assignedCities = myAssignments.filter((t) => t.city).map((t) => `${(t.state || "").trim().toLowerCase()}::${(t.city || "").trim().toLowerCase()}`);
+
     const filtered = leads.filter((lead) => {
-      if (userRole === "super_admin" || userRole === "tech_admin") return true;
-      const spId = String(lead.salesPerson || lead.addedBy || "");
-      return !spId || spId === String(userId) || lead.source === "Super Admin";
+      // Super admin sees master leads (never staff self-added leads)
+      if (userRole === "super_admin" || userRole === "tech_admin") {
+        return lead.source !== "Self-Added" || String(lead.addedBy) === String(userId);
+      }
+
+      // 1. Staff's own self-added leads ("show leads added by staff only in staff dashboard")
+      if (String(lead.addedBy || "") === String(userId)) return true;
+
+      // 2. Directly assigned leads
+      if (String(lead.salesPerson || "") === String(userId)) return true;
+
+      // 3. Leads matching assigned state/city territories
+      const lState = (lead.state || "").trim().toLowerCase();
+      const lCity = (lead.district || lead.city || "").trim().toLowerCase();
+      if (lState && lCity && assignedCities.includes(`${lState}::${lCity}`)) return true;
+      if (lState && assignedStates.includes(lState)) return true;
+
+      return false;
     });
 
     return res.json(filtered);
@@ -207,7 +260,10 @@ export const createSalesLead = async (req, res) => {
       contactPerson,
       phone,
       email,
+      state,
+      district,
       city,
+      address,
       studentCapacity,
       planInterest,
       status,
@@ -219,14 +275,22 @@ export const createSalesLead = async (req, res) => {
       return res.status(400).json({ message: "Coaching Name, Contact Person and Phone are required." });
     }
 
-    const source = req.user.role === "super_admin" ? "Super Admin" : "Self-Added";
+    const resolvedState = (state || "").trim();
+    const resolvedCity = (city || district || "").trim();
+    const resolvedDistrict = (district || city || "").trim();
+
+    const isSuperAdmin = req.user.role === "super_admin" || req.user.role === "tech_admin";
+    const source = isSuperAdmin ? "Super Admin" : "Self-Added";
 
     const newLead = await SalesLead.create({
       coachingName: coachingName.trim(),
       contactPerson: contactPerson.trim(),
       phone: phone.trim(),
       email: email ? email.trim().toLowerCase() : "",
-      city: city ? city.trim() : "",
+      state: resolvedState,
+      district: resolvedDistrict,
+      city: resolvedCity,
+      address: address ? address.trim() : "",
       studentCapacity: studentCapacity ? studentCapacity.trim() : "",
       planInterest: planInterest || "Yearly Subscription",
       status: status || "new",

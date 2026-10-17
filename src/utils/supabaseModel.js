@@ -11,13 +11,15 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs", "sales_leads", "salesleads"
+  "activity_logs", "activitylogs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
 const STUDENT_METADATA_FILE = path.join(FALLBACK_DIR, "student_metadata.json");
 const BATCHES_METADATA_FILE = path.join(FALLBACK_DIR, "batches_metadata.json");
 const USER_METADATA_FILE = path.join(FALLBACK_DIR, "user_metadata.json");
+const LEADS_METADATA_FILE = path.join(FALLBACK_DIR, "leads_metadata.json");
+const TERRITORY_METADATA_FILE = path.join(FALLBACK_DIR, "territory_metadata.json");
 
 const uploadMetadataFile = (filename, contentString) => {
   if (filename && (filename.toLowerCase().includes("video") || filename.toLowerCase().includes("note"))) {
@@ -367,6 +369,50 @@ export function writeUserMetadata(metadata) {
     const content = JSON.stringify(metadata, null, 2);
     fs.writeFileSync(USER_METADATA_FILE, content);
     uploadMetadataFile("user_metadata.json", content);
+  } catch (e) {}
+}
+
+export function readLeadsMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(LEADS_METADATA_FILE)) {
+      fs.writeFileSync(LEADS_METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(LEADS_METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+export function writeLeadsMetadata(metadata) {
+  try {
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(LEADS_METADATA_FILE, content);
+    uploadMetadataFile("leads_metadata.json", content);
+  } catch (e) {}
+}
+
+export function readTerritoryMetadata() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(TERRITORY_METADATA_FILE)) {
+      fs.writeFileSync(TERRITORY_METADATA_FILE, JSON.stringify({}, null, 2));
+    }
+    return JSON.parse(fs.readFileSync(TERRITORY_METADATA_FILE, "utf8"));
+  } catch (e) {
+    return {};
+  }
+}
+
+export function writeTerritoryMetadata(metadata) {
+  try {
+    const content = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(TERRITORY_METADATA_FILE, content);
+    uploadMetadataFile("territory_metadata.json", content);
   } catch (e) {}
 }
 
@@ -782,6 +828,20 @@ class SupabaseDocument {
       this.payout_config = this.payoutConfig;
     }
 
+    if (tableName === "sales_leads" && this._id) {
+      const metadata = readLeadsMetadata();
+      const meta = metadata[this._id] || {};
+      if (this.state === undefined || this.state === null || this.state === "") {
+        this.state = data.state || meta.state || "";
+      }
+      if (this.district === undefined || this.district === null || this.district === "") {
+        this.district = data.district || meta.district || this.city || "";
+      }
+      if (this.address === undefined || this.address === null || this.address === "") {
+        this.address = data.address || meta.address || "";
+      }
+    }
+
     if (tableName === "error_logs") {
       const ctx = (typeof data.context === "object" && data.context !== null) ? data.context : {};
       this.level = data.level || ctx.level || "error";
@@ -1112,6 +1172,16 @@ class SupabaseDocument {
         };
         writeUserMetadata(metadata);
       }
+      if (this._tableName === "sales_leads" && this._id) {
+        const metadata = readLeadsMetadata();
+        metadata[this._id] = {
+          ...(metadata[this._id] || {}),
+          state: this.state ?? metadata[this._id]?.state ?? "",
+          district: this.district ?? metadata[this._id]?.district ?? "",
+          address: this.address ?? metadata[this._id]?.address ?? "",
+        };
+        writeLeadsMetadata(metadata);
+      }
       syncVideoFallback(this);
       return this;
     } else {
@@ -1192,6 +1262,16 @@ class SupabaseDocument {
           payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
         };
         writeUserMetadata(metadata);
+      }
+      if (this._tableName === "sales_leads" && this._id) {
+        const metadata = readLeadsMetadata();
+        metadata[this._id] = {
+          ...(metadata[this._id] || {}),
+          state: this.state ?? metadata[this._id]?.state ?? "",
+          district: this.district ?? metadata[this._id]?.district ?? "",
+          address: this.address ?? metadata[this._id]?.address ?? "",
+        };
+        writeLeadsMetadata(metadata);
       }
       syncVideoFallback(this);
       return this;
@@ -2420,6 +2500,16 @@ class SupabaseModel {
       writeUserMetadata(metadata);
     }
 
+    if (this.tableName === "sales_leads" && data && data.id) {
+      const metadata = readLeadsMetadata();
+      metadata[data.id] = {
+        state: doc.state ?? "",
+        district: doc.district ?? "",
+        address: doc.address ?? "",
+      };
+      writeLeadsMetadata(metadata);
+    }
+
     if (data && ["video_lectures", "video_playlists", "video_uploads"].includes(this.tableName)) {
       try {
         const mergedObj = { ...data };
@@ -2995,6 +3085,7 @@ const mockMongoose = {
     else if (modelName === "CashfreePayment") tableName = "cashfree_payments";
     else if (modelName === "ContactMessage" || modelName === "ContactMessages") tableName = "contactmessages";
     else if (modelName === "SalesLead" || modelName === "SalesLeads") tableName = "sales_leads";
+    else if (modelName === "SalesTerritory" || modelName === "SalesTerritories") tableName = "sales_territory_assignments";
     else if (modelName === "CustomPage") tableName = "custom_pages";
     else if (modelName === "Notification") tableName = "notifications";
     else tableName = modelName.toLowerCase() + "s";
