@@ -6,6 +6,8 @@ import Batch from "../models/Batch.js";
 import Note from "../models/Note.js";
 import Notice from "../models/Notice.js";
 import TestResult from "../models/TestResult.js";
+import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
+import { getISTDateStr } from "../utils/feeHelper.js";
 import { supabase } from "../utils/supabase.js";
 import {
   getSupabaseInstituteRow,
@@ -261,10 +263,24 @@ async function callOpenAiRaw({
   temperature = 0.2,
   apiKey,
   model = "gpt-4o-mini",
+  history = [],
 }) {
   const messages = [];
   if (systemInstruction) {
     messages.push({ role: "system", content: systemInstruction });
+  }
+
+  // Inject prior turns
+  if (Array.isArray(history) && history.length > 0) {
+    for (const h of history) {
+      const text = typeof h.text === "string" ? h.text.trim() : (typeof h.content === "string" ? h.content.trim() : "");
+      if (text) {
+        messages.push({
+          role: h.role === "user" ? "user" : "assistant",
+          content: text,
+        });
+      }
+    }
   }
 
   if (imageBase64) {
@@ -275,7 +291,7 @@ async function callOpenAiRaw({
     messages.push({
       role: "user",
       content: [
-        { type: "text", text: prompt },
+        { type: "text", text: prompt || "" },
         {
           type: "image_url",
           image_url: {
@@ -285,7 +301,7 @@ async function callOpenAiRaw({
       ],
     });
   } else {
-    messages.push({ role: "user", content: prompt });
+    messages.push({ role: "user", content: prompt || "" });
   }
 
   try {
@@ -329,23 +345,55 @@ async function callGeminiApiWithFallback({
   temperature = 0.2,
   apiKey,
   preferredModel = "gemini-3.5-flash",
+  history = [],
 }) {
   const cleanBase64 = imageBase64
     ? imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "")
     : null;
 
   const contents = [];
-  const parts = [];
+
+  // Inject prior conversation turns
+  if (Array.isArray(history) && history.length > 0) {
+    for (const h of history) {
+      const text =
+        typeof h.text === "string"
+          ? h.text.trim()
+          : typeof h.content === "string"
+            ? h.content.trim()
+            : "";
+      if (!text) continue;
+      const role =
+        h.role === "assistant" || h.role === "model" ? "model" : "user";
+      if (contents.length > 0 && contents[contents.length - 1].role === role) {
+        contents[contents.length - 1].parts[0].text += `\n${text}`;
+      } else {
+        contents.push({ role, parts: [{ text }] });
+      }
+    }
+  }
+
+  // Gemini requires the first turn to be from 'user'
+  while (contents.length > 0 && contents[0].role !== "user") {
+    contents.shift();
+  }
+
+  const userParts = [];
   if (cleanBase64) {
-    parts.push({
+    userParts.push({
       inlineData: {
         mimeType: imageMimeType || "image/jpeg",
         data: cleanBase64,
       },
     });
   }
-  parts.push({ text: prompt });
-  contents.push({ role: "user", parts });
+  userParts.push({ text: prompt || "" });
+
+  if (contents.length > 0 && contents[contents.length - 1].role === "user") {
+    contents[contents.length - 1].parts.push(...userParts);
+  } else {
+    contents.push({ role: "user", parts: userParts });
+  }
 
   const payload = {
     contents,
@@ -474,6 +522,7 @@ export async function callGeminiRaw({
   imageBase64 = null,
   imageMimeType = "image/jpeg",
   temperature = 0.2,
+  history = [],
 }) {
   const globalSettings = await getAiGlobalSettings();
   const geminiKey = (
@@ -507,6 +556,7 @@ export async function callGeminiRaw({
         temperature,
         apiKey: openaiKey,
         model: chosenModel.startsWith("gpt") ? chosenModel : "gpt-4o-mini",
+        history,
       });
     } catch (openAiErr) {
       if (!geminiKey) {
@@ -531,6 +581,7 @@ export async function callGeminiRaw({
       preferredModel: chosenModel.startsWith("gpt")
         ? "gemini-2.5-flash"
         : chosenModel,
+      history,
     });
   }
 
@@ -544,6 +595,7 @@ export async function callGeminiRaw({
       temperature,
       apiKey: openaiKey,
       model: "gpt-4o-mini",
+      history,
     });
   }
 
@@ -712,8 +764,14 @@ Return only JSON. Do not include markdown preamble.`;
 }
 
 // 7. Task C: Real-Time Institute Intelligence Q&A
-export async function answerInstituteIntelligence(instituteId, user, question) {
+export async function answerInstituteIntelligence(
+  instituteId,
+  user,
+  question,
+  history = [],
+) {
   const instIdStr = String(instituteId || "").trim();
+  const todayISTStr = getISTDateStr(new Date());
 
   // Gather live context from DB safely
   let students = [];
@@ -721,6 +779,7 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
   let notes = 0;
   let notices = [];
   let tests = [];
+  let testSeriesAttempts = [];
 
   try {
     const results = await Promise.allSettled([
@@ -738,8 +797,13 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
         .limit(5)
         .lean(),
       TestResult.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
-        .sort({ createdAt: -1 })
-        .limit(10)
+        .sort({ examDate: -1, createdAt: -1 })
+        .limit(250)
+        .lean(),
+      TestSeriesAttempt.find({ institute: instIdStr })
+        .populate("testSeries", "title category totalMarks")
+        .sort({ submittedAt: -1 })
+        .limit(250)
         .lean(),
     ]);
 
@@ -756,6 +820,8 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
       notices = results[3].value;
     if (results[4].status === "fulfilled" && Array.isArray(results[4].value))
       tests = results[4].value;
+    if (results[5].status === "fulfilled" && Array.isArray(results[5].value))
+      testSeriesAttempts = results[5].value;
   } catch (err) {
     console.error("Error gathering DB context for AI:", err);
   }
@@ -784,9 +850,63 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
     return names.length > 0 ? names.join(", ") : "No Batch";
   };
 
-  // Filter Active Enrolled Students (exclude archived / inactive)
+  // Map test scores (Classroom Tests + Online Test Series) per student
+  const studentTestsMap = new Map();
+
+  (tests || []).forEach((t) => {
+    const sId = String(t.student?._id || t.student || "");
+    if (!sId) return;
+    if (!studentTestsMap.has(sId)) studentTestsMap.set(sId, []);
+    const pct =
+      Number(t.totalMarks || 0) > 0
+        ? Math.round((Number(t.score || 0) / Number(t.totalMarks)) * 100)
+        : 0;
+    studentTestsMap.get(sId).push({
+      title: t.title || "Class Test",
+      subject: t.subject || "General",
+      score: Number(t.score || 0),
+      totalMarks: Number(t.totalMarks || 0),
+      percentage: pct,
+      date: t.examDate ? getISTDateStr(t.examDate) : "",
+      remarks: t.remarks || "",
+      type: "Classroom Test",
+    });
+  });
+
+  (testSeriesAttempts || []).forEach((ta) => {
+    const sId = String(ta.student?._id || ta.student || "");
+    if (!sId) return;
+    if (!studentTestsMap.has(sId)) studentTestsMap.set(sId, []);
+    const seriesTitle =
+      ta.testSeries?.title || ta.batchName || "Online Test Series";
+    const seriesSubject = ta.testSeries?.category || "Test Series";
+    const total = Number(ta.totalMarks || ta.testSeries?.totalMarks || 100);
+    const score = Number(ta.score || 0);
+    const pct =
+      typeof ta.percentage === "number"
+        ? Math.round(ta.percentage)
+        : total > 0
+          ? Math.round((score / total) * 100)
+          : 0;
+
+    studentTestsMap.get(sId).push({
+      title: seriesTitle,
+      subject: seriesSubject,
+      score,
+      totalMarks: total,
+      percentage: pct,
+      date: ta.submittedAt ? getISTDateStr(ta.submittedAt) : "",
+      remarks: "",
+      type: "Online Test Series",
+    });
+  });
+
+  // Filter Active Enrolled Students & compute Attendance + Academic Metrics
   const activeStudents = [];
   const inactiveStudents = [];
+  const todayPresentStudents = [];
+  const todayAbsentStudents = [];
+  const todayUnmarkedStudents = [];
 
   students.forEach((s) => {
     const isArchived =
@@ -806,17 +926,58 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
     ) {
       inactiveStudents.push(s);
     } else {
-      // Calculate attendance metrics
-      const attRecords = Array.isArray(s.attendanceRecords) ? s.attendanceRecords : [];
+      // Calculate overall attendance metrics
+      const attRecords = Array.isArray(s.attendanceRecords)
+        ? s.attendanceRecords
+        : [];
       const totalSessions = attRecords.length;
-      const presentSessions = attRecords.filter((r) => r.status === "present").length;
+      const presentSessions = attRecords.filter(
+        (r) => r.status === "present",
+      ).length;
       const absentSessions = totalSessions - presentSessions;
-      const attendancePercentage = totalSessions > 0 ? Math.round((presentSessions / totalSessions) * 100) : 100;
+      const attendancePercentage =
+        totalSessions > 0
+          ? Math.round((presentSessions / totalSessions) * 100)
+          : 100;
 
       s.attendancePct = attendancePercentage;
       s.totalSessions = totalSessions;
       s.presentSessions = presentSessions;
       s.absentSessions = absentSessions;
+
+      // Today's attendance tracking (IST date)
+      const todayRecord = attRecords.find(
+        (r) => getISTDateStr(r.date) === todayISTStr,
+      );
+      if (todayRecord) {
+        if (todayRecord.status === "present") {
+          s.todayStatus = "Present";
+          todayPresentStudents.push(s);
+        } else if (todayRecord.status === "absent") {
+          s.todayStatus = "Absent";
+          todayAbsentStudents.push(s);
+        } else {
+          s.todayStatus = todayRecord.status || "Marked";
+        }
+      } else {
+        s.todayStatus = "Not Marked";
+        todayUnmarkedStudents.push(s);
+      }
+
+      // Attach test scores
+      const sId = String(s._id || s.id);
+      const studentTests = studentTestsMap.get(sId) || [];
+      s.tests = studentTests;
+      if (studentTests.length > 0) {
+        const avg = Math.round(
+          studentTests.reduce((acc, t) => acc + (t.percentage || 0), 0) /
+            studentTests.length,
+        );
+        s.testAvgPct = avg;
+      } else {
+        s.testAvgPct = null;
+      }
+
       activeStudents.push(s);
     }
   });
@@ -843,23 +1004,52 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
 
   defaulters.sort((a, b) => b.due - a.due);
 
-  // Complete Student Roster with Fees and Attendance
+  // Complete Student Roster with Fees, Attendance & Academic Performance
   const fullRosterFormatted = activeStudents
     .map((s, idx) => {
       const bNames = getStudentBatchNames(s);
       const due = Number(s.pendingAmount || 0);
-      const feeStatus = due > 0 ? `Pending: ₹${due.toLocaleString("en-IN")}` : "Paid / No Due";
-      const attText = s.totalSessions > 0
-        ? `${s.attendancePct}% (${s.presentSessions}/${s.totalSessions} present)`
-        : `100% (No marked absences)`;
-      return `${idx + 1}. **${s.name}** | Batch: ${bNames} | Phone: ${s.phone || "N/A"} | Attendance: ${attText} | Fees: ${feeStatus}`;
+      const feeStatus =
+        due > 0
+          ? `Pending: ₹${due.toLocaleString("en-IN")}`
+          : "Paid / No Due";
+      const attText =
+        s.totalSessions > 0
+          ? `${s.attendancePct}% (${s.presentSessions}/${s.totalSessions} present)`
+          : `100% (No marked absences)`;
+      const todayText =
+        s.todayStatus === "Present"
+          ? "✅ Present Today"
+          : s.todayStatus === "Absent"
+            ? "❌ Absent Today"
+            : "⏳ Today Not Marked";
+
+      let testSummary = "No tests recorded yet";
+      if (s.tests && s.tests.length > 0) {
+        const testsList = s.tests
+          .slice(0, 6)
+          .map(
+            (t) =>
+              `${t.title} [${t.subject}]: ${t.score}/${t.totalMarks} (${t.percentage}%)`,
+          )
+          .join("; ");
+        testSummary = `${s.tests.length} tests completed (Avg: ${s.testAvgPct}%). Recent: ${testsList}`;
+      }
+
+      return `${idx + 1}. **${s.name}** | Batch: ${bNames} | Phone: ${s.phone || "N/A"} | Today: ${todayText} | Overall Attendance: ${attText} | Fees: ${feeStatus}\n   • Academic & Test Scores: ${testSummary}`;
     })
-    .join("\n");
+    .join("\n\n");
 
   // Attendance Highlights
-  const studentsWithAttendance = activeStudents.filter((s) => s.totalSessions > 0);
-  const below75Attendance = activeStudents.filter((s) => s.totalSessions > 0 && s.attendancePct < 75);
-  const perfectAttendance = activeStudents.filter((s) => s.attendancePct === 100);
+  const studentsWithAttendance = activeStudents.filter(
+    (s) => s.totalSessions > 0,
+  );
+  const below75Attendance = activeStudents.filter(
+    (s) => s.totalSessions > 0 && s.attendancePct < 75,
+  );
+  const perfectAttendance = activeStudents.filter(
+    (s) => s.attendancePct === 100,
+  );
 
   // Batch-wise Student Breakdown
   const batchWiseRoster = activeBatches
@@ -877,8 +1067,19 @@ export async function answerInstituteIntelligence(instituteId, user, question) {
     })
     .join("\n");
 
+  const todayPresentNames =
+    todayPresentStudents
+      .map((s) => `${s.name} (${getStudentBatchNames(s)})`)
+      .join(", ") || "None marked present today";
+  const todayAbsentNames =
+    todayAbsentStudents
+      .map((s) => `${s.name} (${getStudentBatchNames(s)})`)
+      .join(", ") || "None marked absent today";
+  const todayUnmarkedCount = todayUnmarkedStudents.length;
+
   const contextStr = `
 Institute Live Snapshot:
+• Date Today (IST): ${todayISTStr}
 • Total Enrolled Students (Active): ${activeStudents.length}
 • Total Active Batches: ${activeBatches.map((b) => b.name).join(", ") || "None"}
 • Total Fees Collected: ₹${totalCollected.toLocaleString("en-IN")}
@@ -892,45 +1093,71 @@ Institute Live Snapshot:
 • Recent Notices: ${notices.map((n) => n.title).join(", ") || "None"}
 • User Inquiring: ${user.name} (${user.role})
 
+Today's Attendance Snapshot (${todayISTStr}):
+• Present Today (${todayPresentStudents.length}): ${todayPresentNames}
+• Absent Today (${todayAbsentStudents.length}): ${todayAbsentNames}
+• Not Marked Yet Today (${todayUnmarkedCount} students): ${todayUnmarkedCount > 0 ? (todayUnmarkedCount <= 12 ? todayUnmarkedStudents.map((s) => `${s.name} (${getStudentBatchNames(s)})`).join(", ") : `${todayUnmarkedCount} students pending mark`) : "All students marked"}
+
 Students Roster by Batch:
 ${batchWiseRoster || "No active batches."}
 
-Complete Active Student Roster (${activeStudents.length} Active Students with Attendance & Fees):
+Complete Active Student Roster (${activeStudents.length} Active Students with Today's Attendance, Overall Attendance, Fees, and Test Marks):
 ${fullRosterFormatted || "No enrolled students."}
 `;
 
   const systemInstruction = `You are ClassTech AI, the intelligent, friendly, and ultra-accurate management assistant for this coaching institute.
-Use the real-time context above to answer all questions accurately, concisely, and cleanly.
+Use the real-time context above and ongoing conversation history to answer all questions accurately, concisely, and cleanly.
 
 CRITICAL OPERATIONAL RULES:
-1. SUMMARY OF ENROLLED STUDENTS:
+
+1. TODAY'S ATTENDANCE INQUIRIES:
+   - When asked questions like:
+     * "How many students were present today?"
+     * "Tell me today's absent students" / "Who is absent today?"
+     * "Who came today?" / "Attendance of today"
+   - Answer directly using "Today's Attendance Snapshot" for date ${todayISTStr}:
+     • If asked about present students: State the exact count (**${todayPresentStudents.length}**) and list their names and batches. If 0 present, explain that no students are marked present yet today.
+     • If asked about absent students: State the exact count (**${todayAbsentStudents.length}**) and list their names and batches. If 0 absent, mention that no students have been marked absent today.
+     • If attendance hasn't been marked for students, clearly note that ${todayUnmarkedCount} student(s) have not had attendance recorded yet today.
+
+2. STUDENT ACADEMIC REPORT CARD & PERFORMANCE ANALYSIS:
+   - When asked "How is [Student Name] doing?", "Give me a report card of [Student Name]", "Analyze [Student Name]'s marks", or about any student's performance:
+   - Find the student by name in the student roster and test data above (fuzzy match case-insensitively, e.g. "Priyanshu" matches any student named Priyanshu).
+   - If the student is found, format a comprehensive, professional **Student Academic Report Card**:
+     • 👤 **Student Profile**: Name, Batch, Contact, Fee status (Paid / Pending ₹X).
+     • 📅 **Attendance Report**: Today's status (✅ Present / ❌ Absent / ⏳ Not Marked), overall attendance percentage (e.g. 92% - 23/25 sessions attended), and attendance consistency (Regular / Irregular).
+     • 📝 **Exam & Test Scores**:
+       - List all classroom tests and online test series attempts with test title, subject, score, total marks, and percentage (e.g. "Maths Unit Test: 22/25 (88%)").
+       - Overall average test percentage across all tests.
+       - Highlight strongest subject and any subject where marks are lower.
+       - If no tests have been recorded yet for the student, clearly state that no test marks have been logged in the system yet.
+     • 💡 **Teacher's Recommendations / Action Plan**: 2-3 specific, encouraging, and constructive suggestions (e.g., maintain regular attendance, focus on revision for lower-scoring subjects, or praise for high consistency).
+
+3. CONTEXTUAL FOLLOW-UPS & MULTI-TURN MEMORY:
+   - You maintain full conversational context. If the user refers to previous questions (e.g., "what about his fees?", "is he present?", "show for the other batch", "yes please do that", "generate it"), use the ongoing conversation history to understand who or what they are referring to without asking them to repeat themselves.
+
+4. SUMMARY OF ENROLLED STUDENTS:
    - When asked for a "summary", "overview", or "total enrolled students":
    - ALWAYS report the count of ACTIVE students (**${activeStudents.length}**) as Total Enrolled Students. Never report archived or inactive students in the total enrolled figure.
 
-2. LIST DOWN ALL STUDENTS:
+5. LIST DOWN ALL STUDENTS:
    - When asked to "list down all students", "show all students", "give student roster", or "list students":
    - You MUST list ALL ${activeStudents.length} active students from the "Complete Active Student Roster" above!
-   - List EVERY SINGLE student IRRESPECTIVE of their pending fees (both students who paid full fees and students who owe pending fees).
+   - List EVERY SINGLE student IRRESPECTIVE of their pending fees.
    - Show their sequential number, name, and batch.
 
-3. STUDENTS OF A PARTICULAR BATCH:
-   - When asked for students of any particular batch (e.g. "show students of Neet batch", "who is in [batch name]", "students in Class 10"):
+6. STUDENTS OF A PARTICULAR BATCH:
+   - When asked for students of any particular batch:
    - Identify the requested batch name from "Students Roster by Batch" or the student roster.
-   - List all students who are in that specific batch.
-   - If that batch has students, list them clearly with their names.
-   - If that batch has no students, clearly state that no students are currently enrolled in that batch.
+   - List all students enrolled in that specific batch.
+   - If that batch has no students, clearly state that no students are currently enrolled.
 
-4. ATTENDANCE QUERIES & NUMERIC FILTERING:
-   - When asked to list or identify students having attendance less than, greater than, or equal to a percentage (e.g., "attendance less than 75%", "< 75%", "100% attendance", "students having 100 percent attendance", "attendance below 80%"):
+7. ATTENDANCE QUERIES & NUMERIC FILTERING:
+   - When asked to list students having attendance less than, greater than, or equal to a percentage:
      * Filter students directly based on their exact Attendance percentage from the active student roster.
-     * List all matching students with:
-       • Sequential number and Student Name
-       • Batch Name
-       • Exact Attendance Percentage and Ratio (e.g. 60% (3/5 sessions))
-     * If no students match the criterion (e.g., if no students have attendance below 75%), clearly state: "No students currently have attendance below 75%."
-     * If all students have 100% attendance (or no absences have been marked), explain that clearly.
+     * List all matching students with sequential number, Student Name, Batch Name, and exact Attendance Percentage & Ratio.
 
-5. FORMATTING RULES:
+8. FORMATTING RULES:
    - Write in a natural, clean, professional style.
    - Use clean bullet points (• or -).
    - Highlight key metrics with single bold (e.g. • Total Enrolled Students: **${activeStudents.length}**).
@@ -946,11 +1173,16 @@ ${contextStr}`;
     prompt: question,
     systemInstruction,
     temperature: 0.2,
+    history,
   });
 }
 
 // 8. Task D: Announcement & WhatsApp Broadcast Generator
-export async function generateNoticeAnnouncement(instituteId, topic) {
+export async function generateNoticeAnnouncement(
+  instituteId,
+  topic,
+  history = [],
+) {
   const prompt = `Draft a high-impact, professional WhatsApp announcement for tuition parents and students about:
 "${topic}"
 Include friendly greetings, clear points with emojis, date/time if relevant, and warm regards from institute management.
@@ -965,6 +1197,7 @@ Return ONLY valid JSON:
     systemInstruction:
       "You are an expert communicator for educational coaching centers.",
     temperature: 0.4,
+    history,
   });
 
   const parsed = extractJsonFromText(raw);
@@ -982,6 +1215,7 @@ export async function generatePracticeQuiz(
   topic = null,
   classLevel = "Class 10",
   numQuestions = 5,
+  history = [],
 ) {
   const isFreeformPrompt =
     !topic ||
@@ -1034,6 +1268,7 @@ Return ONLY valid JSON:
       systemInstruction:
         "You are an expert curriculum and exam question creator. Always return strictly valid JSON.",
       temperature: 0.3,
+      history,
     });
 
     const parsed = extractJsonFromText(raw);
@@ -1099,6 +1334,7 @@ export async function solveStudentDoubt(
   imageBase64,
   imageMimeType,
   studentName = "Student",
+  history = [],
 ) {
   const systemInstruction = `You are a supportive, friendly AI tutor for students.
 Your goal is to explain concepts clearly, provide step-by-step solutions, highlight formulas, and encourage learning.
@@ -1117,5 +1353,6 @@ Formatting rules:
     imageBase64,
     imageMimeType,
     temperature: 0.3,
+    history,
   });
 }

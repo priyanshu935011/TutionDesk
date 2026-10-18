@@ -340,6 +340,7 @@ export const chatWithAi = async (req, res) => {
       imageMimeType = "image/jpeg",
       taskType: explicitTaskType = null,
       batchId = null,
+      history = [],
     } = req.body;
 
     const lowerMessage = String(message || "").toLowerCase().trim();
@@ -563,7 +564,11 @@ export const chatWithAi = async (req, res) => {
 
       case "GENERATE_NOTICE": {
         const billing = await deductAiCredits(instituteId, "query");
-        const noticeData = await generateNoticeAnnouncement(instituteId, message || "General Holiday");
+        const noticeData = await generateNoticeAnnouncement(
+          instituteId,
+          message || "General Holiday",
+          history,
+        );
 
         replyPayload = {
           type: "ACTION_CARD",
@@ -580,9 +585,17 @@ export const chatWithAi = async (req, res) => {
         const billing = await deductAiCredits(instituteId, "quiz");
         const lower = message.toLowerCase();
         const numMatch = lower.match(/(\d+)\s*(?:questions|question|mcq|mcqs)/);
-        const numQuestions = numMatch ? Math.min(20, Math.max(1, parseInt(numMatch[1], 10))) : 5;
+        const numQuestions = numMatch
+          ? Math.min(20, Math.max(1, parseInt(numMatch[1], 10)))
+          : 5;
 
-        const quizData = await generatePracticeQuiz(message || "General Practice Quiz", null, "Class 10", numQuestions);
+        const quizData = await generatePracticeQuiz(
+          message || "General Practice Quiz",
+          null,
+          "Class 10",
+          numQuestions,
+          history,
+        );
 
         replyPayload = {
           type: "ACTION_CARD",
@@ -598,7 +611,13 @@ export const chatWithAi = async (req, res) => {
 
       case "STUDENT_DOUBT": {
         const billing = await deductAiCredits(instituteId, "doubt");
-        const answer = await solveStudentDoubt(message, imageBase64, imageMimeType, req.user.name || "Student");
+        const answer = await solveStudentDoubt(
+          message,
+          imageBase64,
+          imageMimeType,
+          req.user.name || "Student",
+          history,
+        );
 
         replyPayload = {
           type: "TEXT",
@@ -612,7 +631,12 @@ export const chatWithAi = async (req, res) => {
       case "QUERY":
       default: {
         const billing = await deductAiCredits(instituteId, "query");
-        const answer = await answerInstituteIntelligence(instituteId, req.user, message);
+        const answer = await answerInstituteIntelligence(
+          instituteId,
+          req.user,
+          message,
+          history,
+        );
 
         replyPayload = {
           type: "TEXT",
