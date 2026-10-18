@@ -16,6 +16,8 @@ import {
 import {
   updateInstituteAiWalletBalanceMetadata,
   updateInstituteAiSettingsMetadata,
+  readTestsMetadata,
+  toValidUUID,
 } from "../utils/supabaseModel.js";
 
 // Safe JSON parser for LLM responses
@@ -773,38 +775,81 @@ export async function answerInstituteIntelligence(
   const instIdStr = String(instituteId || "").trim();
   const todayISTStr = getISTDateStr(new Date());
 
+  // Resolve all possible institute/admin/user IDs for comprehensive data lookup
+  const instQueryIds = [instIdStr];
+  if (user) {
+    if (user.institute) {
+      if (typeof user.institute === "object") {
+        if (user.institute._id) instQueryIds.push(String(user.institute._id));
+        if (user.institute.id) instQueryIds.push(String(user.institute.id));
+        if (user.institute.adminUser) instQueryIds.push(String(user.institute.adminUser));
+      } else {
+        instQueryIds.push(String(user.institute));
+      }
+    }
+    if (user._id) instQueryIds.push(String(user._id));
+    if (user.id) instQueryIds.push(String(user.id));
+    if (user.institute_id) instQueryIds.push(String(user.institute_id));
+  }
+  const allInstIds = Array.from(new Set(instQueryIds.filter(Boolean).map(String)));
+
   // Gather live context from DB safely
   let students = [];
   let batches = [];
   let notes = 0;
   let notices = [];
   let tests = [];
+  let supabaseTestMarks = [];
   let testSeriesAttempts = [];
+  const testsMeta = readTestsMetadata() || {};
 
   try {
     const results = await Promise.allSettled([
-      Student.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
+      Student.find({
+        $or: [
+          { institute: { $in: allInstIds } },
+          { user: { $in: allInstIds } },
+        ],
+      })
         .select(
           "name phone enrollmentNumber totalFees paidAmount pendingAmount feePlanType batch batches status isArchived lastActiveAt attendanceRecords",
         )
         .lean(),
-      Batch.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
+      Batch.find({
+        $or: [
+          { institute: { $in: allInstIds } },
+          { user: { $in: allInstIds } },
+        ],
+      })
         .select("_id name status scheduleDays startTime endTime")
         .lean(),
-      Note.countDocuments({ $or: [{ institute: instIdStr }, { user: instIdStr }] }),
-      Notice.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
+      Note.countDocuments({
+        $or: [
+          { institute: { $in: allInstIds } },
+          { user: { $in: allInstIds } },
+        ],
+      }),
+      Notice.find({
+        $or: [
+          { institute: { $in: allInstIds } },
+          { user: { $in: allInstIds } },
+        ],
+      })
         .sort({ createdAt: -1 })
         .limit(5)
         .lean(),
-      TestResult.find({ $or: [{ institute: instIdStr }, { user: instIdStr }] })
-        .sort({ examDate: -1, createdAt: -1 })
-        .limit(250)
-        .lean(),
-      TestSeriesAttempt.find({ institute: instIdStr })
+      supabase
+        .from("test_marks")
+        .select("*")
+        .in("institute_id", allInstIds),
+      TestSeriesAttempt.find({
+        institute: { $in: allInstIds },
+      })
         .populate("testSeries", "title category totalMarks")
         .sort({ submittedAt: -1 })
         .limit(250)
-        .lean(),
+        .lean()
+        .catch(() => []),
     ]);
 
     if (results[0].status === "fulfilled" && Array.isArray(results[0].value))
@@ -818,13 +863,29 @@ export async function answerInstituteIntelligence(
       notes = results[2].value;
     if (results[3].status === "fulfilled" && Array.isArray(results[3].value))
       notices = results[3].value;
-    if (results[4].status === "fulfilled" && Array.isArray(results[4].value))
-      tests = results[4].value;
+    if (
+      results[4].status === "fulfilled" &&
+      results[4].value?.data &&
+      Array.isArray(results[4].value.data)
+    )
+      supabaseTestMarks = results[4].value.data;
     if (results[5].status === "fulfilled" && Array.isArray(results[5].value))
       testSeriesAttempts = results[5].value;
   } catch (err) {
     console.error("Error gathering DB context for AI:", err);
   }
+
+  // Also query standalone TestResult collection safely if available
+  try {
+    const mongoTests = await TestResult.find({
+      institute: { $in: allInstIds },
+    })
+      .limit(250)
+      .lean();
+    if (Array.isArray(mongoTests)) {
+      tests = mongoTests;
+    }
+  } catch (_) {}
 
   // Active batches & Batch map
   const activeBatches = batches.filter((b) => b.status !== "archived");
@@ -850,33 +911,106 @@ export async function answerInstituteIntelligence(
     return names.length > 0 ? names.join(", ") : "No Batch";
   };
 
-  // Map test scores (Classroom Tests + Online Test Series) per student
+  // Map test scores (Supabase test_marks + MongoDB TestResult + Online TestSeriesAttempt) per student
   const studentTestsMap = new Map();
 
-  (tests || []).forEach((t) => {
-    const sId = String(t.student?._id || t.student || "");
-    if (!sId) return;
-    if (!studentTestsMap.has(sId)) studentTestsMap.set(sId, []);
-    const pct =
-      Number(t.totalMarks || 0) > 0
-        ? Math.round((Number(t.score || 0) / Number(t.totalMarks)) * 100)
-        : 0;
-    studentTestsMap.get(sId).push({
-      title: t.title || "Class Test",
-      subject: t.subject || "General",
-      score: Number(t.score || 0),
-      totalMarks: Number(t.totalMarks || 0),
-      percentage: pct,
-      date: t.examDate ? getISTDateStr(t.examDate) : "",
-      remarks: t.remarks || "",
-      type: "Classroom Test",
-    });
+  const addTestToStudentKey = (key, testEntry) => {
+    const k = String(key || "").trim().toLowerCase();
+    if (!k) return;
+    if (!studentTestsMap.has(k)) studentTestsMap.set(k, []);
+    studentTestsMap.get(k).push(testEntry);
+  };
+
+  // 1. Process Supabase test_marks table rows (Classroom / Offline test results)
+  (supabaseTestMarks || []).forEach((row) => {
+    const marksObj = row.marks || {};
+    const testMeta = testsMeta[row.id] || {};
+    const bracketSubject =
+      row.test_name && row.test_name.includes("(") && row.test_name.includes(")")
+        ? row.test_name.split("(").pop().replace(")", "").trim()
+        : "";
+    const resolvedSubject =
+      testMeta.subject || bracketSubject || "General";
+    const total = Number(row.max_marks || 100);
+    const dateStr =
+      row.test_date ||
+      (row.created_at ? getISTDateStr(row.created_at) : "");
+
+    for (const [stKey, val] of Object.entries(marksObj)) {
+      const isAbsent =
+        val === -1 ||
+        Number(val) === -1 ||
+        String(val).toLowerCase() === "absent" ||
+        String(val).toLowerCase() === "a";
+      const score = isAbsent ? 0 : Number(val || 0);
+      const pct =
+        isAbsent
+          ? 0
+          : total > 0
+            ? Math.round((score / total) * 100)
+            : 0;
+
+      const testEntry = {
+        title: row.test_name || "Unit Test",
+        subject: resolvedSubject,
+        score: isAbsent ? "Absent" : score,
+        scoreNum: score,
+        totalMarks: total,
+        percentage: pct,
+        isAbsent,
+        date: dateStr,
+        remarks: isAbsent ? "Absent" : "",
+        type: "Classroom Test",
+      };
+
+      addTestToStudentKey(stKey, testEntry);
+    }
   });
 
-  (testSeriesAttempts || []).forEach((ta) => {
-    const sId = String(ta.student?._id || ta.student || "");
+  // 2. Process MongoDB TestResult rows
+  (tests || []).forEach((t) => {
+    const sId = String(
+      t.student?._id || t.student?.id || t.student || t.studentId || t.student_id || "",
+    );
     if (!sId) return;
-    if (!studentTestsMap.has(sId)) studentTestsMap.set(sId, []);
+
+    const isAbsent =
+      t.isAbsent === true ||
+      t.score === -1 ||
+      Number(t.score) === -1 ||
+      String(t.score).toLowerCase() === "absent";
+    const score = isAbsent ? 0 : Number(t.score || 0);
+    const total = Number(t.totalMarks || 100);
+    const pct =
+      isAbsent
+        ? 0
+        : total > 0
+          ? Math.round((score / total) * 100)
+          : 0;
+
+    const testEntry = {
+      title: t.title || "Class Test",
+      subject: t.subject || "General",
+      score: isAbsent ? "Absent" : score,
+      scoreNum: score,
+      totalMarks: total,
+      percentage: pct,
+      isAbsent,
+      date: t.examDate ? getISTDateStr(t.examDate) : (t.test_date || ""),
+      remarks: t.remarks || (isAbsent ? "Absent" : ""),
+      type: "Classroom Test",
+    };
+
+    addTestToStudentKey(sId, testEntry);
+  });
+
+  // 3. Process TestSeriesAttempt rows (Online Test Series)
+  (testSeriesAttempts || []).forEach((ta) => {
+    const sId = String(
+      ta.student?._id || ta.student?.id || ta.student || "",
+    );
+    if (!sId) return;
+
     const seriesTitle =
       ta.testSeries?.title || ta.batchName || "Online Test Series";
     const seriesSubject = ta.testSeries?.category || "Test Series";
@@ -889,16 +1023,20 @@ export async function answerInstituteIntelligence(
           ? Math.round((score / total) * 100)
           : 0;
 
-    studentTestsMap.get(sId).push({
+    const testEntry = {
       title: seriesTitle,
       subject: seriesSubject,
       score,
+      scoreNum: score,
       totalMarks: total,
       percentage: pct,
+      isAbsent: false,
       date: ta.submittedAt ? getISTDateStr(ta.submittedAt) : "",
       remarks: "",
       type: "Online Test Series",
-    });
+    };
+
+    addTestToStudentKey(sId, testEntry);
   });
 
   // Filter Active Enrolled Students & compute Attendance + Academic Metrics
@@ -964,15 +1102,42 @@ export async function answerInstituteIntelligence(
         todayUnmarkedStudents.push(s);
       }
 
-      // Attach test scores
-      const sId = String(s._id || s.id);
-      const studentTests = studentTestsMap.get(sId) || [];
+      // Attach test scores by checking all student identifiers
+      const sId = String(s._id || s.id || "").trim().toLowerCase();
+      const sUUID = toValidUUID(s._id || s.id).toLowerCase();
+      const sEnrollment = String(s.enrollmentNumber || "").trim().toLowerCase();
+      const sName = String(s.name || "").trim().toLowerCase();
+
+      const combinedTests = [
+        ...(studentTestsMap.get(sId) || []),
+        ...(sUUID !== sId ? (studentTestsMap.get(sUUID) || []) : []),
+        ...(sEnrollment ? (studentTestsMap.get(sEnrollment) || []) : []),
+        ...(sName ? (studentTestsMap.get(sName) || []) : []),
+      ];
+
+      // Deduplicate if a test appears in both sources
+      const seenTestKeys = new Set();
+      const studentTests = [];
+      for (const t of combinedTests) {
+        const key = `${t.title}_${t.date}_${t.score}_${t.totalMarks}`;
+        if (!seenTestKeys.has(key)) {
+          seenTestKeys.add(key);
+          studentTests.push(t);
+        }
+      }
+
       s.tests = studentTests;
       if (studentTests.length > 0) {
-        const avg = Math.round(
-          studentTests.reduce((acc, t) => acc + (t.percentage || 0), 0) /
-            studentTests.length,
-        );
+        const validPercentages = studentTests
+          .filter((t) => !t.isAbsent)
+          .map((t) => t.percentage);
+        const avg =
+          validPercentages.length > 0
+            ? Math.round(
+                validPercentages.reduce((acc, p) => acc + p, 0) /
+                  validPercentages.length,
+              )
+            : 0;
         s.testAvgPct = avg;
       } else {
         s.testAvgPct = null;
@@ -1122,16 +1287,16 @@ CRITICAL OPERATIONAL RULES:
 
 2. STUDENT ACADEMIC REPORT CARD & PERFORMANCE ANALYSIS:
    - When asked "How is [Student Name] doing?", "Give me a report card of [Student Name]", "Analyze [Student Name]'s marks", or about any student's performance:
-   - Find the student by name in the student roster and test data above (fuzzy match case-insensitively, e.g. "Priyanshu" matches any student named Priyanshu).
-   - If the student is found, format a comprehensive, professional **Student Academic Report Card**:
-     • 👤 **Student Profile**: Name, Batch, Contact, Fee status (Paid / Pending ₹X).
-     • 📅 **Attendance Report**: Today's status (✅ Present / ❌ Absent / ⏳ Not Marked), overall attendance percentage (e.g. 92% - 23/25 sessions attended), and attendance consistency (Regular / Irregular).
-     • 📝 **Exam & Test Scores**:
-       - List all classroom tests and online test series attempts with test title, subject, score, total marks, and percentage (e.g. "Maths Unit Test: 22/25 (88%)").
-       - Overall average test percentage across all tests.
-       - Highlight strongest subject and any subject where marks are lower.
-       - If no tests have been recorded yet for the student, clearly state that no test marks have been logged in the system yet.
-     • 💡 **Teacher's Recommendations / Action Plan**: 2-3 specific, encouraging, and constructive suggestions (e.g., maintain regular attendance, focus on revision for lower-scoring subjects, or praise for high consistency).
+   - Find the student by name in the student roster and test data above (fuzzy match case-insensitively, e.g. "Priyanshu" matches any student named "PRIYANSHU" or "Priyanshu").
+   - Carefully inspect that student's "• Academic & Test Scores" field in the Complete Active Student Roster.
+   - If tests are listed there, you MUST list out every single test:
+     • Test Title and Subject (e.g. "Unit Test 34 [General]")
+     • Marks obtained and Total Marks (e.g. "20/50 (40%)")
+     • Date of examination if available
+     • Overall average percentage across all tests
+   - NEVER state "No test marks have been recorded in the system yet" if the student has tests listed in their roster entry! Only state that if the field explicitly says "No tests recorded yet".
+   - Highlight their performance, strongest areas, and subjects requiring improvement.
+   - Combine with their Attendance (today's status and overall %) and Fee status to produce an encouraging, comprehensive, and professional **Student Academic Report Card**.
 
 3. CONTEXTUAL FOLLOW-UPS & MULTI-TURN MEMORY:
    - You maintain full conversational context. If the user refers to previous questions (e.g., "what about his fees?", "is he present?", "show for the other batch", "yes please do that", "generate it"), use the ongoing conversation history to understand who or what they are referring to without asking them to repeat themselves.
