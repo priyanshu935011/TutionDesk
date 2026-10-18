@@ -2538,3 +2538,110 @@ export const updateInstituteAiConfig = async (req, res) => {
   }
 };
 
+// ----------------------------------------------------
+// Festival Wise Dynamic Themes
+// ----------------------------------------------------
+
+export const DEFAULT_FESTIVAL_THEME = {
+  activeFestival: "none",
+  enabled: false,
+  greeting: "",
+  subGreeting: "",
+  showBanner: true,
+  showParticles: true,
+  showDecorations: true,
+  primaryColor: "",
+};
+
+export const getFestivalThemeHelper = async () => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "festival_theme" });
+    if (!setting || !setting.value) {
+      return DEFAULT_FESTIVAL_THEME;
+    }
+    let val = setting.value;
+    if (typeof val === "string") {
+      try { val = JSON.parse(val); } catch (_) { val = {}; }
+    }
+    return {
+      ...DEFAULT_FESTIVAL_THEME,
+      ...val,
+      enabled: val.enabled !== undefined ? Boolean(val.enabled) : (val.activeFestival && val.activeFestival !== "none"),
+    };
+  } catch (err) {
+    console.error("getFestivalThemeHelper error:", err.message);
+    return DEFAULT_FESTIVAL_THEME;
+  }
+};
+
+export const getPublicFestivalTheme = async (req, res) => {
+  try {
+    const settings = await getFestivalThemeHelper();
+    res.setHeader("Cache-Control", "public, max-age=60");
+    return res.json({ success: true, settings });
+  } catch (error) {
+    console.error("getPublicFestivalTheme error:", error);
+    return res.json({ success: true, settings: DEFAULT_FESTIVAL_THEME });
+  }
+};
+
+export const getAdminFestivalTheme = async (req, res) => {
+  try {
+    const settings = await getFestivalThemeHelper();
+    return res.json({ success: true, settings });
+  } catch (error) {
+    console.error("getAdminFestivalTheme error:", error);
+    return res.status(500).json({ message: "Could not fetch festival theme settings." });
+  }
+};
+
+export const updateAdminFestivalTheme = async (req, res) => {
+  try {
+    const {
+      activeFestival = "none",
+      enabled = false,
+      greeting = "",
+      subGreeting = "",
+      showBanner = true,
+      showParticles = true,
+      showDecorations = true,
+      primaryColor = "",
+    } = req.body;
+
+    const updatedValue = {
+      activeFestival: String(activeFestival || "none").toLowerCase().trim(),
+      enabled: Boolean(enabled),
+      greeting: String(greeting || "").trim(),
+      subGreeting: String(subGreeting || "").trim(),
+      showBanner: Boolean(showBanner),
+      showParticles: Boolean(showParticles),
+      showDecorations: Boolean(showDecorations),
+      primaryColor: String(primaryColor || "").trim(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    let setting = await SystemSetting.findOne({ key: "festival_theme" });
+    if (setting) {
+      setting.value = updatedValue;
+      if (typeof setting.markModified === "function") setting.markModified("value");
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "festival_theme",
+        value: updatedValue,
+        description: "Festivals wise theme and animation settings for mobile/web app",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Festival theme [${updatedValue.activeFestival}] updated successfully!`,
+      settings: updatedValue,
+    });
+  } catch (error) {
+    console.error("updateAdminFestivalTheme error:", error);
+    return res.status(500).json({ message: "Could not update festival theme settings." });
+  }
+};
+
+

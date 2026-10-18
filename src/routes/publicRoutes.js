@@ -6,6 +6,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormByShortId } from "../controllers/leadController.js";
 import { getPublicPages, getPublicPageBySlug } from "../controllers/pageController.js";
 import { submitContactMessage, getContactDetails } from "../controllers/contactController.js";
+import { getPublicFestivalTheme } from "../controllers/adminController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -125,5 +126,8 @@ router.get("/website-settings", async (req, res) => {
     return res.status(500).json({ message: "Could not fetch public website settings." });
   }
 });
+
+// Public active festival theme configuration for Flutter app & web
+router.get("/festival-theme", getPublicFestivalTheme);
 
 export default router;

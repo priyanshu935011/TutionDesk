@@ -48,6 +48,8 @@ import {
   updateAdminAiSettings,
   topupInstituteAiWallet,
   updateInstituteAiConfig,
+  getAdminFestivalTheme,
+  updateAdminFestivalTheme,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -138,6 +140,9 @@ router.put("/global-wallet-settings", updateGlobalWalletSettings);
 router.get("/ai-settings", getAdminAiSettings);
 router.post("/ai-settings", updateAdminAiSettings);
 router.put("/ai-settings", updateAdminAiSettings);
+router.get("/festival-theme", getAdminFestivalTheme);
+router.post("/festival-theme", updateAdminFestivalTheme);
+router.put("/festival-theme", updateAdminFestivalTheme);
 router.post("/flush-cache", flushSystemCache);
 router.get("/flush-cache", flushSystemCache);
 router.delete("/institutes/:id", deleteInstitute);
