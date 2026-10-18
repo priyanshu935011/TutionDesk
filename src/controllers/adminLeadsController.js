@@ -135,9 +135,21 @@ export const getLeadFolders = async (req, res) => {
       };
     });
 
+    const statusCounts = {
+      total: masterLeads.length,
+      new: masterLeads.filter((l) => (l.status || "new").toLowerCase() === "new").length,
+      contacted: masterLeads.filter((l) => (l.status || "").toLowerCase() === "contacted").length,
+      interested: masterLeads.filter((l) => (l.status || "").toLowerCase() === "interested").length,
+      demo_scheduled: masterLeads.filter((l) => (l.status || "").toLowerCase() === "demo_scheduled").length,
+      follow_up: masterLeads.filter((l) => (l.status || "").toLowerCase() === "follow_up").length,
+      converted: masterLeads.filter((l) => (l.status || "").toLowerCase() === "converted").length,
+      lost: masterLeads.filter((l) => (l.status || "").toLowerCase() === "lost").length,
+    };
+
     return res.json({
       states: folderData,
       totalMasterLeads: masterLeads.length,
+      statusCounts,
     });
   } catch (error) {
     console.error("getLeadFolders error:", error);

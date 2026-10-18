@@ -27,6 +27,8 @@ import { clearCachePattern } from "../utils/cache.js";
 import { logActivity } from "../utils/activityLogger.js";
 import ActivityLog from "../models/ActivityLog.js";
 import SystemLog from "../models/SystemLog.js";
+import SalesLead from "../models/SalesLead.js";
+import SalesTerritory from "../models/SalesTerritory.js";
 
 const getAdminEmails = async () => {
   try {
@@ -1807,6 +1809,71 @@ export const deleteStaff = async (req, res) => {
   } catch (err) {
     console.error("deleteStaff error:", err);
     return res.status(500).json({ message: "Could not delete staff member." });
+  }
+};
+
+// Staff 360 overview: activities, sales, followups, tuitions added
+export const getStaffDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const staff = await User.findById(id).select("-password").populate("parentAdmin", "name email");
+    if (!staff) {
+      return res.status(404).json({ message: "Staff member not found." });
+    }
+
+    // 1. Fetch tuition accounts added or handled by this staff
+    const allInstitutes = await Institute.find({});
+    const staffInstitutes = (allInstitutes || []).filter(
+      (inst) => String(inst.salesPerson || inst.addedBy || "") === String(id)
+    );
+
+    // 2. Fetch leads assigned to or created by this staff
+    const allLeads = await SalesLead.find({});
+    const staffLeads = (allLeads || []).filter(
+      (lead) => String(lead.salesPerson || "") === String(id) || String(lead.addedBy || "") === String(id)
+    );
+
+    // 3. Fetch territory assignments
+    const allTerritories = await SalesTerritory.find({});
+    const staffTerritories = (allTerritories || []).filter(
+      (t) => String(t.salesPersonId || "") === String(id)
+    );
+
+    // 4. Fetch activity logs by this staff
+    const allLogs = await ActivityLog.find({});
+    const staffLogs = (allLogs || [])
+      .filter((log) => String(log.user?._id || log.user || "") === String(id))
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 30);
+
+    // 5. Calculate statistics
+    const stats = {
+      totalTuitions: staffInstitutes.length,
+      totalLeads: staffLeads.length,
+      followUpsCount: staffLeads.filter((l) => (l.status || "").toLowerCase() === "follow_up").length,
+      closedSalesCount: staffInstitutes.length,
+      leadsByStatus: {
+        new: staffLeads.filter((l) => (l.status || "new").toLowerCase() === "new").length,
+        contacted: staffLeads.filter((l) => (l.status || "").toLowerCase() === "contacted").length,
+        interested: staffLeads.filter((l) => (l.status || "").toLowerCase() === "interested").length,
+        demo_scheduled: staffLeads.filter((l) => (l.status || "").toLowerCase() === "demo_scheduled").length,
+        follow_up: staffLeads.filter((l) => (l.status || "").toLowerCase() === "follow_up").length,
+        converted: staffLeads.filter((l) => (l.status || "").toLowerCase() === "converted").length,
+        lost: staffLeads.filter((l) => (l.status || "").toLowerCase() === "lost").length,
+      },
+    };
+
+    return res.json({
+      staff,
+      stats,
+      institutes: staffInstitutes,
+      leads: staffLeads,
+      territories: staffTerritories,
+      activityLogs: staffLogs,
+    });
+  } catch (err) {
+    console.error("getStaffDetails error:", err);
+    return res.status(500).json({ message: "Could not fetch staff details." });
   }
 };
 
