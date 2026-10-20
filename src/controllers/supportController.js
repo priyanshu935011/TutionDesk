@@ -1,4 +1,6 @@
 import SupportTicket from "../models/SupportTicket.js";
+import SupportFaq from "../models/SupportFaq.js";
+import SupportTutorial from "../models/SupportTutorial.js";
 import { sendAdminTicketAlert } from "../services/adminAlertService.js";
 import cloudinary from "../utils/cloudinary.js";
 import { callGeminiRaw } from "../services/aiService.js";
@@ -233,12 +235,19 @@ export async function getMyTickets(req, res) {
  */
 export async function getFaqs(req, res) {
   try {
+    const dbFaqs = await SupportFaq.find({ isActive: true }).sort({ orderIndex: 1, createdAt: -1 });
+    if (dbFaqs && dbFaqs.length > 0) {
+      return res.json({
+        success: true,
+        faqs: dbFaqs,
+      });
+    }
     return res.json({
       success: true,
       faqs: CLASSTECH_FAQS,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true, faqs: CLASSTECH_FAQS });
   }
 }
 
@@ -248,12 +257,19 @@ export async function getFaqs(req, res) {
  */
 export async function getTutorials(req, res) {
   try {
+    const dbTuts = await SupportTutorial.find({ isActive: true }).sort({ orderIndex: 1, createdAt: -1 });
+    if (dbTuts && dbTuts.length > 0) {
+      return res.json({
+        success: true,
+        tutorials: dbTuts,
+      });
+    }
     return res.json({
       success: true,
       tutorials: CLASSTECH_TUTORIALS,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.json({ success: true, tutorials: CLASSTECH_TUTORIALS });
   }
 }
 
@@ -309,3 +325,288 @@ CRITICAL RULES:
     });
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUPER ADMIN ENDPOINTS: TICKETS, FAQS & TUTORIALS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/support/admin/tickets
+ * Super Admin: Get all tickets with filtering and search
+ */
+export async function adminGetTickets(req, res) {
+  try {
+    const { status, category, search } = req.query;
+    const filter = {};
+    if (status && status !== "ALL") {
+      filter.status = status.toUpperCase();
+    }
+    if (category && category !== "ALL") {
+      filter.category = category;
+    }
+
+    let tickets = await SupportTicket.find(filter).sort({ createdAt: -1 });
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      tickets = tickets.filter(
+        (t) =>
+          (t.ticketNumber && t.ticketNumber.toLowerCase().includes(q)) ||
+          (t.userName && t.userName.toLowerCase().includes(q)) ||
+          (t.userPhone && t.userPhone.toLowerCase().includes(q)) ||
+          (t.subject && t.subject.toLowerCase().includes(q)) ||
+          (t.instituteName && t.instituteName.toLowerCase().includes(q))
+      );
+    }
+
+    return res.json({
+      success: true,
+      tickets: tickets || [],
+      total: tickets ? tickets.length : 0,
+    });
+  } catch (error) {
+    console.error("[SupportController] adminGetTickets error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * PUT /api/support/admin/tickets/:id
+ * Super Admin: Update ticket status or priority
+ */
+export async function adminUpdateTicket(req, res) {
+  try {
+    const { id } = req.params;
+    const { status, priority, adminReply } = req.body;
+    const update = {};
+    if (status) update.status = status.toUpperCase();
+    if (priority) update.priority = priority.toUpperCase();
+    if (adminReply !== undefined) update.adminReply = adminReply;
+
+    const ticket = await SupportTicket.findByIdAndUpdate(id, update, { new: true });
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    return res.json({
+      success: true,
+      message: "Ticket updated successfully",
+      ticket,
+    });
+  } catch (error) {
+    console.error("[SupportController] adminUpdateTicket error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * POST /api/support/admin/tickets/:id/reply
+ * Super Admin: Send official reply to ticket
+ */
+export async function adminReplyTicket(req, res) {
+  try {
+    const { id } = req.params;
+    const { adminReply, status = "RESOLVED" } = req.body;
+
+    if (!adminReply || !adminReply.trim()) {
+      return res.status(400).json({ success: false, message: "Reply text is required" });
+    }
+
+    const ticket = await SupportTicket.findByIdAndUpdate(
+      id,
+      {
+        adminReply: adminReply.trim(),
+        status: status.toUpperCase(),
+      },
+      { new: true }
+    );
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    return res.json({
+      success: true,
+      message: "Reply saved and ticket updated",
+      ticket,
+    });
+  } catch (error) {
+    console.error("[SupportController] adminReplyTicket error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Get all FAQs
+ */
+export async function adminGetFaqs(req, res) {
+  try {
+    let faqs = await SupportFaq.find({}).sort({ orderIndex: 1, createdAt: -1 });
+    if (!faqs || faqs.length === 0) {
+      try {
+        const seeded = await SupportFaq.create(
+          CLASSTECH_FAQS.map((f, i) => ({
+            ...f,
+            orderIndex: i,
+            isActive: true,
+          }))
+        );
+        faqs = Array.isArray(seeded) ? seeded : [seeded];
+      } catch (_) {
+        faqs = CLASSTECH_FAQS.map((f, i) => ({ ...f, _id: `seed_${i}`, orderIndex: i, isActive: true }));
+      }
+    }
+    return res.json({ success: true, faqs });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Create FAQ
+ */
+export async function adminCreateFaq(req, res) {
+  try {
+    const { category, question, answer, orderIndex = 0, isActive = true } = req.body;
+    if (!category || !question || !answer) {
+      return res.status(400).json({ success: false, message: "Category, question, and answer required." });
+    }
+
+    const faq = await SupportFaq.create({
+      category: category.trim(),
+      question: question.trim(),
+      answer: answer.trim(),
+      orderIndex: Number(orderIndex) || 0,
+      isActive: Boolean(isActive),
+    });
+
+    return res.status(201).json({ success: true, message: "FAQ created successfully", faq });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Update FAQ
+ */
+export async function adminUpdateFaq(req, res) {
+  try {
+    const { id } = req.params;
+    const { category, question, answer, orderIndex, isActive } = req.body;
+    const update = {};
+    if (category !== undefined) update.category = category.trim();
+    if (question !== undefined) update.question = question.trim();
+    if (answer !== undefined) update.answer = answer.trim();
+    if (orderIndex !== undefined) update.orderIndex = Number(orderIndex);
+    if (isActive !== undefined) update.isActive = Boolean(isActive);
+
+    const faq = await SupportFaq.findByIdAndUpdate(id, update, { new: true });
+    return res.json({ success: true, message: "FAQ updated successfully", faq });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Delete FAQ
+ */
+export async function adminDeleteFaq(req, res) {
+  try {
+    const { id } = req.params;
+    await SupportFaq.findByIdAndDelete(id);
+    return res.json({ success: true, message: "FAQ deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Get all Tutorials
+ */
+export async function adminGetTutorials(req, res) {
+  try {
+    let tutorials = await SupportTutorial.find({}).sort({ orderIndex: 1, createdAt: -1 });
+    if (!tutorials || tutorials.length === 0) {
+      try {
+        const seeded = await SupportTutorial.create(
+          CLASSTECH_TUTORIALS.map((t, i) => ({
+            ...t,
+            orderIndex: i,
+            isActive: true,
+          }))
+        );
+        tutorials = Array.isArray(seeded) ? seeded : [seeded];
+      } catch (_) {
+        tutorials = CLASSTECH_TUTORIALS.map((t, i) => ({ ...t, _id: `seed_tut_${i}`, orderIndex: i, isActive: true }));
+      }
+    }
+    return res.json({ success: true, tutorials });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Create Tutorial
+ */
+export async function adminCreateTutorial(req, res) {
+  try {
+    const { title, category, description, duration, videoUrl, thumbnailUrl, orderIndex = 0, isActive = true } = req.body;
+    if (!title || !category || !videoUrl) {
+      return res.status(400).json({ success: false, message: "Title, category, and videoUrl are required." });
+    }
+
+    const tutorial = await SupportTutorial.create({
+      title: title.trim(),
+      category: category.trim(),
+      description: (description || "").trim(),
+      duration: (duration || "").trim(),
+      videoUrl: videoUrl.trim(),
+      thumbnailUrl: (thumbnailUrl || "").trim(),
+      orderIndex: Number(orderIndex) || 0,
+      isActive: Boolean(isActive),
+    });
+
+    return res.status(201).json({ success: true, message: "Tutorial created successfully", tutorial });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Update Tutorial
+ */
+export async function adminUpdateTutorial(req, res) {
+  try {
+    const { id } = req.params;
+    const { title, category, description, duration, videoUrl, thumbnailUrl, orderIndex, isActive } = req.body;
+    const update = {};
+    if (title !== undefined) update.title = title.trim();
+    if (category !== undefined) update.category = category.trim();
+    if (description !== undefined) update.description = (description || "").trim();
+    if (duration !== undefined) update.duration = (duration || "").trim();
+    if (videoUrl !== undefined) update.videoUrl = videoUrl.trim();
+    if (thumbnailUrl !== undefined) update.thumbnailUrl = (thumbnailUrl || "").trim();
+    if (orderIndex !== undefined) update.orderIndex = Number(orderIndex);
+    if (isActive !== undefined) update.isActive = Boolean(isActive);
+
+    const tutorial = await SupportTutorial.findByIdAndUpdate(id, update, { new: true });
+    return res.json({ success: true, message: "Tutorial updated successfully", tutorial });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+/**
+ * Super Admin: Delete Tutorial
+ */
+export async function adminDeleteTutorial(req, res) {
+  try {
+    const { id } = req.params;
+    await SupportTutorial.findByIdAndDelete(id);
+    return res.json({ success: true, message: "Tutorial deleted successfully" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+}
+
