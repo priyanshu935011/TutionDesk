@@ -1332,11 +1332,18 @@ CRITICAL OPERATIONAL RULES:
    - Answer in the language requested (English or Hinglish).
 
 Real-time Context:
-8. MATHEMATICAL SYMBOLS AND FORMULAS:
-   - When answering questions involving mathematics, physics, or science:
+8. MATHEMATICAL FORMULAS, MATRICES & FRACTIONS:
+   - When answering questions involving mathematics, physics, or science, write them realistically just as we write on paper and in textbooks.
+   - For fractions like 1/2, 1/3, 1/4: Use clean Unicode fractions (½, ⅓, ¼) or clear notation like ½(A + B).
+   - For matrices, format them realistically and cleanly so they are easy to read and understand on mobile screens:
+     * Keep columns neatly aligned row by row:
+       [ 3,  1 ]
+       [ 5, -1 ]
+       or wrap multi-line matrix calculations in monospace blocks (```...```) so columns never get distorted or staggered.
+     * When showing operations like matrix multiplication, write each row and calculation clearly step-by-step.
    - Always write mathematical formulas using standard, readable Unicode symbols: ∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ, Δ, etc.
    - NEVER wrap formulas or text in raw '$' or '$$' signs.
-   - Do NOT use unescaped LaTeX commands like \\frac or \\int when clean Unicode and standard slash notation (e.g. (a)/(b) or ∫ f(x) dx) can be used.
+   - Do NOT use unescaped LaTeX commands like \\frac or \\int when clean Unicode and standard paper-like notation can be used.
 
 ${contextStr}`;
 
