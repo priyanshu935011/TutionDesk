@@ -116,13 +116,14 @@ export async function createTicket(req, res) {
       });
     }
 
-    const userId = req.user?._id ? String(req.user._id) : "anonymous";
+    const rawUserId = req.user?._id ? String(req.user._id) : (req.user?.id ? String(req.user.id) : null);
+    const userId = rawUserId || (req.user?.email ? req.user.email : "anonymous");
     const userName = req.user?.name || "ClassTech Educator";
     const userPhone = req.user?.phone || req.user?.email || "";
     const userRole = req.user?.role || "teacher";
 
     const rawInst = req.user?.institute;
-    const instituteId = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : "");
+    const instituteId = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
     const instituteName = rawInst?.name || "ClassTech Tuition";
 
     const attachments = [];
@@ -161,15 +162,12 @@ export async function createTicket(req, res) {
       }
     }
 
-    const ticketNumber = `TKT-${Math.floor(100000 + Math.random() * 900000)}`;
-
     const ticket = await SupportTicket.create({
-      ticketNumber,
       userId,
       userName,
       userPhone,
       userRole,
-      instituteId,
+      instituteId: instituteId || null,
       instituteName,
       category,
       subject,
@@ -180,15 +178,22 @@ export async function createTicket(req, res) {
       priority: priority.toUpperCase(),
     });
 
+    const returnTicket = {
+      ...(ticket._doc || ticket),
+      id: ticket.id || ticket._id,
+      _id: ticket._id || ticket.id,
+      ticketNumber: ticket.ticket_number || ticket.ticketNumber || ticket.id?.slice(-6),
+    };
+
     // 3. Dispatch async alerts to Telegram / Slack (non-blocking)
-    sendAdminTicketAlert(ticket).catch((err) => {
+    sendAdminTicketAlert(returnTicket).catch((err) => {
       console.warn("[SupportController] Error in background alert:", err.message);
     });
 
     return res.status(201).json({
       success: true,
       message: "Support ticket created successfully. Our team will review it shortly.",
-      ticket,
+      ticket: returnTicket,
     });
   } catch (error) {
     console.error("[SupportController] Error creating ticket:", error);
@@ -215,9 +220,16 @@ export async function getMyTickets(req, res) {
       $or: [{ userId }, { userPhone: req.user?.phone || "" }],
     }).sort({ createdAt: -1 });
 
+    const formattedTickets = (tickets || []).map((t) => ({
+      ...(t._doc || t),
+      id: t.id || t._id,
+      _id: t._id || t.id,
+      ticketNumber: t.ticket_number || t.ticketNumber || t.id?.slice(-6),
+    }));
+
     return res.json({
       success: true,
-      tickets: tickets || [],
+      tickets: formattedTickets,
     });
   } catch (error) {
     console.error("[SupportController] Error getting tickets:", error);
@@ -359,10 +371,17 @@ export async function adminGetTickets(req, res) {
       );
     }
 
+    const formattedTickets = (tickets || []).map((t) => ({
+      ...(t._doc || t),
+      id: t.id || t._id,
+      _id: t._id || t.id,
+      ticketNumber: t.ticket_number || t.ticketNumber || t.id?.slice(-6),
+    }));
+
     return res.json({
       success: true,
-      tickets: tickets || [],
-      total: tickets ? tickets.length : 0,
+      tickets: formattedTickets,
+      total: formattedTickets.length,
     });
   } catch (error) {
     console.error("[SupportController] adminGetTickets error:", error);

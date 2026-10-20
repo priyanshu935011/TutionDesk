@@ -681,6 +681,7 @@ class SupabaseDocument {
     if (data.file_url !== undefined) this.pdfUrl = data.file_url;
     if (data.student_ids !== undefined) this.students = data.student_ids;
     if (data.batch_ids !== undefined) this.batches = data.batch_ids;
+    if (data.ticket_number !== undefined) this.ticketNumber = data.ticket_number;
     if (data.folder_id !== undefined) {
       this.folder = data.folder_id;
       this.folder_id = data.folder_id;
@@ -1078,6 +1079,30 @@ class SupabaseDocument {
         const ab = payload.assigned_by || payload.assignedBy;
         payload.assigned_by = ab ? toValidUUID(ab) : null;
         delete payload.assignedBy;
+      }
+    }
+
+    if (this._tableName === "support_tickets") {
+      if (typeof payload.ticket_number === "string") {
+        const numOnly = parseInt(payload.ticket_number.replace(/\D/g, ""), 10);
+        if (!isNaN(numOnly)) {
+          payload.ticket_number = numOnly;
+        } else {
+          delete payload.ticket_number;
+        }
+      }
+      if (payload.ticket_number === undefined || payload.ticket_number === null) {
+        delete payload.ticket_number;
+      }
+      if (payload.institute_id === "" || payload.institute_id === undefined) {
+        payload.institute_id = null;
+      } else if (payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id);
+      }
+      if (!payload.user_id || payload.user_id === "anonymous") {
+        payload.user_id = toValidUUID("anonymous");
+      } else {
+        payload.user_id = toValidUUID(payload.user_id);
       }
     }
 
@@ -2390,12 +2415,45 @@ class SupabaseModel {
       }
     }
 
+    if (this.tableName === "support_tickets") {
+      if (typeof payload.ticket_number === "string") {
+        const numOnly = parseInt(payload.ticket_number.replace(/\D/g, ""), 10);
+        if (!isNaN(numOnly)) {
+          payload.ticket_number = numOnly;
+        } else {
+          delete payload.ticket_number;
+        }
+      }
+      if (payload.ticket_number === undefined || payload.ticket_number === null) {
+        delete payload.ticket_number;
+      }
+      if (payload.institute_id === "" || payload.institute_id === undefined) {
+        payload.institute_id = null;
+      } else if (payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id);
+      }
+      if (!payload.user_id || payload.user_id === "anonymous") {
+        payload.user_id = toValidUUID("anonymous");
+      } else {
+        payload.user_id = toValidUUID(payload.user_id);
+      }
+      delete payload.id;
+    }
+
     const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
     for (const key of uuidPayloadKeys) {
-      if (payload[key] && typeof payload[key] === "string") {
-        const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(payload[key]);
-        if (!isUuid) {
-          payload[key] = toValidUUID(payload[key]);
+      if (key in payload) {
+        if (payload[key] === "" || payload[key] === undefined) {
+          if (key !== "id") {
+            payload[key] = null;
+          } else {
+            delete payload.id;
+          }
+        } else if (payload[key] && typeof payload[key] === "string") {
+          const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(payload[key]);
+          if (!isUuid) {
+            payload[key] = toValidUUID(payload[key]);
+          }
         }
       }
     }
@@ -2411,7 +2469,7 @@ class SupabaseModel {
         .maybeSingle();
 
       if (error && error.message) {
-        const strictTables = ["notes", "institutes", "students", "batches", "test_series", "test_series_folders", "institute_test_series", "test_series_categories", "test_series_attempts"];
+        const strictTables = ["notes", "institutes", "students", "batches", "test_series", "test_series_folders", "institute_test_series", "test_series_categories", "test_series_attempts", "support_tickets", "support_faqs", "support_tutorials"];
         const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
 
         if (!isStrictTable && (

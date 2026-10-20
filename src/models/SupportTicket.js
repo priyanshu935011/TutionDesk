@@ -3,8 +3,7 @@ import mongoose from "../utils/supabaseModel.js";
 const supportTicketSchema = new mongoose.Schema(
   {
     ticketNumber: {
-      type: String,
-      default: () => `TKT-${Math.floor(100000 + Math.random() * 900000)}`,
+      type: Number,
     },
     userId: {
       type: String,
@@ -24,7 +23,7 @@ const supportTicketSchema = new mongoose.Schema(
     },
     instituteId: {
       type: String,
-      default: "",
+      default: null,
     },
     instituteName: {
       type: String,
