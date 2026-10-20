@@ -1339,7 +1339,7 @@ Real-time Context:
      * Keep columns neatly aligned row by row:
        [ 3,  1 ]
        [ 5, -1 ]
-       or wrap multi-line matrix calculations in monospace blocks (```...```) so columns never get distorted or staggered.
+       or wrap multi-line matrix calculations in monospace blocks so columns never get distorted or staggered.
      * When showing operations like matrix multiplication, write each row and calculation clearly step-by-step.
    - Always write mathematical formulas using standard, readable Unicode symbols: ∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ, Δ, etc.
    - NEVER wrap formulas or text in raw '$' or '$$' signs.
