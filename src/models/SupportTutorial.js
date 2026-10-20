@@ -41,5 +41,5 @@ const supportTutorialSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-const SupportTutorial = mongoose.model("SupportTutorial", supportTutorialSchema);
+const SupportTutorial = mongoose.model("SupportTutorial", supportTutorialSchema, "support_tutorials");
 export default SupportTutorial;

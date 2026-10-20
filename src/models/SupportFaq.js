@@ -28,5 +28,5 @@ const supportFaqSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-const SupportFaq = mongoose.model("SupportFaq", supportFaqSchema);
+const SupportFaq = mongoose.model("SupportFaq", supportFaqSchema, "support_faqs");
 export default SupportFaq;

@@ -3068,7 +3068,10 @@ const mockMongoose = {
       return this;
     }
   },
-  model(modelName, schema) {
+  model(modelName, schema, collectionName) {
+    if (collectionName) {
+      return new SupabaseModel(collectionName);
+    }
     let tableName = "";
     if (modelName === "User") tableName = "users";
     else if (modelName === "Student") tableName = "students";
@@ -3106,11 +3109,17 @@ const mockMongoose = {
     else if (modelName === "SalesTerritory" || modelName === "SalesTerritories") tableName = "sales_territory_assignments";
     else if (modelName === "CustomPage") tableName = "custom_pages";
     else if (modelName === "Notification") tableName = "notifications";
+    else if (modelName === "SupportFaq" || modelName === "SupportFaqs") tableName = "support_faqs";
+    else if (modelName === "SupportTicket" || modelName === "SupportTickets") tableName = "support_tickets";
+    else if (modelName === "SupportTutorial" || modelName === "SupportTutorials") tableName = "support_tutorials";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
     if (tableName === "contact_messages") tableName = "contactmessages";
     if (tableName === "cashfreepayments" || tableName === "cashfreepayment") tableName = "cashfree_payments";
+    if (tableName === "supportfaqs" || tableName === "supportfaq") tableName = "support_faqs";
+    if (tableName === "supporttickets" || tableName === "supportticket") tableName = "support_tickets";
+    if (tableName === "supporttutorials" || tableName === "supporttutorial") tableName = "support_tutorials";
 
     return new SupabaseModel(tableName);
   },
