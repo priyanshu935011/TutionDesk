@@ -634,8 +634,18 @@ const snakeToCamel = (str) => {
 
 class SupabaseDocument {
   constructor(tableName, data, modelInstance) {
-    this._tableName = tableName;
-    this._model = modelInstance;
+    Object.defineProperty(this, "_tableName", {
+      value: tableName,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(this, "_model", {
+      value: modelInstance,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
 
     if (!data || typeof data !== "object") {
       this._id = null;
@@ -1318,10 +1328,18 @@ class SupabaseDocument {
     }
   }
 
+  get _doc() {
+    return this.toObject();
+  }
+
   toObject() {
-    const obj = { ...this };
-    delete obj._tableName;
-    delete obj._model;
+    const obj = {};
+    for (const key of Object.keys(this)) {
+      if (key.startsWith("_")) continue;
+      obj[key] = this[key];
+    }
+    if (this._id && !obj._id) obj._id = this._id;
+    if (this._id && !obj.id) obj.id = this._id;
     return obj;
   }
 

@@ -94,6 +94,23 @@ const CLASSTECH_TUTORIALS = [
   },
 ];
 
+// Safely serialize a ticket object to pure JSON without circular references or internal models
+function safeSerializeTicket(t) {
+  if (!t) return null;
+  const raw = typeof t.toObject === "function" ? t.toObject() : (t._doc ? t._doc : { ...t });
+  const clean = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (k.startsWith("_") && k !== "_id") continue;
+    clean[k] = v;
+  }
+  return {
+    ...clean,
+    id: clean.id || clean._id || t.id || t._id,
+    _id: clean._id || clean.id || t._id || t.id,
+    ticketNumber: clean.ticket_number || clean.ticketNumber || t.ticket_number || t.ticketNumber || String(clean.id || "").slice(-6),
+  };
+}
+
 /**
  * POST /api/support/tickets
  * Create a new support ticket / bug report with optional screenshot upload
@@ -178,12 +195,7 @@ export async function createTicket(req, res) {
       priority: priority.toUpperCase(),
     });
 
-    const returnTicket = {
-      ...(ticket._doc || ticket),
-      id: ticket.id || ticket._id,
-      _id: ticket._id || ticket.id,
-      ticketNumber: ticket.ticket_number || ticket.ticketNumber || ticket.id?.slice(-6),
-    };
+    const returnTicket = safeSerializeTicket(ticket);
 
     // 3. Dispatch async alerts to Telegram / Slack (non-blocking)
     sendAdminTicketAlert(returnTicket).catch((err) => {
@@ -220,12 +232,7 @@ export async function getMyTickets(req, res) {
       $or: [{ userId }, { userPhone: req.user?.phone || "" }],
     }).sort({ createdAt: -1 });
 
-    const formattedTickets = (tickets || []).map((t) => ({
-      ...(t._doc || t),
-      id: t.id || t._id,
-      _id: t._id || t.id,
-      ticketNumber: t.ticket_number || t.ticketNumber || t.id?.slice(-6),
-    }));
+    const formattedTickets = (tickets || []).map(safeSerializeTicket);
 
     return res.json({
       success: true,
@@ -371,12 +378,7 @@ export async function adminGetTickets(req, res) {
       );
     }
 
-    const formattedTickets = (tickets || []).map((t) => ({
-      ...(t._doc || t),
-      id: t.id || t._id,
-      _id: t._id || t.id,
-      ticketNumber: t.ticket_number || t.ticketNumber || t.id?.slice(-6),
-    }));
+    const formattedTickets = (tickets || []).map(safeSerializeTicket);
 
     return res.json({
       success: true,
@@ -410,7 +412,7 @@ export async function adminUpdateTicket(req, res) {
     return res.json({
       success: true,
       message: "Ticket updated successfully",
-      ticket,
+      ticket: safeSerializeTicket(ticket),
     });
   } catch (error) {
     console.error("[SupportController] adminUpdateTicket error:", error);
@@ -446,8 +448,8 @@ export async function adminReplyTicket(req, res) {
 
     return res.json({
       success: true,
-      message: "Reply saved and ticket updated",
-      ticket,
+      message: "Reply sent and ticket updated successfully",
+      ticket: safeSerializeTicket(ticket),
     });
   } catch (error) {
     console.error("[SupportController] adminReplyTicket error:", error);
