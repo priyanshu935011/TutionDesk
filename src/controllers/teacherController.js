@@ -783,6 +783,8 @@ export const viewNote = async (req, res) => {
 
     // Serve custom PDF.js HTML viewer: completely eliminates browser PDF headers & provides 100% native smooth scrolling
     const rawPdfUrl = `/teacher/notes/${noteId}/view?raw=true`;
+    const isDark = req.query.theme === "dark" || req.query.isDark === "true";
+    const bgCol = isDark ? "#090D16" : "#F8FAFC";
     const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -795,12 +797,17 @@ export const viewNote = async (req, res) => {
     html, body {
       width: 100%;
       min-height: 100vh;
-      background-color: #F8FAFC;
+      background-color: ${bgCol};
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       overflow-y: auto !important;
       overflow-x: hidden;
       -webkit-overflow-scrolling: touch;
     }
+    ${!isDark ? `@media (prefers-color-scheme: dark) {
+      html, body {
+        background-color: #090D16;
+      }
+    }` : ""}`.trim() + `
     #loading {
       display: flex;
       flex-direction: column;

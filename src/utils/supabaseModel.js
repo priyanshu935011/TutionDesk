@@ -1740,15 +1740,17 @@ class SupabaseQuery {
         .select("id, student_id, amount, payment_date, payment_type, note")
         .in("student_id", studentIds)
         .order("payment_date", { ascending: true })
+        .limit(50000)
     ];
 
     if (includeAttendance) {
       promises.push(
         this.model.supabase
           .from("attendance")
-          .select("id, student_id, date, status")
+          .select("id, student_id, date, status, batch_id")
           .in("student_id", studentIds)
           .order("date", { ascending: false })
+          .limit(50000)
       );
     }
 
@@ -1780,7 +1782,8 @@ class SupabaseQuery {
       attendanceByStudent[a.student_id].push({
         _id: a.id,
         date: a.date,
-        status: a.status
+        status: a.status,
+        batchId: a.batch_id
       });
     }
 
