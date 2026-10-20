@@ -16,7 +16,8 @@ import {
   streamRemoteFileInline,
 } from "../utils/noteDownload.js";
 import { supabase, supabaseBucket } from "../utils/supabase.js";
-import { toValidUUID } from "../utils/supabaseModel.js";
+import { toValidUUID, readUserMetadata, writeUserMetadata } from "../utils/supabaseModel.js";
+import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { syncInstituteStorage } from "./videoController.js";
@@ -513,19 +514,69 @@ export const getNotes = async (req, res) => {
       rawRows = data || [];
     }
 
-    // Filter notes for hired teachers to only show notes for their assigned batches or uploaded by them
+    // Map hired teachers to attach teacher attribution if uploaded by hired teacher
+    const instituteId = instId || (req.user?.institute?._id || req.user?.institute?.id || req.user?.institute);
+    let hiredTeacherMap = {};
+    try {
+      const teachers = await User.find({ institute: instituteId, role: "teacher" }).select("name _id id");
+      for (const t of teachers) {
+        const tId = String(t._id || t.id);
+        const tUuid = toValidUUID(tId);
+        if (t.name) {
+          hiredTeacherMap[tId] = t.name;
+          if (tUuid) hiredTeacherMap[tUuid] = t.name;
+        }
+      }
+    } catch (_) {}
+
+    // Filter notes for hired teachers: strictly show only notes for their assigned batches or uploaded by them
     let rows = rawRows;
     if (req.user.role === "teacher") {
       const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instId].filter(Boolean);
       const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
       const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
-      const myBatchIds = new Set(myActiveBatches.map((b) => String(b._id || b.id)));
+      const myBatchIds = new Set();
+      myActiveBatches.forEach((b) => {
+        const bIdStr = String(b._id || b.id || "");
+        if (bIdStr) {
+          myBatchIds.add(bIdStr);
+          myBatchIds.add(bIdStr.toLowerCase());
+          const uuid = toValidUUID(bIdStr);
+          if (uuid) myBatchIds.add(uuid);
+        }
+      });
       const teacherUuid = toValidUUID(req.user._id);
       const teacherIdStr = String(req.user._id);
 
       rows = rawRows.filter((r) => {
-        const rCreatedBy = String(r.created_by || r.createdBy || "");
-        return rCreatedBy && (rCreatedBy === teacherUuid || rCreatedBy === teacherIdStr);
+        const rCreatedBy = String(r.created_by || r.createdBy || "").trim();
+        // If uploaded by this teacher, always allow
+        if (rCreatedBy && (rCreatedBy === teacherUuid || rCreatedBy === teacherIdStr)) {
+          return true;
+        }
+
+        // Check if note is assigned to teacher's batches
+        const rBatchId = r.batch_id ? String(r.batch_id).trim() : "";
+        let rBatchIds = [];
+        if (Array.isArray(r.batch_ids)) {
+          rBatchIds = r.batch_ids.map((id) => String(id).trim());
+        } else if (typeof r.batch_ids === "string" && r.batch_ids.startsWith("[")) {
+          try {
+            rBatchIds = JSON.parse(r.batch_ids).map((id) => String(id).trim());
+          } catch (_) {}
+        }
+        if (rBatchId) rBatchIds.push(rBatchId);
+
+        if (rBatchIds.length > 0) {
+          return rBatchIds.some((id) => myBatchIds.has(id) || myBatchIds.has(id.toLowerCase()) || myBatchIds.has(toValidUUID(id)));
+        }
+
+        // If target_type is 'all' with no specific batches, allow
+        if (r.target_type === "all") {
+          return true;
+        }
+
+        return false;
       });
     }
 
@@ -593,6 +644,9 @@ export const getNotes = async (req, res) => {
         .filter((n) => n && n !== "null");
       const formattedBatchName = batchNames.length > 0 ? batchNames.join(", ") : "All Batches";
 
+      const rCreatedBy = String(row.created_by || row.createdBy || "").trim();
+      const teacherAuthorName = hiredTeacherMap[rCreatedBy] || null;
+
       return {
         _id: row.id,
         id: row.id,
@@ -608,6 +662,8 @@ export const getNotes = async (req, res) => {
         students: row.student_ids || [],
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        uploadedByTeacherName: teacherAuthorName,
+        isCreatedByHiredTeacher: Boolean(teacherAuthorName),
       };
     });
 
@@ -1127,6 +1183,7 @@ export const uploadNote = async (req, res) => {
       batch_ids: targetType === "student" ? [] : validBatchUuids,
       student_ids: targetType === "student" ? validStudentUuids : [],
       file_size_bytes: fileSizeVal,
+      created_by: toValidUUID(req.user._id || req.user.id),
     };
 
     let noteData = null;
@@ -1140,7 +1197,7 @@ export const uploadNote = async (req, res) => {
 
       if (noteError) {
         console.error("Supabase notes insert error:", noteError.message);
-        // Retry with batch_id = null if batch_id FK failed
+        // Retry with batch_id = null and stripped created_by if schema mismatch
         const fallbackPayload = { ...notePayload, batch_id: null };
         const { data: retryData, error: retryErr } = await sb
           .from("notes")
@@ -1150,7 +1207,19 @@ export const uploadNote = async (req, res) => {
 
         if (retryErr) {
           console.error("Supabase notes retry insert error:", retryErr.message);
-          finalError = retryErr;
+          // Try without created_by if column doesn't exist yet
+          const noCreatedByPayload = { ...fallbackPayload };
+          delete noCreatedByPayload.created_by;
+          const { data: retry2Data, error: retry2Err } = await sb
+            .from("notes")
+            .insert(noCreatedByPayload)
+            .select()
+            .maybeSingle();
+          if (retry2Err) {
+            finalError = retry2Err;
+          } else {
+            noteData = retry2Data;
+          }
         } else {
           noteData = retryData;
         }
@@ -1165,6 +1234,17 @@ export const uploadNote = async (req, res) => {
     if (!noteData) {
       return res.status(500).json({
         message: "Failed to insert record into notes table: " + (finalError?.message || "Unknown DB error")
+      });
+    }
+
+    // Log teacher activity if uploaded by hired teacher
+    if (req.user.role === "teacher") {
+      logTeacherActivity(req.user._id, {
+        type: "notes",
+        title: `Uploaded Study Material: ${title.trim()}`,
+        details: `Category: ${noteCategory} • Batch: ${formattedBatchName}`,
+        batchId: primaryBatchId,
+        batchName: formattedBatchName,
       });
     }
 
@@ -1459,6 +1539,20 @@ export const getTestResults = async (req, res) => {
       query.student = req.query.studentId;
     }
 
+    // Map hired teachers for teacher attribution
+    let hiredTeacherMap = {};
+    try {
+      const teachers = await User.find({ institute: instituteId, role: "teacher" }).select("name _id id");
+      for (const t of teachers) {
+        const tId = String(t._id || t.id);
+        const tUuid = toValidUUID(tId);
+        if (t.name) {
+          hiredTeacherMap[tId] = t.name;
+          if (tUuid) hiredTeacherMap[tUuid] = t.name;
+        }
+      }
+    } catch (_) {}
+
     let results = [];
     try {
       results = await TestResult.find(query)
@@ -1468,55 +1562,21 @@ export const getTestResults = async (req, res) => {
       console.warn("MongoDB TestResult.find warning:", dbErr.message);
     }
 
-    if (req.user.role === "teacher") {
-      const ownerId = rawInst?.adminUser ? String(rawInst.adminUser) : String(req.user._id || req.user.id || "");
-      const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instituteId].filter(Boolean);
-      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
-      const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
-      const myBatchIds = new Set();
-      myActiveBatches.forEach((b) => {
-        const bIdStr = String(b._id || b.id || "");
-        if (bIdStr) {
-          myBatchIds.add(bIdStr);
-          myBatchIds.add(bIdStr.toLowerCase());
-          const uuidForm = toValidUUID(bIdStr);
-          if (uuidForm) {
-            myBatchIds.add(uuidForm);
-            myBatchIds.add(uuidForm.toLowerCase());
-          }
-        }
-      });
-
-      const teacherUuid = toValidUUID(req.user._id);
-      const teacherIdStr = String(req.user._id);
-
-      results = results.filter((item) => {
-        const rawBatchId = item.batch_id || item.batchId || (typeof item.batch === "object" ? item.batch?._id || item.batch?.id : item.batch);
-        const itemBatchId = String(rawBatchId || "").trim();
-        const itemCreatedBy = String(item.created_by || item.createdBy || "").trim();
-
-        if (itemBatchId) {
-          const isAllowed = myBatchIds.has(itemBatchId) || myBatchIds.has(itemBatchId.toLowerCase()) || myBatchIds.has(toValidUUID(itemBatchId));
-          if (!isAllowed) return false;
-        } else {
-          if (itemCreatedBy !== teacherUuid && itemCreatedBy !== teacherIdStr) {
-            return false;
-          }
-        }
-        return true;
-      });
-    }
-
-    // Format MongoDB results so absent scores are consistent
+    // Format MongoDB results so absent scores and teacher author are consistent
     const formattedMongoResults = (results || []).map((item) => {
       const doc = typeof item.toObject === "function" ? item.toObject() : (typeof item.toJSON === "function" ? item.toJSON() : { ...item });
       const sc = doc.score ?? doc.marksObtained;
       const isAbsent = doc.isAbsent === true || sc === -1 || Number(sc) === -1 || String(sc).toLowerCase() === "absent" || String(sc).toLowerCase() === "a";
+      const creatorIdStr = String(doc.createdBy || doc.created_by || (typeof doc.createdBy === "object" ? doc.createdBy?._id || doc.createdBy?.id : "")).trim();
+      const teacherName = hiredTeacherMap[creatorIdStr] || null;
+
       return {
         ...doc,
         score: isAbsent ? "Absent" : Number(sc || 0),
         marksObtained: isAbsent ? "Absent" : Number(sc || 0),
         isAbsent,
+        uploadedByTeacherName: teacherName,
+        isCreatedByHiredTeacher: Boolean(teacherName),
       };
     });
 
@@ -1538,6 +1598,8 @@ export const getTestResults = async (req, res) => {
         for (const row of supabaseRows) {
           const marksObj = row.marks && typeof row.marks === "object" ? row.marks : {};
           const meta = testsMeta[row.id] || {};
+          const rowCreator = String(row.created_by || meta.createdBy || "").trim();
+          const teacherName = meta.createdByName || hiredTeacherMap[rowCreator] || null;
 
           if (targetStudentId) {
             let matchedKey = null;
@@ -1573,7 +1635,10 @@ export const getTestResults = async (req, res) => {
                 studentId: matchedKey,
                 batch: row.batch_id,
                 batch_id: row.batch_id,
+                created_by: rowCreator,
                 createdAt: row.created_at || row.test_date,
+                uploadedByTeacherName: teacherName,
+                isCreatedByHiredTeacher: Boolean(teacherName),
               });
             }
           } else {
@@ -1601,7 +1666,10 @@ export const getTestResults = async (req, res) => {
                 studentId: stKey,
                 batch: row.batch_id,
                 batch_id: row.batch_id,
+                created_by: rowCreator,
                 createdAt: row.created_at || row.test_date,
+                uploadedByTeacherName: teacherName,
+                isCreatedByHiredTeacher: Boolean(teacherName),
               });
             }
           }
@@ -1633,7 +1701,56 @@ export const getTestResults = async (req, res) => {
       }
     }
 
-    return res.json(combined);
+    // STRICT BATCH ISOLATION FOR HIRED TEACHERS:
+    // Teachers must ONLY see marks for batches assigned to them or created by them!
+    let finalCombined = combined;
+    if (req.user.role === "teacher") {
+      const ownerId = rawInst?.adminUser ? String(rawInst.adminUser) : String(req.user._id || req.user.id || "");
+      const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instituteId].filter(Boolean);
+      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher name");
+      const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+      const myBatchIds = new Set();
+      myActiveBatches.forEach((b) => {
+        const bIdStr = String(b._id || b.id || "");
+        if (bIdStr) {
+          myBatchIds.add(bIdStr);
+          myBatchIds.add(bIdStr.toLowerCase());
+          const uuidForm = toValidUUID(bIdStr);
+          if (uuidForm) {
+            myBatchIds.add(uuidForm);
+            myBatchIds.add(uuidForm.toLowerCase());
+          }
+        }
+        if (b.name) {
+          myBatchIds.add(String(b.name).toLowerCase().trim());
+        }
+      });
+
+      const teacherUuid = toValidUUID(req.user._id);
+      const teacherIdStr = String(req.user._id);
+
+      finalCombined = combined.filter((item) => {
+        const rawBatchId = item.batch_id || item.batchId || (typeof item.batch === "object" ? item.batch?._id || item.batch?.id : item.batch);
+        const itemBatchId = String(rawBatchId || "").trim();
+        const itemCreatedBy = String(item.created_by || item.createdBy || "").trim();
+        const itemBatchName = String(item.batchName || (typeof item.batch === "object" ? item.batch?.name : "") || "").trim().toLowerCase();
+
+        if (itemBatchId) {
+          const isAllowed = myBatchIds.has(itemBatchId) ||
+                            myBatchIds.has(itemBatchId.toLowerCase()) ||
+                            myBatchIds.has(toValidUUID(itemBatchId)) ||
+                            (itemBatchName && myBatchIds.has(itemBatchName));
+          if (!isAllowed) return false;
+        } else {
+          if (itemCreatedBy !== teacherUuid && itemCreatedBy !== teacherIdStr) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    return res.json(finalCombined);
   } catch (error) {
     console.error("getTestResults error:", error);
     return res.status(500).json({ message: "Could not fetch test results" });
@@ -1675,6 +1792,15 @@ export const createTestResult = async (req, res) => {
       chapter: chapter || "",
     });
 
+    if (req.user.role === "teacher") {
+      logTeacherActivity(req.user._id, {
+        type: "test_marks",
+        title: `Recorded Test Marks: ${title.trim()}`,
+        details: `Subject: ${subject.trim()} • Score: ${isAbsent ? 'Absent' : score}/${totalMarks}`,
+        batchId: req.body.batchId || req.body.batch || null,
+      });
+    }
+
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
@@ -1711,7 +1837,7 @@ export const createTestResultsBulk = async (req, res) => {
     const batch = await Batch.findOne({
       _id: batchId,
       $or: [{ institute: instituteId }, { user: ownerId }],
-    }).select("_id");
+    }).select("_id name");
     if (!batch) {
       return res.status(404).json({ message: "Batch not found" });
     }
@@ -1738,18 +1864,41 @@ export const createTestResultsBulk = async (req, res) => {
         ? `${title.trim()} (${resolvedSubject})`
         : title.trim();
 
-    const { data: insertedRow, error: insertError } = await sb
+    const testMarksPayload = {
+      institute_id: String(instituteId),
+      batch_id: String(batchId),
+      test_name: formattedTestTitle,
+      max_marks: Number(totalMarks),
+      test_date: new Date(examDate).toISOString().substring(0, 10),
+      marks: marksMap,
+      created_by: toValidUUID(req.user._id || req.user.id),
+    };
+
+    let insertedRow = null;
+    let insertError = null;
+    const { data: rowData, error: errData } = await sb
       .from("test_marks")
-      .insert({
-        institute_id: String(instituteId),
-        batch_id: String(batchId),
-        test_name: formattedTestTitle,
-        max_marks: Number(totalMarks),
-        test_date: new Date(examDate).toISOString().substring(0, 10),
-        marks: marksMap,
-      })
+      .insert(testMarksPayload)
       .select()
       .maybeSingle();
+
+    if (errData) {
+      // Retry without created_by if column does not exist yet
+      const fallbackPayload = { ...testMarksPayload };
+      delete fallbackPayload.created_by;
+      const { data: retryRow, error: retryErr } = await sb
+        .from("test_marks")
+        .insert(fallbackPayload)
+        .select()
+        .maybeSingle();
+      if (retryErr) {
+        insertError = retryErr;
+      } else {
+        insertedRow = retryRow;
+      }
+    } else {
+      insertedRow = rowData;
+    }
 
     if (insertError) {
       console.error("Supabase test_marks insert error:", insertError);
@@ -1762,8 +1911,21 @@ export const createTestResultsBulk = async (req, res) => {
         subject: resolvedSubject,
         testType: resolvedTestType,
         chapter: resolvedChapter,
+        createdBy: req.user._id,
+        createdByName: req.user.role === "teacher" ? req.user.name : null,
+        isCreatedByHiredTeacher: req.user.role === "teacher",
       };
       writeTestsMetadata(testMetadata);
+    }
+
+    if (req.user.role === "teacher") {
+      logTeacherActivity(req.user._id, {
+        type: "test_marks",
+        title: `Recorded Test Marks: ${title.trim()}`,
+        details: `Subject: ${resolvedSubject} • Total: ${totalMarks} Marks • ${entries.length} Students`,
+        batchId: String(batchId),
+        batchName: batch.name || "Batch",
+      });
     }
 
     // Also persist TestResult records for student portal
@@ -2012,11 +2174,112 @@ export const getHiredTeachers = async (req, res) => {
     const teachers = await User.find({
       institute: instituteId,
       role: "teacher",
-    }).select("name email phone role createdAt");
+    }).select("name email phone role createdAt aiAccessEnabled activity");
 
-    return res.json(teachers);
+    const userMeta = readUserMetadata();
+    const formatted = teachers.map((t) => {
+      const tId = String(t._id || t.id);
+      const meta = userMeta[tId] || {};
+      const aiEnabled = t.aiAccessEnabled !== undefined
+        ? t.aiAccessEnabled
+        : (meta.aiAccessEnabled !== undefined ? meta.aiAccessEnabled : true);
+      const act = Array.isArray(t.activity) && t.activity.length > 0 ? t.activity : (meta.activity || []);
+
+      return {
+        _id: tId,
+        id: tId,
+        name: t.name,
+        email: t.email,
+        phone: t.phone,
+        role: t.role,
+        createdAt: t.createdAt,
+        aiAccessEnabled: aiEnabled,
+        activity: act,
+      };
+    });
+
+    return res.json(formatted);
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch teachers" });
+  }
+};
+
+export const getHiredTeacherActivity = async (req, res) => {
+  try {
+    const teacherId = req.params.id;
+    const instituteId = req.user.institute?._id || req.user.institute;
+    let teacher = await User.findOne({
+      _id: teacherId,
+      institute: instituteId,
+      role: "teacher",
+    });
+    if (!teacher) {
+      teacher = await User.findOne({ id: teacherId, institute: instituteId, role: "teacher" });
+    }
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    const meta = readUserMetadata()[String(teacher._id || teacher.id)] || {};
+    const activities = Array.isArray(teacher.activity) && teacher.activity.length > 0
+      ? teacher.activity
+      : (meta.activity || []);
+
+    return res.json({
+      teacherId,
+      teacherName: teacher.name,
+      activity: activities,
+    });
+  } catch (error) {
+    console.error("getHiredTeacherActivity error:", error);
+    return res.status(500).json({ message: "Could not fetch teacher activity" });
+  }
+};
+
+export const toggleTeacherAiAccess = async (req, res) => {
+  try {
+    if (req.user.role !== "institute_admin") {
+      return res.status(403).json({ message: "Access denied. Only institute admins can modify teacher AI permissions." });
+    }
+    const teacherId = req.params.id;
+    const instituteId = req.user.institute?._id || req.user.institute;
+    let teacher = await User.findOne({
+      _id: teacherId,
+      institute: instituteId,
+      role: "teacher",
+    });
+    if (!teacher) {
+      teacher = await User.findOne({ id: teacherId, institute: instituteId, role: "teacher" });
+    }
+    if (!teacher) {
+      return res.status(404).json({ message: "Teacher not found" });
+    }
+
+    const { aiAccessEnabled } = req.body;
+    teacher.aiAccessEnabled = aiAccessEnabled === true || aiAccessEnabled === "true";
+    await teacher.save();
+
+    try {
+      const meta = readUserMetadata();
+      const tId = String(teacher._id || teacher.id);
+      meta[tId] = { ...(meta[tId] || {}), aiAccessEnabled: teacher.aiAccessEnabled };
+      writeUserMetadata(meta);
+
+      const { supabase: sb } = await import("../utils/supabase.js");
+      const uUuid = toValidUUID(tId);
+      await sb.from("users").update({ ai_access_enabled: teacher.aiAccessEnabled }).or(`id.eq.${tId},id.eq.${uUuid}`);
+    } catch (_) {}
+
+    await invalidateUserDashboard(req);
+
+    return res.json({
+      message: `AI access ${teacher.aiAccessEnabled ? "enabled" : "disabled"} successfully`,
+      teacherId,
+      aiAccessEnabled: teacher.aiAccessEnabled,
+    });
+  } catch (error) {
+    console.error("toggleTeacherAiAccess error:", error);
+    return res.status(500).json({ message: "Could not update AI permission" });
   }
 };
 
@@ -2063,7 +2326,7 @@ export const updateHiredTeacher = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Only institute admins can edit teachers." });
     }
 
-    const { name, email, phone, password } = req.body;
+    const { name, email, phone, password, aiAccessEnabled } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
 
     const teacher = await User.findOne({
@@ -2102,6 +2365,9 @@ export const updateHiredTeacher = async (req, res) => {
     if (password && password.trim() !== "") {
       teacher.password = await bcrypt.hash(password.trim(), 10);
     }
+    if (aiAccessEnabled !== undefined) {
+      teacher.aiAccessEnabled = Boolean(aiAccessEnabled);
+    }
 
     await teacher.save();
 
@@ -2114,6 +2380,7 @@ export const updateHiredTeacher = async (req, res) => {
       email: teacher.email,
       phone: teacher.phone,
       role: teacher.role,
+      aiAccessEnabled: teacher.aiAccessEnabled,
     });
   } catch (error) {
     console.error("updateHiredTeacher error:", error);

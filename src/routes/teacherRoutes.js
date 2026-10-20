@@ -14,6 +14,8 @@ import {
   deleteNote,
   createHiredTeacher,
   getHiredTeachers,
+  getHiredTeacherActivity,
+  toggleTeacherAiAccess,
   deleteHiredTeacher,
   updateHiredTeacher,
   uploadBrandingLogo,
@@ -71,6 +73,9 @@ router.route("/hired-teachers")
 router.route("/hired-teachers/:id")
   .put(updateHiredTeacher)
   .delete(deleteHiredTeacher);
+router.get("/hired-teachers/:id/activity", getHiredTeacherActivity);
+router.patch("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
+router.put("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
 
 // Branding & UPI endpoints
 router.post("/branding/logo", upload.single("logo"), uploadBrandingLogo);

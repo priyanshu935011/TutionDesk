@@ -6,6 +6,9 @@ import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
+import User from "../models/User.js";
+import { isTeacherOfBatch } from "./teacherController.js";
+import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
 
 const DEFAULT_CATEGORIES = [
@@ -364,6 +367,21 @@ export const getTestSeriesList = async (req, res) => {
       if (seriesId) accessMap.set(seriesId, acc);
     });
 
+    let hiredTeacherMap = {};
+    if (instStr) {
+      try {
+        const teachers = await User.find({ institute: instStr, role: "teacher" }).select("name _id id");
+        for (const teacher of teachers) {
+          const tId = String(teacher._id || teacher.id);
+          const tUuid = toValidUUID(tId);
+          if (teacher.name) {
+            hiredTeacherMap[tId] = teacher.name;
+            if (tUuid) hiredTeacherMap[tUuid] = teacher.name;
+          }
+        }
+      } catch (_) {}
+    }
+
     const enrichedTests = tests.map((t) => {
       const tObj = t.toObject ? t.toObject() : { ...t };
       const tId = String(t._id || t.id);
@@ -381,13 +399,38 @@ export const getTestSeriesList = async (req, res) => {
             assignedBatches: access.assignedBatches ?? access.assigned_batches ?? [],
           }
         : { isEnabled: isOwnTest ? true : false, assignedBatches: [] };
+
+      const creator = String(t.created_by || t.createdBy || "").trim();
+      const teacherName = hiredTeacherMap[creator] || null;
+      if (teacherName) {
+        tObj.uploadedByTeacherName = teacherName;
+        tObj.isCreatedByHiredTeacher = true;
+      }
+
       return tObj;
     });
+
+    let finalTests = enrichedTests;
+    if (req.user?.role === "teacher" && req.user.institute) {
+      try {
+        const userIds = [instStr, req.user._id, req.user.id].filter(Boolean);
+        const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers");
+        const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+        const myBatchIds = new Set(myActiveBatches.map((b) => String(b._id || b.id)));
+        finalTests = enrichedTests.filter((t) => {
+          const creator = String(t.created_by || t.createdBy || "").trim();
+          if (creator === userId || creator === userUuid) return true;
+          const assigned = Array.isArray(t.access?.assignedBatches) ? t.access.assignedBatches : [];
+          if (assigned.length === 0) return true;
+          return assigned.some((bId) => myBatchIds.has(String(bId)));
+        });
+      } catch (_) {}
+    }
 
     res.json({
       enabled: true,
       allowedCategories,
-      testSeries: enrichedTests,
+      testSeries: finalTests,
     });
   } catch (error) {
     console.error("Error fetching test series:", error);
@@ -511,6 +554,19 @@ export const createTestSeries = async (req, res) => {
         });
       } catch (accErr) {
         console.warn("Could not auto-create InstituteTestSeriesAccess:", accErr?.message);
+      }
+    }
+
+    if (req.user && (req.user.role === "teacher" || req.user.institute)) {
+      try {
+        const teacherId = req.user._id || req.user.id;
+        await logTeacherActivity(teacherId, {
+          type: "test_series",
+          title: `Created test series: ${testSeries.title || "Untitled Test"}`,
+          details: `${testSeries.category || "General"} • ${formattedQuestions.length} questions`,
+        });
+      } catch (logErr) {
+        console.warn("logTeacherActivity warning in createTestSeries:", logErr.message);
       }
     }
 

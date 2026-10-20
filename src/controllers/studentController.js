@@ -20,6 +20,7 @@ import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, f
 import cloudinary from "../utils/cloudinary.js";
 import Notification from "../models/Notification.js";
 import { sendStudentNotification } from "../services/notificationService.js";
+import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -1830,6 +1831,18 @@ export const markBatchAttendance = async (req, res) => {
     const updatedStudents = batchStudents;
 
     const message = isUpdate ? "Attendance updated successfully" : "Attendance marked successfully";
+
+    if (req.user.role === "teacher") {
+      const presCount = records.filter(r => r.status === "present").length;
+      const absCount = records.filter(r => r.status === "absent").length;
+      logTeacherActivity(req.user._id, {
+        type: "attendance",
+        title: `Marked Attendance for ${resolvedBatchName}`,
+        details: `Date: ${date} • ${records.length} Students (${presCount} Present, ${absCount} Absent)`,
+        batchId: resolvedBatchIdStr,
+        batchName: resolvedBatchName,
+      });
+    }
 
     // Respond immediately to the client so UI is instant and never times out (<200ms)
     res.json({

@@ -279,9 +279,11 @@ export const getAiStatus = async (req, res) => {
 
     // Role-based locked check
     const isStudent = req.user.role === "student";
+    const isTeacher = req.user.role === "teacher";
+    const teacherAiDisabled = isTeacher && req.user.aiAccessEnabled === false;
     const isLocked = isStudent
       ? (!details.aiEnabled || !details.aiStudentEnabled)
-      : !details.aiEnabled;
+      : (teacherAiDisabled || !details.aiEnabled);
 
     const availableBatches = await getInstituteBatches(req, instituteId);
     const studentCustomFields = await getInstituteStudentCustomFields(instituteId);
@@ -293,6 +295,8 @@ export const getAiStatus = async (req, res) => {
       aiStudentEnabled: details.aiStudentEnabled,
       aiWalletBalance: details.aiWalletBalance,
       isLocked,
+      teacherAiDisabled,
+      aiAccessEnabled: req.user.aiAccessEnabled !== false,
       rates: details.rates,
       userRole: req.user.role,
       batches: availableBatches,
@@ -318,6 +322,14 @@ export const chatWithAi = async (req, res) => {
     }
 
     const isStudent = req.user.role === "student";
+
+    if (req.user.role === "teacher" && req.user.aiAccessEnabled === false) {
+      return res.status(403).json({
+        message: "AI access has been disabled for your teacher account by the institute admin.",
+        code: "TEACHER_AI_DISABLED",
+        isLocked: true,
+      });
+    }
 
     // Locked check
     if (!details.aiEnabled) {

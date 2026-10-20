@@ -15,6 +15,9 @@ import SystemSetting from "../models/SystemSetting.js";
 import { clearCachePattern, flushMemoryCache } from "../utils/cache.js";
 import cloudinary from "../utils/cloudinary.js";
 import { supabase, readFallbackData, writeFallbackData, syncVideoFallback, toValidUUID } from "../utils/supabaseModel.js";
+import Batch from "../models/Batch.js";
+import { isTeacherOfBatch } from "./teacherController.js";
+import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -555,6 +558,20 @@ export const completeVideoUpload = async (req, res) => {
       await clearCachePattern("*");
     } catch (_) {}
 
+    if (req.user && (req.user.role === "teacher" || req.user.institute)) {
+      try {
+        const teacherId = req.user._id || req.user.id;
+        await logTeacherActivity(teacherId, {
+          type: "video_upload",
+          title: `Uploaded video: ${video.title || "Untitled Video"}`,
+          details: video.description || "",
+          batchId: video.targetAudienceMetadata?.batchId || null,
+        });
+      } catch (logErr) {
+        console.warn("logTeacherActivity warning in completeVideoUpload:", logErr.message);
+      }
+    }
+
     return res.json({
       message: "Upload completed. Video is now processing.",
       video: {
@@ -776,6 +793,39 @@ export const getTeacherVideos = async (req, res) => {
 
     const isSuperAdmin = req.user?.role === "super_admin" && !req.query?.instituteId;
 
+    let hiredTeacherMap = {};
+    if (isValidId(instituteId)) {
+      try {
+        const teachers = await User.find({ institute: instituteId, role: "teacher" }).select("name _id id");
+        for (const t of teachers) {
+          const tId = String(t._id || t.id);
+          const tUuid = toValidUUID(tId);
+          if (t.name) {
+            hiredTeacherMap[tId] = t.name;
+            if (tUuid) hiredTeacherMap[tUuid] = t.name;
+          }
+        }
+      } catch (_) {}
+    }
+
+    let myBatchIds = new Set();
+    if (req.user?.role === "teacher") {
+      try {
+        const userIds = [instituteId, req.user._id, req.user.id].filter(Boolean);
+        const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers");
+        const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+        myActiveBatches.forEach((b) => {
+          const bIdStr = String(b._id || b.id || "");
+          if (bIdStr) {
+            myBatchIds.add(bIdStr);
+            myBatchIds.add(bIdStr.toLowerCase());
+            const uuid = toValidUUID(bIdStr);
+            if (uuid) myBatchIds.add(uuid);
+          }
+        });
+      } catch (_) {}
+    }
+
     const belongsToInstitute = (item) => {
       if (isSuperAdmin) return true;
       if (!item || typeof item !== "object") return false;
@@ -802,9 +852,29 @@ export const getTeacherVideos = async (req, res) => {
       ).trim();
 
       if (req.user?.role === "teacher") {
-        const targetUser = String(req.user._id || req.user.id).trim();
-        const targetUuid = toValidUUID(targetUser);
-        return itemCreatedBy === targetUser || itemCreatedBy === targetUuid;
+        const tUser = String(req.user._id || req.user.id).trim();
+        const tUuid = toValidUUID(tUser);
+        if (itemCreatedBy === tUser || itemCreatedBy === tUuid) return true;
+
+        let meta = item.targetAudienceMetadata;
+        if (typeof meta === "string") {
+          try { meta = JSON.parse(meta); } catch (_) { meta = {}; }
+        }
+        meta = meta || {};
+        const metaBatchId = meta.batchId || meta.selectedBatchId || item.batchId || item.batch_id || "";
+        const metaBatchIds = Array.isArray(meta.batchIds) ? meta.batchIds : [];
+        const allTargetBatchIds = [metaBatchId, ...metaBatchIds].map(String).filter(Boolean);
+        const tType = String(item.targetAudienceType || item.target_type || "").toLowerCase().trim();
+
+        if (tType === "batch" || allTargetBatchIds.length > 0) {
+          return allTargetBatchIds.some((bId) => myBatchIds.has(bId) || myBatchIds.has(bId.toLowerCase()) || myBatchIds.has(toValidUUID(bId)));
+        }
+
+        if (tType === "all" || !tType || tType === "none") {
+          return itemInst === targetInst || itemInst === targetUser;
+        }
+
+        return false;
       }
 
       if (targetInst && itemInst && itemInst === targetInst) return true;
@@ -1062,6 +1132,21 @@ export const getTeacherVideos = async (req, res) => {
         vObj.id = vid;
         vObj._id = vid;
       }
+
+      const itemCreatedBy = String(
+        (vObj.createdBy && typeof vObj.createdBy === "object"
+          ? vObj.createdBy._id || vObj.createdBy.id
+          : vObj.createdBy) ||
+        vObj.teacher ||
+        vObj.user ||
+        ""
+      ).trim();
+      const teacherName = hiredTeacherMap[itemCreatedBy] || null;
+      if (teacherName) {
+        vObj.uploadedByTeacherName = teacherName;
+        vObj.isCreatedByHiredTeacher = true;
+      }
+
       if (v.isArchived || v.status === "ARCHIVED") {
         archivedVideos.push(vObj);
       } else {
@@ -1720,6 +1805,20 @@ export const createVideoRelease = async (req, res) => {
 
     await clearCachePattern("*");
 
+    if (req.user && (req.user.role === "teacher" || req.user.institute)) {
+      try {
+        const teacherId = req.user._id || req.user.id;
+        const videoTitles = targetVideos.map((v) => v.title).filter(Boolean).join(", ");
+        await logTeacherActivity(teacherId, {
+          type: "video_release",
+          title: `Released ${targetVideos.length} video(s): ${videoTitles.slice(0, 50)}`,
+          details: `Released to ${studentIds.length} student(s)`,
+        });
+      } catch (logErr) {
+        console.warn("logTeacherActivity warning in createVideoRelease:", logErr.message);
+      }
+    }
+
     return res.status(201).json({
       message: `Successfully released ${targetVideos.length} video(s) to ${studentIds.length} student(s).`,
       releasesCount: createdReleases.length,
@@ -1735,6 +1834,35 @@ export const getVideoReleases = async (req, res) => {
     const instituteId = resolveInstituteId(req);
     const query = {};
     if (instituteId) query.institute = instituteId;
+
+    let hiredTeacherMap = {};
+    if (isValidId(instituteId)) {
+      try {
+        const teachers = await User.find({ institute: instituteId, role: "teacher" }).select("name _id id");
+        for (const t of teachers) {
+          const tId = String(t._id || t.id);
+          const tUuid = toValidUUID(tId);
+          if (t.name) {
+            hiredTeacherMap[tId] = t.name;
+            if (tUuid) hiredTeacherMap[tUuid] = t.name;
+          }
+        }
+      } catch (_) {}
+    }
+
+    let teacherStudentIdSet = new Set();
+    if (req.user?.role === "teacher") {
+      try {
+        const userIds = [instituteId, req.user._id, req.user.id].filter(Boolean);
+        const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers");
+        const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+        const myBatchIds = myActiveBatches.map((b) => b._id || b.id);
+        const myStudents = await Student.find({ batch: { $in: myBatchIds } }).select("_id id");
+        myStudents.forEach((s) => {
+          teacherStudentIdSet.add(String(s._id || s.id));
+        });
+      } catch (_) {}
+    }
 
     let releases = [];
     try {
@@ -1881,8 +2009,32 @@ export const getVideoReleases = async (req, res) => {
           computedStatus = "EXPIRED";
         }
 
+        const creatorId = String(
+          (rObj.teacher && typeof rObj.teacher === "object" ? rObj.teacher._id || rObj.teacher.id : rObj.teacher) ||
+          rObj.createdBy ||
+          rObj.created_by ||
+          ""
+        ).trim();
+        const teacherAuthorName = hiredTeacherMap[creatorId] || null;
+
+        const vCreatorId = String(
+          (videoObj.createdBy && typeof videoObj.createdBy === "object" ? videoObj.createdBy._id || videoObj.createdBy.id : videoObj.createdBy) ||
+          videoObj.teacher ||
+          videoObj.user ||
+          ""
+        ).trim();
+        const videoTeacherName = hiredTeacherMap[vCreatorId] || null;
+        if (videoTeacherName) {
+          videoObj.uploadedByTeacherName = videoTeacherName;
+          videoObj.isCreatedByHiredTeacher = true;
+        }
+
+        const effectiveTeacherName = teacherAuthorName || videoTeacherName || null;
+
         return {
           ...rObj,
+          uploadedByTeacherName: effectiveTeacherName,
+          isCreatedByHiredTeacher: Boolean(effectiveTeacherName),
           status: computedStatus,
           video: videoObj,
           studentCount: Math.max(populatedStudents.length, studentIds.length, rObj.studentCount || 0),
@@ -1892,7 +2044,23 @@ export const getVideoReleases = async (req, res) => {
       })
     );
 
-    return res.json({ releases: result });
+    let finalReleases = result;
+    if (req.user?.role === "teacher" && teacherStudentIdSet.size > 0) {
+      const myId = String(req.user._id || req.user.id);
+      const myUuid = toValidUUID(myId);
+      finalReleases = result.filter((r) => {
+        const creatorId = String(
+          (r.teacher && typeof r.teacher === "object" ? r.teacher._id || r.teacher.id : r.teacher) ||
+          r.createdBy ||
+          r.created_by ||
+          ""
+        );
+        if (creatorId === myId || creatorId === myUuid) return true;
+        return (r.studentIds || []).some((sId) => teacherStudentIdSet.has(String(sId)));
+      });
+    }
+
+    return res.json({ releases: finalReleases });
   } catch (error) {
     console.error("getVideoReleases error:", error);
     return res.status(500).json({ message: "Could not fetch video releases" });

@@ -826,6 +826,17 @@ class SupabaseDocument {
         this.payoutConfig = typeof rawPayout === "string" ? JSON.parse(rawPayout) : rawPayout;
       }
       this.payout_config = this.payoutConfig;
+
+      const rawAiAccess = data.ai_access_enabled ?? data.aiAccessEnabled ?? meta.aiAccessEnabled;
+      this.aiAccessEnabled = rawAiAccess !== undefined ? (rawAiAccess === true || rawAiAccess === "true" || rawAiAccess === 1) : true;
+      this.ai_access_enabled = this.aiAccessEnabled;
+
+      const rawActivity = data.activity ?? meta.activity;
+      if (rawActivity) {
+        this.activity = typeof rawActivity === "string" ? JSON.parse(rawActivity) : rawActivity;
+      } else {
+        this.activity = [];
+      }
     }
 
     if (tableName === "sales_leads" && this._id) {
@@ -1169,6 +1180,8 @@ class SupabaseDocument {
         metadata[this._id] = {
           ...(metadata[this._id] || {}),
           payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
+          aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? true,
+          activity: this.activity ?? metadata[this._id]?.activity ?? [],
         };
         writeUserMetadata(metadata);
       }
@@ -1260,6 +1273,8 @@ class SupabaseDocument {
         metadata[this._id] = {
           ...(metadata[this._id] || {}),
           payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
+          aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? true,
+          activity: this.activity ?? metadata[this._id]?.activity ?? [],
         };
         writeUserMetadata(metadata);
       }
