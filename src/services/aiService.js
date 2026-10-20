@@ -1332,6 +1332,12 @@ CRITICAL OPERATIONAL RULES:
    - Answer in the language requested (English or Hinglish).
 
 Real-time Context:
+8. MATHEMATICAL SYMBOLS AND FORMULAS:
+   - When answering questions involving mathematics, physics, or science:
+   - Always write mathematical formulas using standard, readable Unicode symbols: ∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ, Δ, etc.
+   - NEVER wrap formulas or text in raw '$' or '$$' signs.
+   - Do NOT use unescaped LaTeX commands like \\frac or \\int when clean Unicode and standard slash notation (e.g. (a)/(b) or ∫ f(x) dx) can be used.
+
 ${contextStr}`;
 
   return await callGeminiRaw({
@@ -1520,4 +1526,224 @@ Formatting rules:
     temperature: 0.3,
     history,
   });
+}
+
+// 11. Task G: Structured Notes Generator
+export async function generateStructuredNotes(
+  promptOrTopic,
+  targetClass = "Class 10",
+  history = [],
+) {
+  const prompt = `You are a master educator creating high-quality, structured study and revision notes.
+User prompt: "${promptOrTopic}". Target Level: "${targetClass}".
+
+Create comprehensive, structured chapter revision notes.
+Rules:
+- Structure with clear sections:
+  1. Overview & Key Objectives
+  2. Core Definitions & Principles
+  3. Important Formulas & Equations (Use clean Unicode symbols: ∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ. Do NOT use raw $ or $$ signs)
+  4. Step-by-Step Concepts & Explanations
+  5. Solved Illustrations / Key Examples
+  6. Common Pitfalls & Exam Tips
+  7. Chapter Summary
+- Use clean headers with '#' or '##' and bullet points '•'.
+- Provide real, deeply educational content (not a placeholder).
+
+Return ONLY valid JSON:
+{
+  "title": "Clean Short Topic Name",
+  "topic": "Clean Short Topic Name",
+  "category": "Chapter Notes",
+  "notesText": "Full formatted notes content with headers, bullet points, formulas and examples."
+}`;
+
+  try {
+    const raw = await callGeminiRaw({
+      prompt,
+      systemInstruction: "You are an expert teacher creating study notes. Always return strictly valid JSON.",
+      temperature: 0.3,
+      history,
+    });
+    const parsed = extractJsonFromText(raw);
+    if (parsed && parsed.notesText) {
+      return parsed;
+    }
+  } catch (err) {
+    console.error("generateStructuredNotes error:", err.message);
+  }
+
+  return {
+    title: promptOrTopic || "Revision Notes",
+    topic: promptOrTopic || "Revision Notes",
+    category: "Chapter Notes",
+    notesText: `# ${promptOrTopic || "Study Notes"}\n\n## Overview\nComprehensive revision notes and key concepts.\n\n• Key Definitions & Core Ideas\n• Important Principles\n• Formulae & Problem-Solving Guidelines\n• Key Exam Takeaways`,
+  };
+}
+
+// 12. Task H: Comprehensive Test Series Generator
+export async function generateComprehensiveTestSeries({
+  topic = "General Test",
+  targetExam = "Class 10",
+  numQuestions = 10,
+  correctMarks = 4,
+  negativeMarks = 1,
+  durationMinutes = 30,
+  difficulty = "Medium",
+}, history = []) {
+  const count = Math.min(30, Math.max(1, parseInt(numQuestions, 10) || 10));
+  const cMarks = Number(correctMarks) || 4;
+  const nMarks = Number(negativeMarks) || 1;
+  const duration = Number(durationMinutes) || 30;
+
+  const prompt = `Create an official, high-quality test series paper.
+Topic: "${topic}"
+Target Level / Exam: "${targetExam}"
+Number of Questions: ${count}
+Marks per correct question: +${cMarks}
+Negative marks per wrong question: -${nMarks}
+Duration: ${duration} minutes
+Difficulty: "${difficulty}"
+
+Rules:
+- Generate exactly ${count} multiple choice questions (MCQs).
+- Each question must have 4 clear, plausible options (A, B, C, D).
+- Specify correctOption as an integer 0, 1, 2, or 3 corresponding to option index.
+- Provide a clear, step-by-step explanation for each question.
+- Write math/science formulas using standard Unicode symbols (e.g. ∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ). Do NOT use raw $ or $$ signs.
+
+Return ONLY valid JSON:
+{
+  "title": "${topic} Test Series (${targetExam})",
+  "category": "${targetExam}",
+  "durationMinutes": ${duration},
+  "passingMarks": ${Math.round(count * cMarks * 0.4)},
+  "totalMarks": ${count * cMarks},
+  "correctMarks": ${cMarks},
+  "negativeMarks": ${nMarks},
+  "instructions": "Attempt all questions. Each correct answer carries +${cMarks} marks. Each incorrect answer deducts -${nMarks} marks. Test cannot be paused once started.",
+  "questions": [
+    {
+      "id": "q_1",
+      "question": "Question text here",
+      "type": "single_choice",
+      "marks": ${cMarks},
+      "negativeMarks": ${nMarks},
+      "options": [
+        {"id": "opt_0", "text": "Option A text", "isCorrect": true},
+        {"id": "opt_1", "text": "Option B text", "isCorrect": false},
+        {"id": "opt_2", "text": "Option C text", "isCorrect": false},
+        {"id": "opt_3", "text": "Option D text", "isCorrect": false}
+      ],
+      "correctOption": 0,
+      "explanation": "Detailed explanation of the correct answer."
+    }
+  ]
+}`;
+
+  try {
+    const raw = await callGeminiRaw({
+      prompt,
+      systemInstruction: "You are an expert examiner creating professional test series and mock exams. Return strictly valid JSON.",
+      temperature: 0.3,
+      history,
+    });
+    const parsed = extractJsonFromText(raw);
+    if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+      return parsed;
+    }
+  } catch (err) {
+    console.error("generateComprehensiveTestSeries error:", err.message);
+  }
+
+  return {
+    title: `${topic} Test Series`,
+    category: targetExam,
+    durationMinutes: duration,
+    passingMarks: Math.round(count * cMarks * 0.4),
+    totalMarks: count * cMarks,
+    correctMarks: cMarks,
+    negativeMarks: nMarks,
+    instructions: `Answer all questions within ${duration} minutes.`,
+    questions: [
+      {
+        id: "q_1",
+        question: `Sample Question on ${topic}`,
+        type: "single_choice",
+        marks: cMarks,
+        negativeMarks: nMarks,
+        options: [
+          {"id": "opt_0", "text": "Correct Option", "isCorrect": true},
+          {"id": "opt_1", "text": "Distractor B", "isCorrect": false},
+          {"id": "opt_2", "text": "Distractor C", "isCorrect": false},
+          {"id": "opt_3", "text": "Distractor D", "isCorrect": false}
+        ],
+        correctOption: 0,
+        explanation: "Correct explanation."
+      }
+    ]
+  };
+}
+
+// 13. Task I: Student Assignment Generator
+export async function generateAssignment({
+  topic = "General Assignment",
+  numQuestions = 10,
+  difficulty = "Medium",
+  batchName = "Selected Batch",
+  imageBase64 = null,
+  imageMimeType = "image/jpeg",
+}, history = []) {
+  const count = Math.min(25, Math.max(1, parseInt(numQuestions, 10) || 10));
+
+  const prompt = `You are an expert teacher creating a comprehensive student homework / practice assignment.
+${imageBase64 ? "The teacher has uploaded a photo. Analyze the questions/concepts in the photo and create an assignment around this topic." : `Topic: "${topic}".`}
+Number of Questions: ${count}
+Difficulty: "${difficulty}"
+Target Batch: "${batchName}"
+
+Rules:
+- Generate a well-structured assignment with:
+  * Title and target Batch
+  * Section A: Conceptual & Short Answer Questions
+  * Section B: Numerical / Problem-Solving Questions
+  * Section C: Higher Order Thinking / Long Answer Questions
+  * Answer Key & Hints: Clear step-by-step solutions/hints at the end.
+- Use standard Unicode mathematical symbols (∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ). Do NOT use raw $ or $$ signs.
+
+Return ONLY valid JSON:
+{
+  "title": "${topic} - Assignment",
+  "topic": "${topic}",
+  "numQuestions": ${count},
+  "difficulty": "${difficulty}",
+  "batchName": "${batchName}",
+  "assignmentText": "Full formatted assignment text with sections, question numbers, sub-parts, and solution key."
+}`;
+
+  try {
+    const raw = await callGeminiRaw({
+      prompt,
+      systemInstruction: "You are an expert curriculum designer. Return strictly valid JSON.",
+      imageBase64,
+      imageMimeType,
+      temperature: 0.3,
+      history,
+    });
+    const parsed = extractJsonFromText(raw);
+    if (parsed && parsed.assignmentText) {
+      return parsed;
+    }
+  } catch (err) {
+    console.error("generateAssignment error:", err.message);
+  }
+
+  return {
+    title: `${topic} - Assignment`,
+    topic,
+    numQuestions: count,
+    difficulty,
+    batchName,
+    assignmentText: `# ${topic} Assignment\n\n**Batch**: ${batchName} | **Difficulty**: ${difficulty}\n\n## Section A: Conceptual Questions\n1. Explain the fundamental principles of ${topic}.\n2. State the key laws and governing equations.\n\n## Section B: Practice Problems\n3. Solve the standard problem with given parameters.\n\n## Answer Key & Hints\n• Detailed hints and solutions for all problems.`,
+  };
 }

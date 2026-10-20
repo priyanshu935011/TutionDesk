@@ -11,6 +11,9 @@ import {
   generateNoticeAnnouncement,
   generatePracticeQuiz,
   solveStudentDoubt,
+  generateStructuredNotes,
+  generateComprehensiveTestSeries,
+  generateAssignment,
   callGeminiRaw,
 } from "../services/aiService.js";
 import { createStudent } from "./studentController.js";
@@ -362,6 +365,12 @@ export const chatWithAi = async (req, res) => {
     if (!taskType) {
       if (imageBase64) {
         if (
+          lowerMessage.includes("assignment") ||
+          lowerMessage.includes("homework") ||
+          lowerMessage.includes("worksheet")
+        ) {
+          taskType = "GENERATE_ASSIGNMENT";
+        } else if (
           lowerMessage.includes("mark") ||
           lowerMessage.includes("score") ||
           lowerMessage.includes("test") ||
@@ -382,6 +391,25 @@ export const chatWithAi = async (req, res) => {
         }
       } else if (isStudent) {
         taskType = "STUDENT_DOUBT";
+      } else if (
+        lowerMessage.includes("test series") ||
+        lowerMessage.includes("mock test")
+      ) {
+        taskType = "GENERATE_TEST_SERIES";
+      } else if (
+        lowerMessage.includes("generate notes") ||
+        lowerMessage.includes("create notes") ||
+        lowerMessage.includes("study notes") ||
+        lowerMessage.includes("revision notes") ||
+        lowerMessage.startsWith("notes on")
+      ) {
+        taskType = "GENERATE_NOTES";
+      } else if (
+        lowerMessage.includes("generate assignment") ||
+        lowerMessage.includes("create assignment") ||
+        lowerMessage.includes("homework assignment")
+      ) {
+        taskType = "GENERATE_ASSIGNMENT";
       } else if (
         lowerMessage.includes("notice") ||
         lowerMessage.includes("announcement") ||
@@ -574,6 +602,106 @@ export const chatWithAi = async (req, res) => {
         break;
       }
 
+      case "GENERATE_NOTES": {
+        const billing = await deductAiCredits(instituteId, "query");
+        const availableBatches = await getInstituteBatches(req, instituteId);
+        const targetClass = req.body.targetClass || req.body.classLevel || "Class 10";
+        const notesData = await generateStructuredNotes(message || "Revision Notes", targetClass, history);
+
+        const payloadData = {
+          ...notesData,
+          availableBatches,
+          batchId: batchId || (availableBatches[0]?._id || null),
+          batchName: availableBatches[0]?.name || "All Batches",
+        };
+
+        replyPayload = {
+          type: "ACTION_CARD",
+          action: "NOTES_PREVIEW",
+          data: payloadData,
+          parsedData: payloadData,
+          reply: notesData.notesText || `Generated comprehensive study notes for **${notesData.title}**!`,
+          creditsDeducted: billing.deducted,
+          remainingBalance: billing.newBalance,
+        };
+        break;
+      }
+
+      case "GENERATE_TEST_SERIES": {
+        const billing = await deductAiCredits(instituteId, "quiz");
+        const topic = req.body.topic || message.replace(/generate|create|test series|mock test/gi, "").trim() || "Unit Test Series";
+        const targetExam = req.body.targetExam || req.body.classLevel || "Class 10";
+        const numQuestions = req.body.numQuestions || 10;
+        const correctMarks = req.body.correctMarks || 4;
+        const negativeMarks = req.body.negativeMarks || 1;
+        const durationMinutes = req.body.durationMinutes || 30;
+        const difficulty = req.body.difficulty || "Medium";
+
+        const testSeriesData = await generateComprehensiveTestSeries({
+          topic,
+          targetExam,
+          numQuestions,
+          correctMarks,
+          negativeMarks,
+          durationMinutes,
+          difficulty,
+        }, history);
+
+        replyPayload = {
+          type: "ACTION_CARD",
+          action: "TEST_SERIES_PREVIEW",
+          data: testSeriesData,
+          parsedData: testSeriesData,
+          reply: `Generated official test series: **${testSeriesData.title}** (${testSeriesData.questions?.length || 0} Questions, ${testSeriesData.totalMarks || 40} Total Marks, ${testSeriesData.durationMinutes || 30} mins)! Preview or publish it directly below.`,
+          creditsDeducted: billing.deducted,
+          remainingBalance: billing.newBalance,
+        };
+        break;
+      }
+
+      case "GENERATE_ASSIGNMENT": {
+        const billing = await deductAiCredits(instituteId, imageBase64 ? "vision" : "query");
+        const availableBatches = await getInstituteBatches(req, instituteId);
+        let selectedBatchName = "Selected Batch";
+        if (batchId) {
+          const match = availableBatches.find(b => String(b._id || b.id) === String(batchId));
+          if (match) selectedBatchName = match.name;
+        } else if (availableBatches.length > 0) {
+          selectedBatchName = availableBatches[0].name;
+        }
+
+        const topic = req.body.topic || message.replace(/generate|create|assignment|worksheet/gi, "").trim() || "Practice Assignment";
+        const numQuestions = req.body.numQuestions || 10;
+        const difficulty = req.body.difficulty || "Medium";
+
+        const assignmentData = await generateAssignment({
+          topic,
+          numQuestions,
+          difficulty,
+          batchName: selectedBatchName,
+          imageBase64,
+          imageMimeType,
+        }, history);
+
+        const payloadData = {
+          ...assignmentData,
+          availableBatches,
+          batchId: batchId || (availableBatches[0]?._id || null),
+          batchName: selectedBatchName,
+        };
+
+        replyPayload = {
+          type: "ACTION_CARD",
+          action: "ASSIGNMENT_PREVIEW",
+          data: payloadData,
+          parsedData: payloadData,
+          reply: assignmentData.assignmentText || `Generated homework assignment for **${assignmentData.title}** (${selectedBatchName})!`,
+          creditsDeducted: billing.deducted,
+          remainingBalance: billing.newBalance,
+        };
+        break;
+      }
+
       case "GENERATE_NOTICE": {
         const billing = await deductAiCredits(instituteId, "query");
         const noticeData = await generateNoticeAnnouncement(
@@ -582,11 +710,10 @@ export const chatWithAi = async (req, res) => {
           history,
         );
 
+        // Suppress broadcast option: return clean message text with copy option
         replyPayload = {
-          type: "ACTION_CARD",
-          action: "BROADCAST_WHATSAPP",
-          data: noticeData,
-          reply: `Here is your drafted notice for **${noticeData.title}**. You can copy the message or broadcast it to parents.`,
+          type: "TEXT",
+          reply: `📢 **${noticeData.title || "Announcement"}**\n\n${noticeData.whatsappText || noticeData.content || ""}`,
           creditsDeducted: billing.deducted,
           remainingBalance: billing.newBalance,
         };
