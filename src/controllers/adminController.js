@@ -1746,6 +1746,7 @@ export const createStaff = async (req, res) => {
       role: staff.role,
       payoutConfig: staff.payoutConfig,
       allowStudentAiDoubtSolver: staff.allowStudentAiDoubtSolver,
+      allowStudentAiDoubtSolver: staff.allowStudentAiDoubtSolver,
       createdAt: staff.createdAt,
     });
   } catch (err) {
@@ -1756,7 +1757,7 @@ export const createStaff = async (req, res) => {
 
 export const updateStaff = async (req, res) => {
   try {
-    const { name, email, password, role, payoutConfig } = req.body;
+    const { name, email, password, role, payoutConfig, allowStudentAiDoubtSolver } = req.body;
     const staff = await User.findById(req.params.id);
     if (!staff) {
       return res.status(404).json({ message: "Staff member not found." });
