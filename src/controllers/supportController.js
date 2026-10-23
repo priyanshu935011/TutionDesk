@@ -1,9 +1,11 @@
 import SupportTicket from "../models/SupportTicket.js";
 import SupportFaq from "../models/SupportFaq.js";
 import SupportTutorial from "../models/SupportTutorial.js";
+import SystemSetting from "../models/SystemSetting.js";
 import { sendAdminTicketAlert } from "../services/adminAlertService.js";
 import cloudinary from "../utils/cloudinary.js";
 import { callGeminiRaw } from "../services/aiService.js";
+import { logAiHarvest } from "../utils/aiHarvestLogger.js";
 
 // Authentic ClassTech FAQs with exact in-app steps and button names
 const CLASSTECH_FAQS = [
@@ -283,12 +285,16 @@ export async function getTutorials(req, res) {
         tutorials: dbTuts,
       });
     }
+    const isSeeded = await SystemSetting.findOne({ key: "tutorials_initial_seeded" }).catch(() => null);
+    if (isSeeded) {
+      return res.json({ success: true, tutorials: [] });
+    }
     return res.json({
       success: true,
       tutorials: CLASSTECH_TUTORIALS,
     });
   } catch (error) {
-    return res.json({ success: true, tutorials: CLASSTECH_TUTORIALS });
+    return res.json({ success: true, tutorials: [] });
   }
 }
 
@@ -331,9 +337,20 @@ CRITICAL RULES:
       history: Array.isArray(history) ? history.slice(-6) : [],
     });
 
+    const replyText = aiReply || "Here are the steps to follow in your ClassTech app.";
+
+    logAiHarvest({
+      instituteId: req.user?.institute?._id || req.user?.institute || null,
+      user: req.user,
+      taskType: "APP_SUPPORT_HELP",
+      prompt: query,
+      response: replyText,
+      creditsDeducted: 0,
+    }).catch(() => null);
+
     return res.json({
       success: true,
-      reply: aiReply || "Here are the steps to follow in your ClassTech app.",
+      reply: replyText,
     });
   } catch (error) {
     console.error("[SupportController] Error in AI Help:", error);
@@ -547,21 +564,29 @@ export async function adminDeleteFaq(req, res) {
 export async function adminGetTutorials(req, res) {
   try {
     let tutorials = await SupportTutorial.find({}).sort({ orderIndex: 1, createdAt: -1 });
-    if (!tutorials || tutorials.length === 0) {
+    const isSeeded = await SystemSetting.findOne({ key: "tutorials_initial_seeded" }).catch(() => null);
+
+    if ((!tutorials || tutorials.length === 0) && !isSeeded) {
       try {
         const seeded = await SupportTutorial.create(
           CLASSTECH_TUTORIALS.map((t, i) => ({
-            ...t,
+            title: t.title,
+            category: t.category,
+            description: t.description || "",
+            videoUrl: t.videoUrl,
+            thumbnailUrl: t.thumbnailUrl || "",
+            duration: t.duration || "",
             orderIndex: i,
             isActive: true,
           }))
         );
         tutorials = Array.isArray(seeded) ? seeded : [seeded];
+        await SystemSetting.create({ key: "tutorials_initial_seeded", value: true }).catch(() => null);
       } catch (_) {
         tutorials = CLASSTECH_TUTORIALS.map((t, i) => ({ ...t, _id: `seed_tut_${i}`, orderIndex: i, isActive: true }));
       }
     }
-    return res.json({ success: true, tutorials });
+    return res.json({ success: true, tutorials: tutorials || [] });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -624,9 +649,29 @@ export async function adminUpdateTutorial(req, res) {
 export async function adminDeleteTutorial(req, res) {
   try {
     const { id } = req.params;
-    await SupportTutorial.findByIdAndDelete(id);
+    if (!id) return res.status(400).json({ success: false, message: "Tutorial ID required" });
+
+    // Mark as seeded so deleting tutorials does not trigger auto-re-seed
+    await SystemSetting.findOneAndUpdate(
+      { key: "tutorials_initial_seeded" },
+      { key: "tutorials_initial_seeded", value: true },
+      { upsert: true }
+    ).catch(() => null);
+
+    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(id));
+
+    if (isUuid) {
+      await SupportTutorial.findByIdAndDelete(id);
+    } else {
+      // Legacy or seed ID
+      await SupportTutorial.deleteOne({
+        $or: [{ id: id }, { _id: id }]
+      }).catch(() => null);
+    }
+
     return res.json({ success: true, message: "Tutorial deleted successfully" });
   } catch (error) {
+    console.error("adminDeleteTutorial error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 }

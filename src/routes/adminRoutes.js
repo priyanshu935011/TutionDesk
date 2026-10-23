@@ -51,6 +51,7 @@ import {
   updateInstituteAiConfig,
   getAdminFestivalTheme,
   updateAdminFestivalTheme,
+  getAiHarvestLogs,
 } from "../controllers/adminController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -84,6 +85,7 @@ router.use(protect, staffOnly);
 router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
 router.get("/system-logs", getSystemLogs);
+router.get("/ai-harvest-logs", getAiHarvestLogs);
 router.delete("/system-logs", clearSystemLogs);
 router.put("/system-logs/read-all", markAllSystemLogsAsRead);
 router.put("/system-logs/:id/read", markSystemLogAsRead);

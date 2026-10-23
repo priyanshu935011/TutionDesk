@@ -28,6 +28,7 @@ import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { logActivity } from "../utils/activityLogger.js";
 import ActivityLog from "../models/ActivityLog.js";
+import AiHarvestLog from "../models/AiHarvestLog.js";
 import SystemLog from "../models/SystemLog.js";
 import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
@@ -2732,3 +2733,51 @@ export const updateAdminFestivalTheme = async (req, res) => {
 };
 
 
+
+
+/**
+ * Super Admin: Get AI Harvested Logs
+ */
+export const getAiHarvestLogs = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.taskType) {
+      filter.taskType = String(req.query.taskType).toUpperCase();
+    }
+    if (req.query.instituteId) {
+      filter.instituteId = String(req.query.instituteId);
+    }
+
+    const search = req.query.search ? String(req.query.search).trim() : "";
+    if (search) {
+      filter.$or = [
+        { prompt: { $regex: search, $options: "i" } },
+        { response: { $regex: search, $options: "i" } },
+        { userName: { $regex: search, $options: "i" } },
+        { taskType: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const total = await AiHarvestLog.countDocuments(filter);
+    const logs = await AiHarvestLog.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    return res.json({
+      success: true,
+      logs,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
+  } catch (error) {
+    console.error("getAiHarvestLogs error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};

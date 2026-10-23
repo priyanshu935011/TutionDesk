@@ -19,6 +19,7 @@ import {
 import { createStudent } from "./studentController.js";
 import { createTestResultsBulk } from "./teacherController.js";
 import { supabase } from "../utils/supabase.js";
+import { logAiHarvest } from "../utils/aiHarvestLogger.js";
 
 // Helper to get clean institute ID from req.user
 function getInstituteIdFromReq(req) {
@@ -786,6 +787,31 @@ export const chatWithAi = async (req, res) => {
         break;
       }
     }
+
+    // Harvest AI Interaction Log
+    logAiHarvest({
+      instituteId,
+      user: req.user,
+      taskType,
+      prompt: message,
+      response: replyPayload.reply,
+      generatedContent: replyPayload.data || replyPayload.parsedData || null,
+      metadata: {
+        action: replyPayload.action || null,
+        responseType: replyPayload.type || "TEXT",
+        hasImage: Boolean(imageBase64),
+        imageMimeType: imageBase64 ? imageMimeType : null,
+        batchId: batchId || null,
+        topic: req.body.topic || null,
+        targetClass: req.body.targetClass || req.body.classLevel || null,
+        targetExam: req.body.targetExam || null,
+        numQuestions: req.body.numQuestions || null,
+        difficulty: req.body.difficulty || null,
+        durationMinutes: req.body.durationMinutes || null,
+        historyLength: Array.isArray(history) ? history.length : 0,
+      },
+      creditsDeducted: replyPayload.creditsDeducted || 0,
+    }).catch(() => null);
 
     return res.json({
       success: true,
