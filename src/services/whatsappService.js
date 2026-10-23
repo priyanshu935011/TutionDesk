@@ -180,9 +180,9 @@ export const getInstituteWalletBalance = async (instituteId, fallback = 0) => {
   return Number(fallback || 0);
 };
 
-export const getInstituteMessageCharge = async (instituteId, fallback = 0.10) => {
+export const getInstituteMessageCharge = async (instituteId, fallback = 0.25) => {
   const instIdStr = getCleanInstId(instituteId);
-  if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0.10);
+  if (!instIdStr || instIdStr === "admin_test") return Number(fallback || 0.25);
 
   // 1. Direct fetch from Supabase table 'institutes' using getSupabaseInstituteRow
   try {
@@ -215,7 +215,7 @@ export const getInstituteMessageCharge = async (instituteId, fallback = 0.10) =>
     }
   } catch (_) {}
 
-  return Number(fallback || 0.10);
+  return Number(fallback || 0.25);
 };
 
 const recordLogAndDeduct = async (instituteId, inst, charge, to, messageText, msgType, isSuccess, errMessage = "") => {
@@ -367,7 +367,7 @@ export const logoutSession = async (instituteId) => {
 export const sendMessage = async (instituteId, to, text, msgType = "custom", templateConfig = null) => {
   const cleanNumber = formatPhoneNumber(to);
   const inst = await findInstituteDoc(instituteId);
-  const charge = await getInstituteMessageCharge(instituteId, inst?.perMessageCharge ?? 0.10);
+  const charge = await getInstituteMessageCharge(instituteId, inst?.perMessageCharge ?? 0.25);
 
   const creds = await getMetaCredentials();
   const { accessToken, phoneNumberId, languageCode } = creds;
@@ -508,7 +508,7 @@ export const sendDocument = async (instituteId, to, fileBuffer, fileName, captio
 export const sendTemplateMessage = async (instituteId, to, templateName, parameters) => {
   const cleanNumber = formatPhoneNumber(to);
   const inst = await findInstituteDoc(instituteId);
-  const charge = await getInstituteMessageCharge(instituteId, inst?.perMessageCharge ?? 0.10);
+  const charge = await getInstituteMessageCharge(instituteId, inst?.perMessageCharge ?? 0.25);
 
   const creds = await getMetaCredentials();
   const { accessToken, phoneNumberId, languageCode } = creds;

@@ -67,6 +67,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    allowStudentAiDoubtSolver: {
+      type: Boolean,
+      default: true,
+    },
     activity: {
       type: Array,
       default: [],

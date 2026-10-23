@@ -79,10 +79,11 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
 
   const instIdStr = String(institute._id || institute.id || "").trim();
   const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
-  const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.10);
+  const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.25);
 
   const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
   instObj.walletBalance = liveBal;
+  instObj.aiWalletBalance = Number(institute.aiWalletBalance || 0);
   instObj.perMessageCharge = liveRate;
   let creatorName = institute.createdByName || institute.staffName || "";
   const creatorId = institute.createdBy || institute.salesPerson;
@@ -1381,7 +1382,7 @@ export const getInstituteFullAnalytics = async (req, res) => {
     }
 
     const liveBal = await getInstituteWalletBalance(instIdStr, institute.walletBalance || 0);
-    const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.10);
+    const liveRate = await getInstituteMessageCharge(instIdStr, institute.perMessageCharge ?? 0.25);
     const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
     instObj.walletBalance = liveBal;
     instObj.perMessageCharge = liveRate;
@@ -1688,7 +1689,7 @@ export const getStaff = async (req, res) => {
     }
 
     const staffList = await User.find(query)
-      .select("name email role parentAdmin payoutConfig createdAt")
+      .select("name email role parentAdmin payoutConfig allowStudentAiDoubtSolver createdAt")
       .populate("parentAdmin", "name email");
 
     return res.json(staffList);
@@ -1700,7 +1701,7 @@ export const getStaff = async (req, res) => {
 
 export const createStaff = async (req, res) => {
   try {
-    const { name, email, password, role, payoutConfig } = req.body;
+    const { name, email, password, role, payoutConfig, allowStudentAiDoubtSolver } = req.body;
     if (!name || !email || !password || !role) {
       return res.status(400).json({ message: "All fields are required." });
     }
@@ -1732,6 +1733,7 @@ export const createStaff = async (req, res) => {
       parentAdmin: req.user._id,
       institute: null,
       payoutConfig: payoutConfig || null,
+      allowStudentAiDoubtSolver: allowStudentAiDoubtSolver !== undefined ? Boolean(allowStudentAiDoubtSolver) : true,
     });
 
     await logActivity(req.user._id, "Create Staff", `Created staff member ${email} with role ${role}`, req.ip);
@@ -1742,6 +1744,7 @@ export const createStaff = async (req, res) => {
       email: staff.email,
       role: staff.role,
       payoutConfig: staff.payoutConfig,
+      allowStudentAiDoubtSolver: staff.allowStudentAiDoubtSolver,
       createdAt: staff.createdAt,
     });
   } catch (err) {
@@ -1796,6 +1799,9 @@ export const updateStaff = async (req, res) => {
 
     if (payoutConfig !== undefined) {
       staff.payoutConfig = payoutConfig;
+    }
+    if (allowStudentAiDoubtSolver !== undefined) {
+      staff.allowStudentAiDoubtSolver = Boolean(allowStudentAiDoubtSolver);
     }
 
     await staff.save();

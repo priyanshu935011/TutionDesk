@@ -321,7 +321,7 @@ const instituteSchema = new mongoose.Schema(
     },
     perMessageCharge: {
       type: Number,
-      default: 0.10,
+      default: 0.25,
     },
     aiEnabled: {
       type: Boolean,

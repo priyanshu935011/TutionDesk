@@ -442,6 +442,7 @@ export const getSalesInstitutes = async (req, res) => {
       walletBalance: Number(inst.walletBalance || 0),
       aiWalletBalance: Number(inst.aiWalletBalance || 0),
       aiEnabled: Boolean(inst.aiEnabled),
+      aiStudentEnabled: Boolean(inst.aiStudentEnabled),
       recordedLecturesFeatureEnabled: inst.recordedLecturesFeatureEnabled !== false,
       quizFeatureEnabled: inst.quizFeatureEnabled !== undefined ? Boolean(inst.quizFeatureEnabled) : false,
       studentCustomFields: inst.studentCustomFields || [],
@@ -477,6 +478,7 @@ export const createSalesInstitute = async (req, res) => {
       adminEmail,
       adminPhone,
       adminPassword,
+      aiStudentEnabled,
       subscriptionPlan,
       subscriptionAmount,
       tuitionType,
@@ -533,6 +535,8 @@ export const createSalesInstitute = async (req, res) => {
       walletBalance: Number(walletBalance !== undefined && !isNaN(Number(walletBalance)) ? walletBalance : 0),
       aiWalletBalance: Number(aiWalletBalance !== undefined && !isNaN(Number(aiWalletBalance)) ? aiWalletBalance : 0),
       aiEnabled: Boolean(aiEnabled),
+      aiStudentEnabled: Boolean(aiStudentEnabled),
+      perMessageCharge: 0.25,
       recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== false,
       maxVideoStorageGb: Number(maxVideoStorageGb !== undefined && !isNaN(Number(maxVideoStorageGb)) ? maxVideoStorageGb : 50),
       testSeriesFeatureEnabled: Boolean(testSeriesFeatureEnabled),
@@ -675,6 +679,9 @@ export const updateSalesInstitute = async (req, res) => {
     if (aiEnabled !== undefined) {
       institute.aiEnabled = Boolean(aiEnabled);
       updateInstituteAiSettingsMetadata(id, { aiEnabled: Boolean(aiEnabled) });
+    }
+    if (req.body.aiStudentEnabled !== undefined) {
+      institute.aiStudentEnabled = Boolean(req.body.aiStudentEnabled);
     }
     if (recordedLecturesFeatureEnabled !== undefined) {
       institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);

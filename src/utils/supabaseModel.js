@@ -219,7 +219,7 @@ export function updateInstitutePerMessageChargeMetadata(instId, rate) {
     const cleanId = String(instId || "").trim();
     if (!cleanId) return;
     const metadata = readInstitutesMetadata();
-    const newRate = Number(rate || 0.10);
+    const newRate = Number(rate || 0.25);
 
     for (const key of Object.keys(metadata)) {
       metadata[key] = {
@@ -742,7 +742,7 @@ class SupabaseDocument {
       } else if (meta.perMessageCharge !== undefined && meta.perMessageCharge !== null && !isNaN(Number(meta.perMessageCharge))) {
         this.perMessageCharge = Number(meta.perMessageCharge);
       } else {
-        this.perMessageCharge = this.perMessageCharge ?? 0.10;
+        this.perMessageCharge = this.perMessageCharge ?? 0.25;
       }
       this.per_message_charge = this.perMessageCharge;
 
@@ -875,6 +875,9 @@ class SupabaseDocument {
       const rawAiAccess = data.ai_access_enabled ?? data.aiAccessEnabled ?? meta.aiAccessEnabled;
       this.aiAccessEnabled = rawAiAccess !== undefined ? (rawAiAccess === true || rawAiAccess === "true" || rawAiAccess === 1) : true;
       this.ai_access_enabled = this.aiAccessEnabled;
+      const rawStudentAi = data.allow_student_ai_doubt_solver ?? data.allowStudentAiDoubtSolver ?? meta.allowStudentAiDoubtSolver;
+      this.allowStudentAiDoubtSolver = rawStudentAi !== undefined ? (rawStudentAi === true || rawStudentAi === "true" || rawStudentAi === 1) : true;
+      this.allow_student_ai_doubt_solver = this.allowStudentAiDoubtSolver;
 
       const rawActivity = data.activity ?? meta.activity;
       if (rawActivity) {
@@ -1200,7 +1203,7 @@ class SupabaseDocument {
           studentCustomFields: this.studentCustomFields ?? [],
           studentPortalEnabled: this.studentPortalEnabled ?? true,
           walletBalance: this.walletBalance ?? 0,
-          perMessageCharge: this.perMessageCharge ?? 0.10,
+          perMessageCharge: this.perMessageCharge ?? 0.25,
           aiEnabled: this.aiEnabled ?? false,
           aiStudentEnabled: this.aiStudentEnabled ?? false,
           aiWalletBalance: this.aiWalletBalance ?? 0,
@@ -1336,7 +1339,7 @@ class SupabaseDocument {
           studentCustomFields: this.studentCustomFields ?? [],
           studentPortalEnabled: this.studentPortalEnabled ?? true,
           walletBalance: this.walletBalance ?? 0,
-          perMessageCharge: this.perMessageCharge ?? 0.10,
+          perMessageCharge: this.perMessageCharge ?? 0.25,
           aiEnabled: this.aiEnabled ?? false,
           aiStudentEnabled: this.aiStudentEnabled ?? false,
           aiWalletBalance: this.aiWalletBalance ?? 0,
@@ -2646,7 +2649,7 @@ class SupabaseModel {
         studentCustomFields: doc.studentCustomFields ?? [],
         studentPortalEnabled: doc.studentPortalEnabled ?? true,
         walletBalance: doc.walletBalance ?? 0,
-        perMessageCharge: doc.perMessageCharge ?? 0.10,
+        perMessageCharge: doc.perMessageCharge ?? 0.25,
         whatsappSettings: doc.whatsappSettings ?? {},
         createdBy: doc.createdBy || doc.salesPerson || null,
         createdByName: doc.createdByName || doc.staffName || "",
