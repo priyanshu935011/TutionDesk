@@ -615,6 +615,8 @@ export const updateSalesInstitute = async (req, res) => {
       ownerName,
       adminEmail,
       adminPhone,
+      subscriptionPlan,
+      subscriptionAmount,
       tuitionType,
       walletBalance,
       aiWalletBalance,
@@ -631,6 +633,42 @@ export const updateSalesInstitute = async (req, res) => {
     if (ownerName) institute.ownerName = ownerName.trim();
     if (adminPhone !== undefined) institute.adminPhone = adminPhone ? adminPhone.trim() : "";
     if (tuitionType) institute.tuitionType = tuitionType;
+
+    if (subscriptionPlan !== undefined && subscriptionPlan) {
+      const planChanged = institute.subscriptionPlan !== subscriptionPlan;
+      institute.subscriptionPlan = subscriptionPlan;
+
+      if (subscriptionPlan === "trial") {
+        institute.subscriptionAmount = 0;
+        institute.subscriptionPaymentStatus = "paid";
+        institute.subscriptionPaymentLink = "";
+      } else if (planChanged && institute.subscriptionPaymentStatus !== "paid") {
+        // Clear previous payment link if plan changed while unpaid so new link matches new plan
+        institute.subscriptionPaymentLink = "";
+        institute.subscriptionOrderId = "";
+      }
+
+      if (planChanged) {
+        const nextEnd = resolveSubscriptionEnd({
+          subscriptionPlan,
+          subscriptionStart: institute.subscriptionStart || new Date(),
+          trialDays: subscriptionPlan === "trial" ? 14 : 0,
+        });
+        if (nextEnd) {
+          institute.subscriptionEnd = nextEnd;
+        }
+      }
+    }
+
+    if (subscriptionAmount !== undefined && !isNaN(Number(subscriptionAmount))) {
+      const numAmount = Number(subscriptionAmount);
+      // If amount changed while unpaid, clear the old payment link
+      if (institute.subscriptionAmount !== numAmount && institute.subscriptionPaymentStatus !== "paid") {
+        institute.subscriptionPaymentLink = "";
+        institute.subscriptionOrderId = "";
+      }
+      institute.subscriptionAmount = numAmount;
+    }
     if (aiEnabled !== undefined) {
       institute.aiEnabled = Boolean(aiEnabled);
       updateInstituteAiSettingsMetadata(id, { aiEnabled: Boolean(aiEnabled) });
@@ -687,6 +725,22 @@ export const updateSalesInstitute = async (req, res) => {
     }
 
     await institute.save();
+
+    // Sync metadata
+    try {
+      const metadata = readInstitutesMetadata();
+      const instId = String(institute._id || institute.id);
+      if (metadata[instId]) {
+        metadata[instId].subscriptionPlan = institute.subscriptionPlan;
+        metadata[instId].subscriptionAmount = institute.subscriptionAmount;
+        metadata[instId].subscriptionEnd = institute.subscriptionEnd;
+        metadata[instId].subscriptionPaymentStatus = institute.subscriptionPaymentStatus;
+        metadata[instId].subscriptionPaymentLink = institute.subscriptionPaymentLink;
+        metadata[instId].subscriptionOrderId = institute.subscriptionOrderId;
+        writeInstitutesMetadata(metadata);
+      }
+    } catch (_) {}
+
     await clearCachePattern("institute:*").catch(() => {});
 
     try {
