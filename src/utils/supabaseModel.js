@@ -3293,6 +3293,7 @@ const mockMongoose = {
     else if (modelName === "SupportFaq" || modelName === "SupportFaqs") tableName = "support_faqs";
     else if (modelName === "SupportTicket" || modelName === "SupportTickets") tableName = "support_tickets";
     else if (modelName === "SupportTutorial" || modelName === "SupportTutorials") tableName = "support_tutorials";
+    else if (modelName === "AiHarvestLog" || modelName === "AiHarvestLogs") tableName = "ai_harvest_logs";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
@@ -3301,6 +3302,7 @@ const mockMongoose = {
     if (tableName === "supportfaqs" || tableName === "supportfaq") tableName = "support_faqs";
     if (tableName === "supporttickets" || tableName === "supportticket") tableName = "support_tickets";
     if (tableName === "supporttutorials" || tableName === "supporttutorial") tableName = "support_tutorials";
+    if (tableName === "aiharvestlogs" || tableName === "aiharvestlog") tableName = "ai_harvest_logs";
 
     return new SupabaseModel(tableName);
   },
