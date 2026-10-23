@@ -8,6 +8,7 @@ import {
   logLeadCall,
   getSalesInstitutes,
   createSalesInstitute,
+  updateSalesInstitute,
   topupSalesInstituteWallet,
   topupSalesInstituteAiWallet,
   createSalesInstituteRechargeLink,
@@ -34,6 +35,7 @@ router.post("/leads/:id/call", logLeadCall);
 
 router.get("/institutes", getSalesInstitutes);
 router.post("/institutes", createSalesInstitute);
+router.put("/institutes/:id", updateSalesInstitute);
 router.post("/institutes/upload-logo", upload.single("logo"), uploadInstituteLogo);
 router.post("/institutes/:id/wallet-topup", topupSalesInstituteWallet);
 router.post("/institutes/:id/ai-wallet-topup", topupSalesInstituteAiWallet);

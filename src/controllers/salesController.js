@@ -11,6 +11,7 @@ import { resolveSubscriptionEnd } from "../utils/subscription.js";
 import {
   updateInstituteWalletBalanceMetadata,
   updateInstituteAiWalletBalanceMetadata,
+  updateInstituteAiSettingsMetadata,
 } from "../utils/supabaseModel.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { logActivity } from "../utils/activityLogger.js";
@@ -568,6 +569,114 @@ export const createSalesInstitute = async (req, res) => {
   } catch (error) {
     console.error("createSalesInstitute error:", error);
     return res.status(500).json({ message: error.message || "Could not onboard tuition account" });
+  }
+};
+
+// PUT /api/sales/institutes/:id
+// Update tuition account from staff dashboard
+export const updateSalesInstitute = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition account not found" });
+    }
+
+    const {
+      name,
+      ownerName,
+      adminEmail,
+      adminPhone,
+      tuitionType,
+      walletBalance,
+      aiWalletBalance,
+      aiEnabled,
+      recordedLecturesFeatureEnabled,
+      testSeriesFeatureEnabled,
+      studentCustomFields,
+      allowedFeatures,
+      brandingEnabled,
+      logoUrl,
+    } = req.body;
+
+    if (name) institute.name = name.trim();
+    if (ownerName) institute.ownerName = ownerName.trim();
+    if (adminPhone !== undefined) institute.adminPhone = adminPhone ? adminPhone.trim() : "";
+    if (tuitionType) institute.tuitionType = tuitionType;
+    if (aiEnabled !== undefined) {
+      institute.aiEnabled = Boolean(aiEnabled);
+      updateInstituteAiSettingsMetadata(id, { aiEnabled: Boolean(aiEnabled) });
+    }
+    if (recordedLecturesFeatureEnabled !== undefined) {
+      institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+    }
+    if (testSeriesFeatureEnabled !== undefined) {
+      institute.testSeriesFeatureEnabled = Boolean(testSeriesFeatureEnabled);
+    }
+    if (studentCustomFields !== undefined && Array.isArray(studentCustomFields)) {
+      institute.studentCustomFields = studentCustomFields;
+    }
+    if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
+    if (logoUrl !== undefined) institute.logoUrl = logoUrl ? logoUrl.trim() : null;
+
+    if (allowedFeatures !== undefined && Array.isArray(allowedFeatures)) {
+      let feats = allowedFeatures.filter((f) => f !== "upi" && f !== "test_series");
+      if (institute.testSeriesFeatureEnabled) {
+        feats.push("test_series");
+      }
+      institute.allowedFeatures = feats;
+    }
+
+    if (adminEmail && adminEmail.trim().toLowerCase() !== (institute.adminEmail || "").toLowerCase()) {
+      const normalizedEmail = adminEmail.trim().toLowerCase();
+      const existingUser = await User.findOne({ email: normalizedEmail, _id: { $ne: institute.adminUser } });
+      if (existingUser) {
+        return res.status(400).json({ message: "An account with this email already exists." });
+      }
+      institute.adminEmail = normalizedEmail;
+      if (institute.adminUser) {
+        await User.findByIdAndUpdate(institute.adminUser, {
+          email: normalizedEmail,
+          name: institute.ownerName,
+        }).catch(() => {});
+      }
+    } else if (ownerName && institute.adminUser) {
+      await User.findByIdAndUpdate(institute.adminUser, { name: ownerName.trim() }).catch(() => {});
+    }
+
+    if (walletBalance !== undefined && walletBalance !== null && !isNaN(Number(walletBalance))) {
+      const newBal = Number(walletBalance);
+      institute.walletBalance = newBal;
+      updateInstituteWalletBalanceMetadata(id, newBal);
+      if (institute._id) updateInstituteWalletBalanceMetadata(institute._id, newBal);
+    }
+
+    if (aiWalletBalance !== undefined && aiWalletBalance !== null && !isNaN(Number(aiWalletBalance))) {
+      const newAiBal = Number(aiWalletBalance);
+      institute.aiWalletBalance = newAiBal;
+      updateInstituteAiWalletBalanceMetadata(id, newAiBal);
+      if (institute._id) updateInstituteAiWalletBalanceMetadata(institute._id, newAiBal);
+    }
+
+    await institute.save();
+    await clearCachePattern("institute:*").catch(() => {});
+
+    try {
+      await logActivity(
+        req.user._id || req.user.id,
+        "Tuition Updated by Staff",
+        `Staff member ${req.user.name} updated tuition "${institute.name}"`,
+        req.ip
+      );
+    } catch (_) {}
+
+    return res.json({
+      message: "Tuition account updated successfully!",
+      institute,
+    });
+  } catch (error) {
+    console.error("updateSalesInstitute error:", error);
+    return res.status(500).json({ message: error.message || "Could not update tuition account" });
   }
 };
 
