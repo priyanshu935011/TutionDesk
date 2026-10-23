@@ -14,6 +14,8 @@ import {
   createSalesInstituteRechargeLink,
   verifySalesInstituteRecharge,
   getSalesInstituteRechargeHistory,
+  createSalesSubscriptionPaymentLink,
+  verifySalesSubscriptionPayment,
   getPayoutConfig,
   updatePayoutConfig,
 } from "../controllers/salesController.js";
@@ -42,6 +44,8 @@ router.post("/institutes/:id/ai-wallet-topup", topupSalesInstituteAiWallet);
 router.post("/institutes/:id/create-recharge-link", createSalesInstituteRechargeLink);
 router.post("/institutes/:id/verify-recharge", verifySalesInstituteRecharge);
 router.get("/institutes/:id/recharge-history", getSalesInstituteRechargeHistory);
+router.post("/institutes/:id/create-subscription-payment-link", createSalesSubscriptionPaymentLink);
+router.post("/institutes/:id/verify-subscription-payment", verifySalesSubscriptionPayment);
 
 router.get("/payout-config", getPayoutConfig);
 router.put("/payout-config", updatePayoutConfig);

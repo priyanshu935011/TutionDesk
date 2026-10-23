@@ -86,6 +86,41 @@ const instituteSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    subscriptionPaymentStatus: {
+      type: String,
+      enum: ["unpaid", "pending", "paid"],
+      default: "unpaid",
+    },
+    subscriptionPaymentLink: {
+      type: String,
+      default: null,
+    },
+    subscriptionOrderId: {
+      type: String,
+      default: null,
+    },
+    subscriptionPaidAt: {
+      type: Date,
+      default: null,
+    },
+    subscriptionPaidAmount: {
+      type: Number,
+      default: 0,
+    },
+    payoutApprovalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    payoutApprovedAt: {
+      type: Date,
+      default: null,
+    },
+    payoutApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     tuitionType: {
       type: String,
       enum: ["institution", "solo"],

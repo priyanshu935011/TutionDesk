@@ -8,6 +8,7 @@ import {
   getUptimeOverview,
   renewInstituteSubscription,
   updateInstitute,
+  approveInstitutePayout,
   getAdminTeachers,
   getAdminStudents,
   updateAdminTeacher,
@@ -128,6 +129,7 @@ router.post("/institutes", createInstitute);
 router.put("/institutes/:id", updateInstitute);
 router.post("/institutes/upload-logo", upload.single("logo"), uploadInstituteLogo);
 router.post("/institutes/:id/renew", renewInstituteSubscription);
+router.post("/institutes/:id/approve-payout", approveInstitutePayout);
 router.post("/institutes/:id/wallet-topup", topupInstituteWallet);
 router.post("/institutes/:id/message-charge", updateInstituteMessageCharge);
 router.put("/institutes/:id/message-charge", updateInstituteMessageCharge);

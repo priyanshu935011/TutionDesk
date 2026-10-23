@@ -531,6 +531,13 @@ export const verifyPayment = async (req, res) => {
         institute.subscriptionStart = nextStart;
         institute.subscriptionEnd = nextEnd;
         institute.status = "active";
+        institute.subscriptionPaymentStatus = "paid";
+        institute.subscriptionPaymentLink = "";
+        institute.subscriptionPaidAt = new Date();
+        institute.subscriptionPaidAmount = Number(payment.amount || institute.subscriptionAmount || 0);
+        if (!institute.payoutApprovalStatus) {
+          institute.payoutApprovalStatus = "pending";
+        }
 
         if (!Array.isArray(institute.subscriptionHistory)) {
           institute.subscriptionHistory = [];
@@ -2155,7 +2162,7 @@ export const cronVerifyPendingRecharges = async (req, res) => {
   try {
     const pendingRecharges = await CashfreePayment.find({
       status: "pending",
-      type: { $in: ["wallet_recharge", "ai_wallet_recharge"] },
+      type: { $in: ["wallet_recharge", "ai_wallet_recharge", "subscription"] },
     });
 
     if (pendingRecharges.length === 0) {
@@ -2178,6 +2185,17 @@ export const cronVerifyPendingRecharges = async (req, res) => {
           if (result.status === "success") {
             if (payment.type === "ai_wallet_recharge") {
               await creditInstituteAiWallet(payment.institute, payment.amount);
+            } else if (payment.type === "subscription") {
+              const inst = await Institute.findById(payment.institute);
+              if (inst) {
+                inst.subscriptionPaymentStatus = "paid";
+                inst.subscriptionPaymentLink = "";
+                inst.subscriptionPaidAt = new Date();
+                inst.subscriptionPaidAmount = Number(payment.amount || inst.subscriptionAmount || 0);
+                if (!inst.payoutApprovalStatus) inst.payoutApprovalStatus = "pending";
+                inst.status = "active";
+                await inst.save();
+              }
             } else {
               await creditInstituteWallet(payment.institute, payment.amount);
             }

@@ -4,6 +4,8 @@ import mongoose, {
   updateInstitutePerMessageChargeMetadata,
   updateInstituteAiWalletBalanceMetadata,
   updateInstituteAiSettingsMetadata,
+  readInstitutesMetadata,
+  writeInstitutesMetadata,
 } from "../utils/supabaseModel.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
@@ -82,9 +84,37 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
   const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
   instObj.walletBalance = liveBal;
   instObj.perMessageCharge = liveRate;
-  instObj.createdByName = institute.createdByName || institute.staffName || "";
+  let creatorName = institute.createdByName || institute.staffName || "";
+  const creatorId = institute.createdBy || institute.salesPerson;
+  if (!creatorName && creatorId) {
+    try {
+      const staffUser = await User.findById(creatorId).select("name role");
+      if (staffUser && staffUser.name) {
+        creatorName = staffUser.name;
+        const metadata = readInstitutesMetadata();
+        metadata[instIdStr] = {
+          ...(metadata[instIdStr] || {}),
+          createdByName: creatorName,
+          staffName: creatorName,
+          createdBy: creatorId,
+          salesPerson: creatorId,
+        };
+        writeInstitutesMetadata(metadata);
+      }
+    } catch (_) {}
+  }
+  instObj.createdByName = creatorName;
   instObj.staffName = instObj.createdByName;
-  instObj.createdBy = institute.createdBy || institute.salesPerson || null;
+  instObj.createdBy = creatorId || null;
+  instObj.salesPerson = creatorId || null;
+  instObj.subscriptionPaymentStatus = institute.subscriptionPaymentStatus || (institute.subscriptionPlan === "trial" ? "paid" : "unpaid");
+  instObj.subscriptionPaymentLink = institute.subscriptionPaymentLink || null;
+  instObj.subscriptionOrderId = institute.subscriptionOrderId || null;
+  instObj.subscriptionPaidAt = institute.subscriptionPaidAt || null;
+  instObj.subscriptionPaidAmount = institute.subscriptionPaidAmount || 0;
+  instObj.payoutApprovalStatus = institute.payoutApprovalStatus || "pending";
+  instObj.payoutApprovedAt = institute.payoutApprovedAt || null;
+  instObj.payoutApprovedBy = institute.payoutApprovedBy || null;
 
   return {
     ...instObj,
@@ -1827,7 +1857,9 @@ export const getStaffDetails = async (req, res) => {
     // 1. Fetch tuition accounts added or handled by this staff
     const allInstitutes = await Institute.find({});
     const staffInstitutes = (allInstitutes || []).filter(
-      (inst) => String(inst.salesPerson || inst.addedBy || "") === String(id)
+      (inst) =>
+        String(inst.salesPerson || inst.addedBy || inst.createdBy || "") === String(id) ||
+        (inst.createdByName && (staff.name || "").trim().toLowerCase() === inst.createdByName.trim().toLowerCase())
     );
 
     // 2. Fetch leads assigned to or created by this staff
@@ -1855,6 +1887,8 @@ export const getStaffDetails = async (req, res) => {
       totalLeads: staffLeads.length,
       followUpsCount: staffLeads.filter((l) => (l.status || "").toLowerCase() === "follow_up").length,
       closedSalesCount: staffInstitutes.length,
+      approvedSalesCount: staffInstitutes.filter((inst) => inst.payoutApprovalStatus === "approved").length,
+      pendingApprovalCount: staffInstitutes.filter((inst) => (inst.subscriptionPaymentStatus === "paid" || inst.subscriptionPlan === "trial") && inst.payoutApprovalStatus !== "approved").length,
       leadsByStatus: {
         new: staffLeads.filter((l) => (l.status || "new").toLowerCase() === "new").length,
         contacted: staffLeads.filter((l) => (l.status || "").toLowerCase() === "contacted").length,
@@ -1877,6 +1911,50 @@ export const getStaffDetails = async (req, res) => {
   } catch (err) {
     console.error("getStaffDetails error:", err);
     return res.status(500).json({ message: "Could not fetch staff details." });
+  }
+};
+
+// POST /api/admin/institutes/:id/approve-payout
+export const approveInstitutePayout = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition account not found" });
+    }
+
+    institute.payoutApprovalStatus = "approved";
+    institute.payoutApprovedAt = new Date();
+    institute.payoutApprovedBy = req.user._id || req.user.id;
+    await institute.save();
+
+    // Update metadata
+    const metadata = readInstitutesMetadata();
+    if (metadata[id]) {
+      metadata[id].payoutApprovalStatus = "approved";
+      metadata[id].payoutApprovedAt = institute.payoutApprovedAt;
+      metadata[id].payoutApprovedBy = institute.payoutApprovedBy;
+      writeInstitutesMetadata(metadata);
+    }
+
+    await clearCachePattern("institute:*").catch(() => {});
+
+    try {
+      await logActivity(
+        req.user._id || req.user.id,
+        "Tuition Payout Approved",
+        `Super Admin ${req.user.name} approved payout for tuition "${institute.name}" (Plan: ${institute.subscriptionPlan}, Amount: ₹${institute.subscriptionAmount})`,
+        req.ip
+      );
+    } catch (_) {}
+
+    return res.json({
+      message: `Payout approved for "${institute.name}"! This sale will now count in staff performance stats.`,
+      institute,
+    });
+  } catch (error) {
+    console.error("approveInstitutePayout error:", error);
+    return res.status(500).json({ message: error.message || "Could not approve payout" });
   }
 };
 

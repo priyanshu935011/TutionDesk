@@ -793,6 +793,23 @@ class SupabaseDocument {
       this.max_video_storage_gb = this.maxVideoStorageGb;
       this.testSeriesFeatureEnabled = Boolean(data.test_series_feature_enabled ?? meta.testSeriesFeatureEnabled ?? this.testSeriesFeatureEnabled ?? false);
       this.test_series_feature_enabled = this.testSeriesFeatureEnabled;
+      const isTrial = (data.subscription_plan || meta.subscriptionPlan || this.subscriptionPlan) === "trial";
+      this.subscriptionPaymentStatus = data.subscription_payment_status || meta.subscriptionPaymentStatus || (isTrial ? "paid" : "unpaid");
+      this.subscription_payment_status = this.subscriptionPaymentStatus;
+      this.subscriptionPaymentLink = data.subscription_payment_link || meta.subscriptionPaymentLink || null;
+      this.subscription_payment_link = this.subscriptionPaymentLink;
+      this.subscriptionOrderId = data.subscription_order_id || meta.subscriptionOrderId || null;
+      this.subscription_order_id = this.subscriptionOrderId;
+      this.subscriptionPaidAt = data.subscription_paid_at || meta.subscriptionPaidAt || null;
+      this.subscription_paid_at = this.subscriptionPaidAt;
+      this.subscriptionPaidAmount = Number(data.subscription_paid_amount ?? meta.subscriptionPaidAmount ?? 0);
+      this.subscription_paid_amount = this.subscriptionPaidAmount;
+      this.payoutApprovalStatus = data.payout_approval_status || meta.payoutApprovalStatus || "pending";
+      this.payout_approval_status = this.payoutApprovalStatus;
+      this.payoutApprovedAt = data.payout_approved_at || meta.payoutApprovedAt || null;
+      this.payout_approved_at = this.payoutApprovedAt;
+      this.payoutApprovedBy = data.payout_approved_by || meta.payoutApprovedBy || null;
+      this.payout_approved_by = this.payoutApprovedBy;
     }
 
     if (tableName === "students" && this._id) {
@@ -1196,6 +1213,14 @@ class SupabaseDocument {
           logoUrl: this.logoUrl ?? metadata[this._id]?.logoUrl ?? null,
           maxVideoStorageGb: this.maxVideoStorageGb ?? metadata[this._id]?.maxVideoStorageGb ?? 50,
           testSeriesFeatureEnabled: this.testSeriesFeatureEnabled ?? metadata[this._id]?.testSeriesFeatureEnabled ?? false,
+          subscriptionPaymentStatus: this.subscriptionPaymentStatus ?? metadata[this._id]?.subscriptionPaymentStatus ?? "unpaid",
+          subscriptionPaymentLink: this.subscriptionPaymentLink ?? metadata[this._id]?.subscriptionPaymentLink ?? null,
+          subscriptionOrderId: this.subscriptionOrderId ?? metadata[this._id]?.subscriptionOrderId ?? null,
+          subscriptionPaidAt: this.subscriptionPaidAt ?? metadata[this._id]?.subscriptionPaidAt ?? null,
+          subscriptionPaidAmount: this.subscriptionPaidAmount ?? metadata[this._id]?.subscriptionPaidAmount ?? 0,
+          payoutApprovalStatus: this.payoutApprovalStatus ?? metadata[this._id]?.payoutApprovalStatus ?? "pending",
+          payoutApprovedAt: this.payoutApprovedAt ?? metadata[this._id]?.payoutApprovedAt ?? null,
+          payoutApprovedBy: this.payoutApprovedBy ?? metadata[this._id]?.payoutApprovedBy ?? null,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1322,6 +1347,14 @@ class SupabaseDocument {
           logoUrl: this.logoUrl ?? metadata[this._id]?.logoUrl ?? null,
           maxVideoStorageGb: this.maxVideoStorageGb ?? metadata[this._id]?.maxVideoStorageGb ?? 50,
           testSeriesFeatureEnabled: this.testSeriesFeatureEnabled ?? metadata[this._id]?.testSeriesFeatureEnabled ?? false,
+          subscriptionPaymentStatus: this.subscriptionPaymentStatus ?? metadata[this._id]?.subscriptionPaymentStatus ?? "unpaid",
+          subscriptionPaymentLink: this.subscriptionPaymentLink ?? metadata[this._id]?.subscriptionPaymentLink ?? null,
+          subscriptionOrderId: this.subscriptionOrderId ?? metadata[this._id]?.subscriptionOrderId ?? null,
+          subscriptionPaidAt: this.subscriptionPaidAt ?? metadata[this._id]?.subscriptionPaidAt ?? null,
+          subscriptionPaidAmount: this.subscriptionPaidAmount ?? metadata[this._id]?.subscriptionPaidAmount ?? 0,
+          payoutApprovalStatus: this.payoutApprovalStatus ?? metadata[this._id]?.payoutApprovalStatus ?? "pending",
+          payoutApprovedAt: this.payoutApprovedAt ?? metadata[this._id]?.payoutApprovedAt ?? null,
+          payoutApprovedBy: this.payoutApprovedBy ?? metadata[this._id]?.payoutApprovedBy ?? null,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -2614,6 +2647,16 @@ class SupabaseModel {
         brandingEnabled: doc.brandingEnabled ?? false,
         themeColor: doc.themeColor ?? "#6366f1",
         logoUrl: doc.logoUrl ?? null,
+        maxVideoStorageGb: doc.maxVideoStorageGb ?? 50,
+        testSeriesFeatureEnabled: Boolean(doc.testSeriesFeatureEnabled),
+        subscriptionPaymentStatus: doc.subscriptionPaymentStatus || (doc.subscriptionPlan === "trial" ? "paid" : "unpaid"),
+        subscriptionPaymentLink: doc.subscriptionPaymentLink || null,
+        subscriptionOrderId: doc.subscriptionOrderId || null,
+        subscriptionPaidAt: doc.subscriptionPaidAt || null,
+        subscriptionPaidAmount: doc.subscriptionPaidAmount || 0,
+        payoutApprovalStatus: doc.payoutApprovalStatus || "pending",
+        payoutApprovedAt: doc.payoutApprovedAt || null,
+        payoutApprovedBy: doc.payoutApprovedBy || null,
       };
       writeInstitutesMetadata(metadata);
     }

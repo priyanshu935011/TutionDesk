@@ -12,6 +12,8 @@ import {
   updateInstituteWalletBalanceMetadata,
   updateInstituteAiWalletBalanceMetadata,
   updateInstituteAiSettingsMetadata,
+  readInstitutesMetadata,
+  writeInstitutesMetadata,
 } from "../utils/supabaseModel.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { logActivity } from "../utils/activityLogger.js";
@@ -101,10 +103,20 @@ export const getSalesOverview = async (req, res) => {
       return (spId && spId === myId) || (creatorName && myName && creatorName === myName);
     });
 
-    // Month Sales
+    // Month Sales: Only tuitions whose payment is DONE and APPROVED by Super Admin count towards payout & performance stats!
     const monthInstitutes = myInstitutes.filter((inst) => {
-      const d = new Date(inst.subscriptionStart || inst.createdAt);
-      return d >= startOfMonth && inst.subscriptionPlan !== "trial";
+      const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
+      const isPaid = inst.subscriptionPaymentStatus === "paid";
+      const isApproved = inst.payoutApprovalStatus === "approved";
+      return d >= startOfMonth && inst.subscriptionPlan !== "trial" && isPaid && isApproved;
+    });
+
+    const pendingApprovalInstitutes = myInstitutes.filter((inst) => {
+      return inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus === "paid" && inst.payoutApprovalStatus !== "approved";
+    });
+
+    const unpaidInstitutes = myInstitutes.filter((inst) => {
+      return inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus !== "paid";
     });
 
     // Sort month institutes chronologically (earliest to latest)
@@ -114,10 +126,10 @@ export const getSalesOverview = async (req, res) => {
       return da - db;
     });
 
-    // Today Sales
+    // Today Sales (Paid & Approved)
     const todayInstitutes = myInstitutes.filter((inst) => {
-      const d = new Date(inst.subscriptionStart || inst.createdAt);
-      return d >= startOfToday && inst.subscriptionPlan !== "trial";
+      const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
+      return d >= startOfToday && inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus === "paid" && inst.payoutApprovalStatus === "approved";
     });
 
     // Calculate Month Payout & Incentives
@@ -206,6 +218,8 @@ export const getSalesOverview = async (req, res) => {
         totalIncentiveEarned,
         totalEstimatedPayout,
         salesBreakdown,
+        pendingApprovalCount: pendingApprovalInstitutes.length,
+        unpaidCount: unpaidInstitutes.length,
       },
       dailyMetrics: {
         callsToday,
@@ -435,6 +449,13 @@ export const getSalesInstitutes = async (req, res) => {
       themeColor: inst.themeColor || "#6366f1",
       logoUrl: inst.logoUrl || null,
       createdByName: inst.createdByName || inst.staffName || "",
+      subscriptionPaymentStatus: inst.subscriptionPaymentStatus || (inst.subscriptionPlan === "trial" ? "paid" : "unpaid"),
+      subscriptionPaymentLink: inst.subscriptionPaymentLink || null,
+      subscriptionOrderId: inst.subscriptionOrderId || null,
+      subscriptionPaidAt: inst.subscriptionPaidAt || null,
+      subscriptionPaidAmount: Number(inst.subscriptionPaidAmount || 0),
+      payoutApprovalStatus: inst.payoutApprovalStatus || "pending",
+      payoutApprovedAt: inst.payoutApprovedAt || null,
       createdAt: inst.createdAt,
     }));
 
@@ -519,6 +540,10 @@ export const createSalesInstitute = async (req, res) => {
       brandingEnabled: Boolean(brandingEnabled),
       themeColor: themeColor || "#6366f1",
       logoUrl: logoUrl || null,
+      subscriptionPaymentStatus: subscriptionPlan === "trial" ? "paid" : "unpaid",
+      subscriptionPaymentLink: "",
+      subscriptionOrderId: "",
+      payoutApprovalStatus: "pending",
     });
 
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
@@ -564,6 +589,9 @@ export const createSalesInstitute = async (req, res) => {
         themeColor: institute.themeColor,
         logoUrl: institute.logoUrl,
         createdByName: institute.createdByName,
+        subscriptionPaymentStatus: institute.subscriptionPaymentStatus || (subscriptionPlan === "trial" ? "paid" : "unpaid"),
+        subscriptionPaymentLink: institute.subscriptionPaymentLink || "",
+        payoutApprovalStatus: institute.payoutApprovalStatus || "pending",
       },
     });
   } catch (error) {
@@ -993,6 +1021,230 @@ export const getSalesInstituteRechargeHistory = async (req, res) => {
   } catch (error) {
     console.error("getSalesInstituteRechargeHistory error:", error);
     return res.status(500).json({ message: "Could not fetch recharge history." });
+  }
+};
+
+// POST /api/sales/institutes/:id/create-subscription-payment-link
+// Generate a Cashfree payment link for a staff-onboarded tuition subscription
+export const createSalesSubscriptionPaymentLink = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition account not found" });
+    }
+
+    if (institute.subscriptionPlan === "trial") {
+      return res.status(400).json({ message: "Trial plan tuitions do not require payment." });
+    }
+
+    if (institute.subscriptionPaymentStatus === "paid") {
+      return res.status(400).json({ message: "Tuition subscription is already paid." });
+    }
+
+    const amount = Number(institute.subscriptionAmount || 0);
+    if (amount <= 0) {
+      return res.status(400).json({ message: "Subscription amount must be greater than 0 to generate a payment link." });
+    }
+
+    let config;
+    try {
+      config = await getCashfreeConfig();
+    } catch (e) {
+      return res.status(400).json({ message: e.message || "Cashfree payment gateway is not configured." });
+    }
+
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const cfOrderId = "sub_cf_" + crypto.randomUUID().replace(/-/g, "").substring(0, 16);
+
+    let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
+    const returnUrl = `${origin}/sales?verify_sub_order=${cfOrderId}`;
+
+    const orderPayload = {
+      order_id: cfOrderId,
+      order_amount: amount,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: String(institute._id || institute.id).replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 50),
+        customer_name: (institute.ownerName || institute.name || "Tuition Admin").substring(0, 50),
+        customer_email: institute.adminEmail || "support@classtech.com",
+        customer_phone: (institute.adminPhone || "9999999999").replace(/[^0-9]/g, "").slice(-10) || "9999999999",
+      },
+      order_meta: {
+        return_url: returnUrl,
+      },
+      order_note: `Subscription (${institute.subscriptionPlan}) for ${institute.name}`,
+    };
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const response = await axios.post(`${baseUrl}/orders`, orderPayload, { headers });
+
+    const paymentLink = response.data.payments?.url || response.data.payment_link || (
+      String(environment).toLowerCase() === "production" || String(environment).toLowerCase() === "live"
+        ? `https://payments.cashfree.com/order/${response.data.payment_session_id}`
+        : `https://payments-test.cashfree.com/order/${response.data.payment_session_id}`
+    );
+
+    await CashfreePayment.create({
+      institute: institute._id || institute.id,
+      instituteName: institute.name,
+      plan: institute.subscriptionPlan,
+      amount,
+      type: "subscription",
+      status: "pending",
+      cfOrderId,
+      paymentSessionId: response.data.payment_session_id,
+      autoRenew: false,
+      cfPaymentDetails: {
+        environment,
+        returnUrl,
+        createdByStaff: req.user.name || "Sales Specialist",
+        createdByStaffId: req.user._id || req.user.id,
+      },
+    });
+
+    institute.subscriptionPaymentLink = paymentLink;
+    institute.subscriptionOrderId = cfOrderId;
+    institute.subscriptionPaymentStatus = "unpaid";
+    await institute.save();
+
+    // Update metadata if present
+    try {
+      const metadata = readInstitutesMetadata();
+      const instId = String(institute._id || institute.id);
+      if (metadata[instId]) {
+        metadata[instId].subscriptionPaymentLink = paymentLink;
+        metadata[instId].subscriptionOrderId = cfOrderId;
+        metadata[instId].subscriptionPaymentStatus = "unpaid";
+        writeInstitutesMetadata(metadata);
+      }
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      message: "Payment link generated successfully!",
+      paymentLink,
+      cfOrderId,
+      subscriptionPaymentStatus: "unpaid",
+      amount,
+    });
+  } catch (error) {
+    console.error("createSalesSubscriptionPaymentLink error:", error.response?.data || error);
+    const msg = error.response?.data?.message || error.message || "Could not generate subscription payment link";
+    return res.status(500).json({ message: msg });
+  }
+};
+
+// POST /api/sales/institutes/:id/verify-subscription-payment
+// Refresh/verify payment status for a tuition subscription
+export const verifySalesSubscriptionPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition account not found" });
+    }
+
+    if (institute.subscriptionPaymentStatus === "paid") {
+      return res.json({
+        status: "paid",
+        alreadyPaid: true,
+        message: "Subscription payment is already verified and marked as paid.",
+        payoutApprovalStatus: institute.payoutApprovalStatus || "pending",
+        subscriptionPaidAt: institute.subscriptionPaidAt,
+        subscriptionPaidAmount: institute.subscriptionPaidAmount,
+      });
+    }
+
+    const orderIdToVerify = institute.subscriptionOrderId || req.body.cfOrderId;
+    if (!orderIdToVerify) {
+      return res.status(400).json({ message: "No active payment order found for this tuition." });
+    }
+
+    const cleanOrderId = String(orderIdToVerify).trim();
+    let payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId }
+      ]
+    });
+
+    let config;
+    try {
+      config = await getCashfreeConfig();
+    } catch (e) {
+      return res.status(400).json({ message: "Cashfree gateway credentials not available." });
+    }
+
+    const result = await checkCashfreeOrderStatus(payment?.cfOrderId || cleanOrderId, config);
+
+    if (payment) {
+      payment.status = result.status;
+      if (result.rawData && Object.keys(result.rawData).length > 0) {
+        payment.cfPaymentDetails = {
+          ...(payment.cfPaymentDetails || {}),
+          ...result.rawData,
+        };
+      }
+      await payment.save();
+    }
+
+    if (result.status === "success") {
+      const paidAmount = Number(payment?.amount || institute.subscriptionAmount || 0);
+      institute.subscriptionPaymentStatus = "paid";
+      institute.subscriptionPaymentLink = ""; // Remove the link once paid!
+      institute.subscriptionPaidAt = new Date();
+      institute.subscriptionPaidAmount = paidAmount;
+      if (!institute.payoutApprovalStatus) {
+        institute.payoutApprovalStatus = "pending";
+      }
+      institute.status = "active";
+      await institute.save();
+
+      // Update metadata
+      try {
+        const metadata = readInstitutesMetadata();
+        const instId = String(institute._id || institute.id);
+        if (metadata[instId]) {
+          metadata[instId].subscriptionPaymentStatus = "paid";
+          metadata[instId].subscriptionPaymentLink = "";
+          metadata[instId].subscriptionPaidAt = institute.subscriptionPaidAt;
+          metadata[instId].subscriptionPaidAmount = paidAmount;
+          metadata[instId].payoutApprovalStatus = institute.payoutApprovalStatus;
+          writeInstitutesMetadata(metadata);
+        }
+      } catch (_) {}
+
+      return res.json({
+        status: "paid",
+        message: "Payment successfully received and verified!",
+        payoutApprovalStatus: institute.payoutApprovalStatus,
+        subscriptionPaymentStatus: "paid",
+        subscriptionPaidAt: institute.subscriptionPaidAt,
+        subscriptionPaidAmount: paidAmount,
+      });
+    }
+
+    return res.json({
+      status: result.status,
+      message: result.status === "pending"
+        ? "Payment is still pending. Once client makes the payment, click Refresh Status."
+        : `Payment status: ${result.status}`,
+      subscriptionPaymentStatus: institute.subscriptionPaymentStatus,
+      payoutApprovalStatus: institute.payoutApprovalStatus,
+    });
+  } catch (error) {
+    console.error("verifySalesSubscriptionPayment error:", error);
+    return res.status(500).json({ message: error.response?.data?.message || error.message || "Could not verify payment." });
   }
 };
 
