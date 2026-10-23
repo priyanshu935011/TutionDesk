@@ -443,6 +443,7 @@ export const getSalesInstitutes = async (req, res) => {
       aiWalletBalance: Number(inst.aiWalletBalance || 0),
       aiEnabled: Boolean(inst.aiEnabled),
       recordedLecturesFeatureEnabled: inst.recordedLecturesFeatureEnabled !== false,
+      quizFeatureEnabled: inst.quizFeatureEnabled !== undefined ? Boolean(inst.quizFeatureEnabled) : false,
       studentCustomFields: inst.studentCustomFields || [],
       allowedFeatures: inst.allowedFeatures || [],
       brandingEnabled: Boolean(inst.brandingEnabled),
@@ -535,6 +536,7 @@ export const createSalesInstitute = async (req, res) => {
       recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== false,
       maxVideoStorageGb: Number(maxVideoStorageGb !== undefined && !isNaN(Number(maxVideoStorageGb)) ? maxVideoStorageGb : 50),
       testSeriesFeatureEnabled: Boolean(testSeriesFeatureEnabled),
+      quizFeatureEnabled: false, // whenever staff adds tuition, keep quizzes disabled
       studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
       allowedFeatures: cleanedAllowedFeatures,
       brandingEnabled: Boolean(brandingEnabled),
@@ -583,6 +585,7 @@ export const createSalesInstitute = async (req, res) => {
         aiWalletBalance: institute.aiWalletBalance,
         aiEnabled: institute.aiEnabled,
         recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled,
+        quizFeatureEnabled: Boolean(institute.quizFeatureEnabled),
         studentCustomFields: institute.studentCustomFields,
         allowedFeatures: institute.allowedFeatures,
         brandingEnabled: institute.brandingEnabled,
@@ -675,6 +678,9 @@ export const updateSalesInstitute = async (req, res) => {
     }
     if (recordedLecturesFeatureEnabled !== undefined) {
       institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+    }
+    if (req.body.quizFeatureEnabled !== undefined) {
+      institute.quizFeatureEnabled = Boolean(req.body.quizFeatureEnabled);
     }
     if (testSeriesFeatureEnabled !== undefined) {
       institute.testSeriesFeatureEnabled = Boolean(testSeriesFeatureEnabled);

@@ -793,6 +793,12 @@ class SupabaseDocument {
       this.max_video_storage_gb = this.maxVideoStorageGb;
       this.testSeriesFeatureEnabled = Boolean(data.test_series_feature_enabled ?? meta.testSeriesFeatureEnabled ?? this.testSeriesFeatureEnabled ?? false);
       this.test_series_feature_enabled = this.testSeriesFeatureEnabled;
+      this.quizFeatureEnabled = data.quiz_feature_enabled !== undefined
+        ? Boolean(data.quiz_feature_enabled)
+        : (meta.quizFeatureEnabled !== undefined
+            ? Boolean(meta.quizFeatureEnabled)
+            : (this.quizFeatureEnabled !== undefined ? Boolean(this.quizFeatureEnabled) : true));
+      this.quiz_feature_enabled = this.quizFeatureEnabled;
       const isTrial = (data.subscription_plan || meta.subscriptionPlan || this.subscriptionPlan) === "trial";
       this.subscriptionPaymentStatus = data.subscription_payment_status || meta.subscriptionPaymentStatus || (isTrial ? "paid" : "unpaid");
       this.subscription_payment_status = this.subscriptionPaymentStatus;
@@ -1213,6 +1219,7 @@ class SupabaseDocument {
           logoUrl: this.logoUrl ?? metadata[this._id]?.logoUrl ?? null,
           maxVideoStorageGb: this.maxVideoStorageGb ?? metadata[this._id]?.maxVideoStorageGb ?? 50,
           testSeriesFeatureEnabled: this.testSeriesFeatureEnabled ?? metadata[this._id]?.testSeriesFeatureEnabled ?? false,
+          quizFeatureEnabled: this.quizFeatureEnabled !== undefined ? Boolean(this.quizFeatureEnabled) : (metadata[this._id]?.quizFeatureEnabled ?? true),
           subscriptionPaymentStatus: this.subscriptionPaymentStatus ?? metadata[this._id]?.subscriptionPaymentStatus ?? "unpaid",
           subscriptionPaymentLink: this.subscriptionPaymentLink ?? metadata[this._id]?.subscriptionPaymentLink ?? null,
           subscriptionOrderId: this.subscriptionOrderId ?? metadata[this._id]?.subscriptionOrderId ?? null,
@@ -1347,6 +1354,7 @@ class SupabaseDocument {
           logoUrl: this.logoUrl ?? metadata[this._id]?.logoUrl ?? null,
           maxVideoStorageGb: this.maxVideoStorageGb ?? metadata[this._id]?.maxVideoStorageGb ?? 50,
           testSeriesFeatureEnabled: this.testSeriesFeatureEnabled ?? metadata[this._id]?.testSeriesFeatureEnabled ?? false,
+          quizFeatureEnabled: this.quizFeatureEnabled !== undefined ? Boolean(this.quizFeatureEnabled) : (metadata[this._id]?.quizFeatureEnabled ?? true),
           subscriptionPaymentStatus: this.subscriptionPaymentStatus ?? metadata[this._id]?.subscriptionPaymentStatus ?? "unpaid",
           subscriptionPaymentLink: this.subscriptionPaymentLink ?? metadata[this._id]?.subscriptionPaymentLink ?? null,
           subscriptionOrderId: this.subscriptionOrderId ?? metadata[this._id]?.subscriptionOrderId ?? null,
@@ -2649,6 +2657,7 @@ class SupabaseModel {
         logoUrl: doc.logoUrl ?? null,
         maxVideoStorageGb: doc.maxVideoStorageGb ?? 50,
         testSeriesFeatureEnabled: Boolean(doc.testSeriesFeatureEnabled),
+        quizFeatureEnabled: doc.quizFeatureEnabled !== undefined ? Boolean(doc.quizFeatureEnabled) : false,
         subscriptionPaymentStatus: doc.subscriptionPaymentStatus || (doc.subscriptionPlan === "trial" ? "paid" : "unpaid"),
         subscriptionPaymentLink: doc.subscriptionPaymentLink || null,
         subscriptionOrderId: doc.subscriptionOrderId || null,
