@@ -23,6 +23,7 @@ import {
   checkCashfreeOrderStatus,
   creditInstituteWallet,
   creditInstituteAiWallet,
+  getClientBaseUrl,
 } from "./paymentController.js";
 
 // Default Criteria-Based Payout Rules
@@ -452,7 +453,9 @@ export const getSalesInstitutes = async (req, res) => {
       logoUrl: inst.logoUrl || null,
       createdByName: inst.createdByName || inst.staffName || "",
       subscriptionPaymentStatus: inst.subscriptionPaymentStatus || (inst.subscriptionPlan === "trial" ? "paid" : "unpaid"),
-      subscriptionPaymentLink: inst.subscriptionPaymentLink || null,
+      subscriptionPaymentLink: (inst.subscriptionOrderId && (!inst.subscriptionPaymentLink || inst.subscriptionPaymentLink.includes("payments.cashfree.com/order/") || inst.subscriptionPaymentLink.includes("railway.app")))
+        ? `${getClientBaseUrl(req)}/pay/${inst.subscriptionOrderId}`
+        : (inst.subscriptionPaymentLink || null),
       subscriptionOrderId: inst.subscriptionOrderId || null,
       subscriptionPaidAt: inst.subscriptionPaidAt || null,
       subscriptionPaidAmount: Number(inst.subscriptionPaidAmount || 0),
@@ -885,14 +888,8 @@ export const createSalesInstituteRechargeLink = async (req, res) => {
     const prefix = isAi ? "ai_cf_" : "wp_cf_";
     const cfOrderId = prefix + crypto.randomUUID().replace(/-/g, "").substring(0, 20);
 
-    let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
-    if (!origin.startsWith("https://") && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
-      origin = "https://classtech-v1.up.railway.app";
-    }
-
-    const returnUrl = origin.includes("localhost") || origin.includes("127.0.0.1")
-      ? `${origin}/sales-dashboard?verify_recharge=${cfOrderId}`
-      : `${origin}/dashboard?verify_recharge=${cfOrderId}`;
+    const clientBaseUrl = getClientBaseUrl(req);
+    const returnUrl = `${clientBaseUrl}/pay/${cfOrderId}?verify=true`;
 
     const orderPayload = {
       order_id: cfOrderId,
@@ -921,12 +918,7 @@ export const createSalesInstituteRechargeLink = async (req, res) => {
 
     const response = await axios.post(`${baseUrl}/orders`, orderPayload, { headers });
     const sessionId = response.data.payment_session_id;
-    const cleanEnv = String(environment || "").trim().toLowerCase();
-    const paymentLink = response.data.payments?.url ||
-      response.data.payment_link ||
-      ((cleanEnv === "production" || cleanEnv === "live")
-        ? `https://payments.cashfree.com/order/${sessionId}`
-        : `https://payments-test.cashfree.com/order/${sessionId}`);
+    const paymentLink = `${clientBaseUrl}/pay/${cfOrderId}`;
 
     const record = await CashfreePayment.create({
       institute: institute._id || institute.id,
@@ -1062,15 +1054,14 @@ export const getSalesInstituteRechargeHistory = async (req, res) => {
       type: { $in: ["wallet_recharge", "ai_wallet_recharge"] }
     }).sort({ createdAt: -1 });
 
+    const clientBaseUrl = getClientBaseUrl(req);
     const history = (payments || []).map((p) => {
       const details = p.cfPaymentDetails || {};
-      const env = details.environment || "sandbox";
-      const cleanEnv = String(env).trim().toLowerCase();
-      const fallbackLink = p.paymentSessionId
-        ? ((cleanEnv === "production" || cleanEnv === "live")
-          ? `https://payments.cashfree.com/order/${p.paymentSessionId}`
-          : `https://payments-test.cashfree.com/order/${p.paymentSessionId}`)
-        : "";
+      const rawLink = details.paymentLink || "";
+      const isBrokenLink = rawLink.includes("payments.cashfree.com/order/") || rawLink.includes("railway.app");
+      const paymentLink = (!rawLink || isBrokenLink) && p.cfOrderId
+        ? `${clientBaseUrl}/pay/${p.cfOrderId}`
+        : (rawLink || (p.cfOrderId ? `${clientBaseUrl}/pay/${p.cfOrderId}` : ""));
 
       return {
         _id: p._id || p.id,
@@ -1078,7 +1069,7 @@ export const getSalesInstituteRechargeHistory = async (req, res) => {
         amount: p.amount,
         type: p.type,
         status: p.status,
-        paymentLink: details.paymentLink || fallbackLink,
+        paymentLink,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
       };
@@ -1126,8 +1117,8 @@ export const createSalesSubscriptionPaymentLink = async (req, res) => {
 
     const cfOrderId = "sub_cf_" + crypto.randomUUID().replace(/-/g, "").substring(0, 16);
 
-    let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
-    const returnUrl = `${origin}/sales?verify_sub_order=${cfOrderId}`;
+    const clientBaseUrl = getClientBaseUrl(req);
+    const returnUrl = `${clientBaseUrl}/pay/${cfOrderId}?verify=true`;
 
     const orderPayload = {
       order_id: cfOrderId,
@@ -1153,12 +1144,7 @@ export const createSalesSubscriptionPaymentLink = async (req, res) => {
     };
 
     const response = await axios.post(`${baseUrl}/orders`, orderPayload, { headers });
-
-    const paymentLink = response.data.payments?.url || response.data.payment_link || (
-      String(environment).toLowerCase() === "production" || String(environment).toLowerCase() === "live"
-        ? `https://payments.cashfree.com/order/${response.data.payment_session_id}`
-        : `https://payments-test.cashfree.com/order/${response.data.payment_session_id}`
-    );
+    const paymentLink = `${clientBaseUrl}/pay/${cfOrderId}`;
 
     await CashfreePayment.create({
       institute: institute._id || institute.id,

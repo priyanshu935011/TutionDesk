@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import SystemSetting from "../models/SystemSetting.js";
 import { getInstituteWalletBalance, getInstituteMessageCharge, getSupabaseInstituteRow } from "../services/whatsappService.js";
-import { supabase, updateInstituteWalletBalanceMetadata, updateInstituteAiWalletBalanceMetadata } from "../utils/supabaseModel.js";
+import { supabase, updateInstituteWalletBalanceMetadata, updateInstituteAiWalletBalanceMetadata, readInstitutesMetadata, writeInstitutesMetadata } from "../utils/supabaseModel.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { sendRenewalReceiptEmail } from "../utils/mailer.js";
 import nodemailer from "nodemailer";
@@ -12,6 +12,17 @@ import { resolveSubscriptionEnd } from "../utils/subscription.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import axios from "axios";
 import crypto from "crypto";
+
+export const getClientBaseUrl = (req) => {
+  const origin = req?.headers?.origin || req?.headers?.referer;
+  if (origin && !origin.includes("railway.app")) {
+    try {
+      const u = new URL(origin);
+      return `${u.protocol}//${u.host}`;
+    } catch (_) {}
+  }
+  return process.env.CLIENT_URL || "https://classtech.in";
+};
 
 export const getCashfreeConfig = async () => {
   const setting = await SystemSetting.findOne({ key: "cashfree_settings" });
@@ -388,13 +399,10 @@ export const createPaymentSession = async (req, res) => {
 
     } else {
       // One-time payment flow
-      let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
-      if (!origin.startsWith("https://")) {
-        origin = "https://classtech-v1.up.railway.app";
-      }
-      const returnUrl = origin.includes("8080")
-        ? `${origin}/#/subscription-expired?verify_id=${cfOrderId}`
-        : `${origin}/subscription-expired?verify_id=${cfOrderId}`;
+      const clientBaseUrl = getClientBaseUrl(req);
+      const returnUrl = (req.headers.origin || "").includes("8080")
+        ? `${clientBaseUrl}/#/subscription-expired?verify_id=${cfOrderId}`
+        : `${clientBaseUrl}/pay/${cfOrderId}?verify=true`;
 
       const orderPayload = {
         order_id: cfOrderId,
@@ -430,9 +438,7 @@ export const createPaymentSession = async (req, res) => {
         type: "one_time",
         cfOrderId,
         paymentSessionId: response.data.payment_session_id,
-        paymentLink: response.data.payments?.url || response.data.payment_link || (environment === "production" 
-          ? `https://payments.cashfree.com/order/${response.data.payment_session_id}`
-          : `https://payments-test.cashfree.com/order/${response.data.payment_session_id}`),
+        paymentLink: `${clientBaseUrl}/pay/${cfOrderId}`,
         environment,
       });
     }
@@ -2036,13 +2042,10 @@ export const createWalletRechargeSession = async (req, res) => {
 
     const cfOrderId = "wallet_" + crypto.randomUUID().replace(/-/g, "");
 
-    let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
-    if (!origin.startsWith("https://")) {
-      origin = "https://classtech-v1.up.railway.app";
-    }
-    const returnUrl = origin.includes("8080")
-      ? `${origin}/#/dashboard?verify_wallet_id=${cfOrderId}`
-      : `${origin}/dashboard?verify_wallet_id=${cfOrderId}`;
+    const clientBaseUrl = getClientBaseUrl(req);
+    const returnUrl = (req.headers.origin || "").includes("8080")
+      ? `${clientBaseUrl}/#/dashboard?verify_wallet_id=${cfOrderId}`
+      : `${clientBaseUrl}/pay/${cfOrderId}?verify=true`;
 
     const orderPayload = {
       order_id: cfOrderId,
@@ -2084,9 +2087,7 @@ export const createWalletRechargeSession = async (req, res) => {
       type: "wallet_recharge",
       cfOrderId,
       paymentSessionId: response.data.payment_session_id,
-      paymentLink: response.data.payments?.url || response.data.payment_link || (environment === "production"
-        ? `https://payments.cashfree.com/order/${response.data.payment_session_id}`
-        : `https://payments-test.cashfree.com/order/${response.data.payment_session_id}`),
+      paymentLink: `${clientBaseUrl}/pay/${cfOrderId}`,
       environment,
     });
   } catch (error) {
@@ -2290,5 +2291,164 @@ export const proxyImage = async (req, res) => {
     return res.status(500).json({ message: "Could not proxy image" });
   }
 };
+
+// GET /api/public/pay/:orderId
+export const getPublicPaymentOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!orderId) {
+      return res.status(400).json({ message: "Order ID is required." });
+    }
+
+    const cleanOrderId = String(orderId).trim();
+    const payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId },
+      ],
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Payment order not found or invalid." });
+    }
+
+    let institute = null;
+    if (payment.institute) {
+      institute = await Institute.findById(payment.institute);
+    }
+
+    let config = { environment: "production" };
+    try {
+      config = await getCashfreeConfig();
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      orderId: payment.cfOrderId,
+      paymentSessionId: payment.paymentSessionId,
+      amount: Number(payment.amount),
+      plan: payment.plan || "Standard",
+      type: payment.type || "subscription",
+      status: payment.status || "pending",
+      environment: config.environment || "production",
+      institute: {
+        id: institute?._id || institute?.id || payment.institute,
+        name: payment.instituteName || institute?.name || "Tuition Center",
+        logoUrl: institute?.logoUrl || null,
+        ownerName: institute?.ownerName || "",
+        adminPhone: institute?.adminPhone || "",
+      },
+      createdAt: payment.createdAt,
+      paidAt: payment.updatedAt,
+    });
+  } catch (error) {
+    console.error("getPublicPaymentOrder error:", error);
+    return res.status(500).json({ message: "Could not retrieve payment order." });
+  }
+};
+
+// POST /api/public/pay/:orderId/verify
+export const verifyPublicPaymentOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    if (!orderId) {
+      return res.status(400).json({ message: "Order ID is required." });
+    }
+
+    const cleanOrderId = String(orderId).trim();
+    const payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId },
+      ],
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Payment order not found." });
+    }
+
+    const targetInstId = payment.institute;
+    const institute = targetInstId ? await Institute.findById(targetInstId) : null;
+
+    if (payment.status === "success" || payment.status === "paid") {
+      return res.json({
+        success: true,
+        status: "success",
+        alreadyVerified: true,
+        message: "Payment has already been received and confirmed.",
+        paymentType: payment.type,
+      });
+    }
+
+    let config;
+    try {
+      config = await getCashfreeConfig();
+    } catch (e) {
+      return res.status(400).json({ message: "Cashfree gateway credentials not available." });
+    }
+
+    const result = await checkCashfreeOrderStatus(payment.cfOrderId || cleanOrderId, config);
+    payment.status = result.status;
+    if (result.rawData && Object.keys(result.rawData).length > 0) {
+      payment.cfPaymentDetails = {
+        ...(payment.cfPaymentDetails || {}),
+        ...result.rawData,
+      };
+    }
+    await payment.save();
+
+    if (result.status === "success") {
+      if (payment.type === "ai_wallet_recharge") {
+        if (targetInstId) await creditInstituteAiWallet(targetInstId, payment.amount);
+      } else if (payment.type === "subscription") {
+        if (institute) {
+          institute.subscriptionPaymentStatus = "paid";
+          institute.subscriptionPaymentLink = "";
+          institute.subscriptionPaidAt = new Date();
+          institute.subscriptionPaidAmount = Number(payment.amount || institute.subscriptionAmount || 0);
+          if (!institute.payoutApprovalStatus) institute.payoutApprovalStatus = "pending";
+          institute.status = "active";
+          await institute.save();
+
+          try {
+            const metadata = readInstitutesMetadata();
+            const instId = String(institute._id || institute.id);
+            if (metadata[instId]) {
+              metadata[instId].subscriptionPaymentStatus = "paid";
+              metadata[instId].subscriptionPaymentLink = "";
+              metadata[instId].subscriptionPaidAt = institute.subscriptionPaidAt;
+              metadata[instId].subscriptionPaidAmount = institute.subscriptionPaidAmount;
+              metadata[instId].status = "active";
+              writeInstitutesMetadata(metadata);
+            }
+          } catch (_) {}
+        }
+      } else {
+        if (targetInstId) await creditInstituteWallet(targetInstId, payment.amount);
+      }
+
+      return res.json({
+        success: true,
+        status: "success",
+        message: "Payment successfully received and verified!",
+        paymentType: payment.type,
+      });
+    }
+
+    return res.json({
+      success: false,
+      status: result.status,
+      message: result.status === "pending"
+        ? "Payment is still processing with Cashfree. If you completed payment in your UPI app, please wait a few seconds and click Verify again."
+        : `Payment status: ${result.status}`,
+    });
+  } catch (error) {
+    console.error("verifyPublicPaymentOrder error:", error);
+    return res.status(500).json({ message: error.message || "Could not verify payment order." });
+  }
+};
+
 
 

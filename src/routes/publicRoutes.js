@@ -7,6 +7,7 @@ import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormB
 import { getPublicPages, getPublicPageBySlug } from "../controllers/pageController.js";
 import { submitContactMessage, getContactDetails } from "../controllers/contactController.js";
 import { getPublicFestivalTheme } from "../controllers/adminController.js";
+import { getPublicPaymentOrder, verifyPublicPaymentOrder } from "../controllers/paymentController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -129,5 +130,9 @@ router.get("/website-settings", async (req, res) => {
 
 // Public active festival theme configuration for Flutter app & web
 router.get("/festival-theme", getPublicFestivalTheme);
+
+// Public payment checkout & verification routes
+router.get("/pay/:orderId", getPublicPaymentOrder);
+router.post("/pay/:orderId/verify", verifyPublicPaymentOrder);
 
 export default router;

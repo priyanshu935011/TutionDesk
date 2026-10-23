@@ -36,14 +36,18 @@ import {
   createWalletRechargeSession,
   verifyWalletRecharge,
   proxyImage,
+  getPublicPaymentOrder,
+  verifyPublicPaymentOrder,
 } from "../controllers/paymentController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
-// Public webhook & proxy routes
+// Public webhook, payment checkout & proxy routes
 router.post("/webhook", handleCashfreeWebhook);
 router.get("/proxy-image", protect, proxyImage);
+router.get("/public/order/:orderId", getPublicPaymentOrder);
+router.post("/public/order/:orderId/verify", verifyPublicPaymentOrder);
 
 // Protected routes (Tuition Admin / Teachers)
 router.post("/create-session", protect, createPaymentSession);
