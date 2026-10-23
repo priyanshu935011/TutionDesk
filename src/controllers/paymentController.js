@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import SystemSetting from "../models/SystemSetting.js";
 import { getInstituteWalletBalance, getInstituteMessageCharge, getSupabaseInstituteRow } from "../services/whatsappService.js";
-import { supabase, updateInstituteWalletBalanceMetadata } from "../utils/supabaseModel.js";
+import { supabase, updateInstituteWalletBalanceMetadata, updateInstituteAiWalletBalanceMetadata } from "../utils/supabaseModel.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { sendRenewalReceiptEmail } from "../utils/mailer.js";
 import nodemailer from "nodemailer";
@@ -13,9 +13,16 @@ import WhatsappLog from "../models/WhatsappLog.js";
 import axios from "axios";
 import crypto from "crypto";
 
-const getCashfreeConfig = async () => {
+export const getCashfreeConfig = async () => {
   const setting = await SystemSetting.findOne({ key: "cashfree_settings" });
   if (!setting || !setting.value) {
+    if (process.env.CASHFREE_APP_ID && process.env.CASHFREE_SECRET_KEY) {
+      return {
+        appId: process.env.CASHFREE_APP_ID,
+        secretKey: process.env.CASHFREE_SECRET_KEY,
+        environment: process.env.CASHFREE_ENVIRONMENT || "sandbox",
+      };
+    }
     throw new Error("Cashfree API credentials are not configured by the super admin.");
   }
   let val = setting.value;
@@ -29,7 +36,7 @@ const getCashfreeConfig = async () => {
   return val; // { appId, secretKey, environment }
 };
 
-const getBaseUrl = (environment) => {
+export const getBaseUrl = (environment) => {
   const env = String(environment || "").trim().toLowerCase();
   return env === "production" || env === "live"
     ? "https://api.cashfree.com/pg"
@@ -92,6 +99,70 @@ export const creditInstituteWallet = async (instituteId, amount) => {
   updateInstituteWalletBalanceMetadata(cleanInstId, newBal);
   if (institute && institute._id) updateInstituteWalletBalanceMetadata(institute._id, newBal);
   if (institute && institute.id) updateInstituteWalletBalanceMetadata(institute.id, newBal);
+
+  // 4. Invalidate caches
+  await clearCachePattern("teacher:dashboard:*").catch(() => {});
+  await clearCachePattern("institute:*").catch(() => {});
+
+  return newBal;
+};
+
+export const creditInstituteAiWallet = async (instituteId, amount) => {
+  const addAmount = Number(amount || 0);
+  if (addAmount <= 0) return 0;
+
+  const cleanInstId = String(instituteId?._id || instituteId?.id || instituteId || "").trim();
+  if (!cleanInstId) return 0;
+
+  let institute = null;
+  try {
+    institute = await Institute.findById(cleanInstId);
+  } catch (_) {}
+  if (!institute) {
+    try {
+      institute = await Institute.findOne({
+        $or: [{ _id: cleanInstId }, { id: cleanInstId }, { adminUser: cleanInstId }]
+      });
+    } catch (_) {}
+  }
+
+  const currentBal = Number(institute?.aiWalletBalance || 0);
+  const newBal = Number((currentBal + addAmount).toFixed(2));
+
+  // 1. Direct update to Supabase 'institutes' table
+  try {
+    const sbRow = await getSupabaseInstituteRow(cleanInstId);
+    const targetSbId = sbRow?.id || cleanInstId;
+    await supabase
+      .from("institutes")
+      .update({
+        ai_wallet_balance: newBal,
+        aiwalletbalance: newBal,
+        aiWalletBalance: newBal
+      })
+      .eq("id", targetSbId);
+  } catch (sbErr) {
+    console.error("[creditInstituteAiWallet] Supabase AI balance update error:", sbErr.message);
+  }
+
+  // 2. Update Model Institute document
+  try {
+    if (institute) {
+      institute.aiWalletBalance = newBal;
+      if (typeof institute.save === "function") {
+        await institute.save();
+      }
+    } else {
+      await Institute.updateOne({ _id: cleanInstId }, { $set: { aiWalletBalance: newBal } });
+    }
+  } catch (mErr) {
+    console.error("[creditInstituteAiWallet] Institute document update error:", mErr.message);
+  }
+
+  // 3. Update metadata JSON
+  updateInstituteAiWalletBalanceMetadata(cleanInstId, newBal);
+  if (institute && institute._id) updateInstituteAiWalletBalanceMetadata(institute._id, newBal);
+  if (institute && institute.id) updateInstituteAiWalletBalanceMetadata(institute.id, newBal);
 
   // 4. Invalidate caches
   await clearCachePattern("teacher:dashboard:*").catch(() => {});
@@ -554,6 +625,9 @@ export const handleCashfreeWebhook = async (req, res) => {
           if (payment.type === "wallet_recharge") {
             // Correctly topup wallet balance
             await creditInstituteWallet(payment.institute, payment.amount);
+          } else if (payment.type === "ai_wallet_recharge") {
+            // Correctly topup AI credits balance
+            await creditInstituteAiWallet(payment.institute, payment.amount);
           } else {
             const institute = await Institute.findById(payment.institute);
             if (institute) {
@@ -2081,7 +2155,7 @@ export const cronVerifyPendingRecharges = async (req, res) => {
   try {
     const pendingRecharges = await CashfreePayment.find({
       status: "pending",
-      type: "wallet_recharge",
+      type: { $in: ["wallet_recharge", "ai_wallet_recharge"] },
     });
 
     if (pendingRecharges.length === 0) {
@@ -2102,7 +2176,11 @@ export const cronVerifyPendingRecharges = async (req, res) => {
           await payment.save();
 
           if (result.status === "success") {
-            await creditInstituteWallet(payment.institute, payment.amount);
+            if (payment.type === "ai_wallet_recharge") {
+              await creditInstituteAiWallet(payment.institute, payment.amount);
+            } else {
+              await creditInstituteWallet(payment.institute, payment.amount);
+            }
             updatedCount++;
           }
         }

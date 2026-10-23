@@ -782,6 +782,17 @@ class SupabaseDocument {
         sendCredentialsEnabled: false
       };
       this.whatsapp_settings = this.whatsappSettings;
+      this.createdBy = data.created_by || meta.createdBy || meta.salesPerson || this.createdBy || null;
+      this.salesPerson = this.createdBy;
+      this.createdByName = data.created_by_name || meta.createdByName || meta.staffName || this.createdByName || "";
+      this.staffName = this.createdByName;
+      this.brandingEnabled = meta.brandingEnabled ?? this.brandingEnabled ?? false;
+      this.themeColor = meta.themeColor ?? this.themeColor ?? "#6366f1";
+      this.logoUrl = meta.logoUrl ?? this.logoUrl ?? null;
+      this.maxVideoStorageGb = Number(data.max_video_storage_gb ?? meta.maxVideoStorageGb ?? this.maxVideoStorageGb ?? 50);
+      this.max_video_storage_gb = this.maxVideoStorageGb;
+      this.testSeriesFeatureEnabled = Boolean(data.test_series_feature_enabled ?? meta.testSeriesFeatureEnabled ?? this.testSeriesFeatureEnabled ?? false);
+      this.test_series_feature_enabled = this.testSeriesFeatureEnabled;
     }
 
     if (tableName === "students" && this._id) {
@@ -862,6 +873,9 @@ class SupabaseDocument {
       if (this.address === undefined || this.address === null || this.address === "") {
         this.address = data.address || meta.address || "";
       }
+      this.googleBusinessLink = data.google_business_link || meta.googleBusinessLink || this.googleBusinessLink || "";
+      this.addedBy = data.added_by || meta.addedBy || this.addedBy || null;
+      this.addedByName = data.added_by_name || meta.addedByName || this.addedByName || "";
     }
 
     if (tableName === "error_logs") {
@@ -1156,6 +1170,7 @@ class SupabaseDocument {
       if (this._tableName === "institutes" && this._id) {
         const metadata = readInstitutesMetadata();
         metadata[this._id] = {
+          ...(metadata[this._id] || {}),
           flexibleDueDate: this.flexibleDueDate ?? false,
           leadApiKey: this.leadApiKey ?? "",
           subscriptionHistory: this.subscriptionHistory ?? [],
@@ -1171,7 +1186,16 @@ class SupabaseDocument {
           aiQuizRate: this.aiQuizRate ?? 0.40,
           aiDoubtRate: this.aiDoubtRate ?? 0.25,
           upiId: this.upiId ?? "",
-          whatsappSettings: this.whatsappSettings ?? {}
+          whatsappSettings: this.whatsappSettings ?? {},
+          createdBy: this.createdBy ?? metadata[this._id]?.createdBy ?? null,
+          createdByName: this.createdByName ?? metadata[this._id]?.createdByName ?? "",
+          salesPerson: this.salesPerson ?? metadata[this._id]?.salesPerson ?? null,
+          staffName: this.staffName ?? metadata[this._id]?.staffName ?? "",
+          brandingEnabled: this.brandingEnabled ?? metadata[this._id]?.brandingEnabled ?? false,
+          themeColor: this.themeColor ?? metadata[this._id]?.themeColor ?? "#6366f1",
+          logoUrl: this.logoUrl ?? metadata[this._id]?.logoUrl ?? null,
+          maxVideoStorageGb: this.maxVideoStorageGb ?? metadata[this._id]?.maxVideoStorageGb ?? 50,
+          testSeriesFeatureEnabled: this.testSeriesFeatureEnabled ?? metadata[this._id]?.testSeriesFeatureEnabled ?? false,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1227,6 +1251,9 @@ class SupabaseDocument {
           state: this.state ?? metadata[this._id]?.state ?? "",
           district: this.district ?? metadata[this._id]?.district ?? "",
           address: this.address ?? metadata[this._id]?.address ?? "",
+          googleBusinessLink: this.googleBusinessLink ?? metadata[this._id]?.googleBusinessLink ?? "",
+          addedBy: this.addedBy ?? metadata[this._id]?.addedBy ?? null,
+          addedByName: this.addedByName ?? metadata[this._id]?.addedByName ?? "",
         };
         writeLeadsMetadata(metadata);
       }
@@ -1270,6 +1297,7 @@ class SupabaseDocument {
       if (this._tableName === "institutes" && this._id) {
         const metadata = readInstitutesMetadata();
         metadata[this._id] = {
+          ...(metadata[this._id] || {}),
           flexibleDueDate: this.flexibleDueDate ?? false,
           leadApiKey: this.leadApiKey ?? "",
           subscriptionHistory: this.subscriptionHistory ?? [],
@@ -1284,7 +1312,16 @@ class SupabaseDocument {
           aiVisionRate: this.aiVisionRate ?? 0.50,
           aiQuizRate: this.aiQuizRate ?? 0.40,
           aiDoubtRate: this.aiDoubtRate ?? 0.25,
-          whatsappSettings: this.whatsappSettings ?? {}
+          whatsappSettings: this.whatsappSettings ?? {},
+          createdBy: this.createdBy ?? metadata[this._id]?.createdBy ?? null,
+          createdByName: this.createdByName ?? metadata[this._id]?.createdByName ?? "",
+          salesPerson: this.salesPerson ?? metadata[this._id]?.salesPerson ?? null,
+          staffName: this.staffName ?? metadata[this._id]?.staffName ?? "",
+          brandingEnabled: this.brandingEnabled ?? metadata[this._id]?.brandingEnabled ?? false,
+          themeColor: this.themeColor ?? metadata[this._id]?.themeColor ?? "#6366f1",
+          logoUrl: this.logoUrl ?? metadata[this._id]?.logoUrl ?? null,
+          maxVideoStorageGb: this.maxVideoStorageGb ?? metadata[this._id]?.maxVideoStorageGb ?? 50,
+          testSeriesFeatureEnabled: this.testSeriesFeatureEnabled ?? metadata[this._id]?.testSeriesFeatureEnabled ?? false,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1320,6 +1357,9 @@ class SupabaseDocument {
           state: this.state ?? metadata[this._id]?.state ?? "",
           district: this.district ?? metadata[this._id]?.district ?? "",
           address: this.address ?? metadata[this._id]?.address ?? "",
+          googleBusinessLink: this.googleBusinessLink ?? metadata[this._id]?.googleBusinessLink ?? "",
+          addedBy: this.addedBy ?? metadata[this._id]?.addedBy ?? null,
+          addedByName: this.addedByName ?? metadata[this._id]?.addedByName ?? "",
         };
         writeLeadsMetadata(metadata);
       }
@@ -2566,7 +2606,14 @@ class SupabaseModel {
         studentPortalEnabled: doc.studentPortalEnabled ?? true,
         walletBalance: doc.walletBalance ?? 0,
         perMessageCharge: doc.perMessageCharge ?? 0.10,
-        whatsappSettings: doc.whatsappSettings ?? {}
+        whatsappSettings: doc.whatsappSettings ?? {},
+        createdBy: doc.createdBy || doc.salesPerson || null,
+        createdByName: doc.createdByName || doc.staffName || "",
+        salesPerson: doc.salesPerson || doc.createdBy || null,
+        staffName: doc.staffName || doc.createdByName || "",
+        brandingEnabled: doc.brandingEnabled ?? false,
+        themeColor: doc.themeColor ?? "#6366f1",
+        logoUrl: doc.logoUrl ?? null,
       };
       writeInstitutesMetadata(metadata);
     }
@@ -2600,6 +2647,9 @@ class SupabaseModel {
         state: doc.state ?? "",
         district: doc.district ?? "",
         address: doc.address ?? "",
+        googleBusinessLink: doc.googleBusinessLink ?? "",
+        addedBy: doc.addedBy ?? null,
+        addedByName: doc.addedByName ?? "",
       };
       writeLeadsMetadata(metadata);
     }

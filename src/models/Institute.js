@@ -56,6 +56,36 @@ const instituteSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    createdByName: {
+      type: String,
+      default: "",
+    },
+    salesPerson: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    staffName: {
+      type: String,
+      default: "",
+    },
+    brandingEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    themeColor: {
+      type: String,
+      default: "#6366f1",
+    },
+    logoUrl: {
+      type: String,
+      default: null,
+    },
     tuitionType: {
       type: String,
       enum: ["institution", "solo"],

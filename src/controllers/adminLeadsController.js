@@ -36,15 +36,15 @@ export const getLeadFolders = async (req, res) => {
     const [allLeads, assignments, salesStaff] = await Promise.all([
       SalesLead.find(),
       SalesTerritory.find(),
-      User.find({ role: "sales_person" }),
+      User.find({ role: { $in: ["sales_person", "sales_admin", "tech_admin", "marketing_person", "marketing_admin"] } }),
     ]);
 
-    // Exclude leads added by staff ("show leads added by staff only in staff dashboard, not on super admin")
+    // Exclude leads added by staff from master territory state folders
     const masterLeads = (allLeads || []).filter((l) => l.source !== "Self-Added");
 
     // Staff lookup map
     const staffMap = {};
-    salesStaff.forEach((s) => {
+    (salesStaff || []).forEach((s) => {
       const id = String(s._id || s.id);
       staffMap[id] = s.name;
     });
@@ -65,6 +65,38 @@ export const getLeadFolders = async (req, res) => {
         cityAssignments[`${sLower}::${cLower}`] = { salesPersonId: spId, salesPersonName: spName };
       }
     });
+
+    // Group leads uploaded by staff into separate Staff Folders
+    const staffFoldersMap = {};
+    (allLeads || []).forEach((lead) => {
+      const isStaffLead = lead.source === "Self-Added" || lead.addedBy;
+      if (isStaffLead) {
+        const staffId = String(lead.addedBy || lead.salesPerson || "unassigned");
+        const staffName = lead.addedByName || staffMap[staffId] || lead.salesPersonName || "Staff Specialist";
+        if (!staffFoldersMap[staffId]) {
+          staffFoldersMap[staffId] = {
+            staffId,
+            staffName,
+            totalLeads: 0,
+            statusCounts: {
+              new: 0,
+              contacted: 0,
+              interested: 0,
+              demo_scheduled: 0,
+              follow_up: 0,
+              converted: 0,
+              lost: 0,
+            },
+          };
+        }
+        staffFoldersMap[staffId].totalLeads++;
+        const st = (lead.status || "new").toLowerCase();
+        if (staffFoldersMap[staffId].statusCounts[st] !== undefined) {
+          staffFoldersMap[staffId].statusCounts[st]++;
+        }
+      }
+    });
+    const staffFolders = Object.values(staffFoldersMap);
 
     // Merge default states with any custom states in leads or assignments
     const stateNamesSet = new Set(Object.keys(DEFAULT_STATES_AND_DISTRICTS));
@@ -148,6 +180,7 @@ export const getLeadFolders = async (req, res) => {
 
     return res.json({
       states: folderData,
+      staffFolders,
       totalMasterLeads: masterLeads.length,
       statusCounts,
     });
@@ -160,25 +193,34 @@ export const getLeadFolders = async (req, res) => {
 // GET /api/admin/leads - Fetch master leads with state/district/search filters
 export const getAdminLeads = async (req, res) => {
   try {
-    const { state, district, city, status, search, salesPersonId } = req.query;
+    const { state, district, city, status, search, salesPersonId, staffId } = req.query;
 
     const allLeads = await SalesLead.find().sort({ updatedAt: -1, createdAt: -1 });
 
-    // Strictly exclude staff self-added leads from Super Admin leads page
-    let filtered = (allLeads || []).filter((l) => l.source !== "Self-Added");
+    let filtered = allLeads || [];
 
-    if (state) {
+    if (staffId) {
       filtered = filtered.filter(
-        (l) => (l.state || "").trim().toLowerCase() === state.trim().toLowerCase()
+        (l) => String(l.addedBy || "") === String(staffId) ||
+               (l.source === "Self-Added" && String(l.salesPerson || "") === String(staffId))
       );
-    }
+    } else {
+      // Exclude staff self-added leads when browsing state territory folders
+      filtered = filtered.filter((l) => l.source !== "Self-Added");
 
-    const targetCity = (district || city || "").trim().toLowerCase();
-    if (targetCity) {
-      filtered = filtered.filter((l) => {
-        const c = (l.district || l.city || "").trim().toLowerCase();
-        return c === targetCity;
-      });
+      if (state) {
+        filtered = filtered.filter(
+          (l) => (l.state || "").trim().toLowerCase() === state.trim().toLowerCase()
+        );
+      }
+
+      const targetCity = (district || city || "").trim().toLowerCase();
+      if (targetCity) {
+        filtered = filtered.filter((l) => {
+          const c = (l.district || l.city || "").trim().toLowerCase();
+          return c === targetCity;
+        });
+      }
     }
 
     if (status && status !== "all") {
@@ -232,12 +274,14 @@ export const createAdminLead = async (req, res) => {
       notes,
       salesPerson,
       salesPersonName,
+      googleBusinessLink,
     } = req.body;
 
-    if (!coachingName || !contactPerson || !phone) {
-      return res.status(400).json({ message: "Coaching Name, Contact Person and Phone are required." });
+    if (!coachingName || !phone) {
+      return res.status(400).json({ message: "Institute Name and Phone number are required." });
     }
 
+    const resolvedContactPerson = (contactPerson || coachingName || "Owner").trim();
     const resolvedState = (state || "").trim();
     const resolvedCity = (city || district || "").trim();
     const resolvedDistrict = (district || city || "").trim();
@@ -265,7 +309,7 @@ export const createAdminLead = async (req, res) => {
 
     const newLead = await SalesLead.create({
       coachingName: coachingName.trim(),
-      contactPerson: contactPerson.trim(),
+      contactPerson: resolvedContactPerson,
       phone: phone.trim(),
       email: email ? email.trim().toLowerCase() : "",
       state: resolvedState,
@@ -278,7 +322,9 @@ export const createAdminLead = async (req, res) => {
       source: "Super Admin",
       salesPerson: assignedSp,
       salesPersonName: assignedSpName,
-      addedBy: req.user._id || req.user.id,
+      addedBy: req.user?._id || req.user?.id || null,
+      addedByName: req.user?.name || "Super Admin",
+      googleBusinessLink: googleBusinessLink ? googleBusinessLink.trim() : "",
       notes: notes ? notes.trim() : "",
       callLogs: [],
     });

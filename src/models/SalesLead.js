@@ -74,6 +74,15 @@ const salesLeadSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    addedByName: {
+      type: String,
+      default: "",
+    },
+    googleBusinessLink: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     nextFollowUpDate: {
       type: Date,
       default: null,

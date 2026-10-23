@@ -82,6 +82,9 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
   const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
   instObj.walletBalance = liveBal;
   instObj.perMessageCharge = liveRate;
+  instObj.createdByName = institute.createdByName || institute.staffName || "";
+  instObj.staffName = instObj.createdByName;
+  instObj.createdBy = institute.createdBy || institute.salesPerson || null;
 
   return {
     ...instObj,

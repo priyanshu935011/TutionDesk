@@ -3,7 +3,10 @@ import User from "../models/User.js";
 import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
 import SystemSetting from "../models/SystemSetting.js";
+import CashfreePayment from "../models/CashfreePayment.js";
 import bcrypt from "bcryptjs";
+import axios from "axios";
+import crypto from "crypto";
 import { resolveSubscriptionEnd } from "../utils/subscription.js";
 import {
   updateInstituteWalletBalanceMetadata,
@@ -11,6 +14,13 @@ import {
 } from "../utils/supabaseModel.js";
 import { clearCachePattern } from "../utils/cache.js";
 import { logActivity } from "../utils/activityLogger.js";
+import {
+  getCashfreeConfig,
+  getBaseUrl,
+  checkCashfreeOrderStatus,
+  creditInstituteWallet,
+  creditInstituteAiWallet,
+} from "./paymentController.js";
 
 // Default Criteria-Based Payout Rules
 const DEFAULT_PAYOUT_CONFIG = {
@@ -83,8 +93,11 @@ export const getSalesOverview = async (req, res) => {
     const allInstitutes = await Institute.find();
     const myInstitutes = allInstitutes.filter((inst) => {
       if (userRole === "super_admin" || userRole === "tech_admin") return true;
-      const spId = String(inst.salesPerson || inst.createdBy || inst.adminUser || "");
-      return spId === String(userId);
+      const spId = String(inst.salesPerson || inst.createdBy || "");
+      const myId = String(userId);
+      const myName = (req.user?.name || "").trim().toLowerCase();
+      const creatorName = (inst.createdByName || inst.staffName || "").trim().toLowerCase();
+      return (spId && spId === myId) || (creatorName && myName && creatorName === myName);
     });
 
     // Month Sales
@@ -269,22 +282,24 @@ export const createSalesLead = async (req, res) => {
       status,
       notes,
       nextFollowUpDate,
+      googleBusinessLink,
     } = req.body;
 
-    if (!coachingName || !contactPerson || !phone) {
-      return res.status(400).json({ message: "Coaching Name, Contact Person and Phone are required." });
+    if (!coachingName || !phone) {
+      return res.status(400).json({ message: "Institute Name and Phone number are required." });
     }
 
+    const resolvedContactPerson = (contactPerson || coachingName || "Owner").trim();
     const resolvedState = (state || "").trim();
-    const resolvedCity = (city || district || "").trim();
     const resolvedDistrict = (district || city || "").trim();
+    const resolvedCity = (city || district || "").trim();
 
     const isSuperAdmin = req.user.role === "super_admin" || req.user.role === "tech_admin";
     const source = isSuperAdmin ? "Super Admin" : "Self-Added";
 
     const newLead = await SalesLead.create({
       coachingName: coachingName.trim(),
-      contactPerson: contactPerson.trim(),
+      contactPerson: resolvedContactPerson,
       phone: phone.trim(),
       email: email ? email.trim().toLowerCase() : "",
       state: resolvedState,
@@ -298,6 +313,8 @@ export const createSalesLead = async (req, res) => {
       salesPerson: req.user._id || req.user.id,
       salesPersonName: req.user.name || "Sales Specialist",
       addedBy: req.user._id || req.user.id,
+      addedByName: req.user.name || "Sales Specialist",
+      googleBusinessLink: googleBusinessLink ? googleBusinessLink.trim() : "",
       nextFollowUpDate: nextFollowUpDate ? new Date(nextFollowUpDate) : null,
       notes: notes ? notes.trim() : "",
       callLogs: [],
@@ -387,8 +404,11 @@ export const getSalesInstitutes = async (req, res) => {
 
     const filtered = allInstitutes.filter((inst) => {
       if (userRole === "super_admin" || userRole === "tech_admin") return true;
-      const spId = String(inst.salesPerson || inst.createdBy || inst.adminUser || "");
-      return spId === String(userId);
+      const spId = String(inst.salesPerson || inst.createdBy || "");
+      const myId = String(userId);
+      const myName = (req.user?.name || "").trim().toLowerCase();
+      const creatorName = (inst.createdByName || inst.staffName || "").trim().toLowerCase();
+      return (spId && spId === myId) || (creatorName && myName && creatorName === myName);
     });
 
     // Project ONLY basic institution info (no students, no teachers, no test marks, no credentials)
@@ -406,6 +426,14 @@ export const getSalesInstitutes = async (req, res) => {
       tuitionType: inst.tuitionType,
       walletBalance: Number(inst.walletBalance || 0),
       aiWalletBalance: Number(inst.aiWalletBalance || 0),
+      aiEnabled: Boolean(inst.aiEnabled),
+      recordedLecturesFeatureEnabled: inst.recordedLecturesFeatureEnabled !== false,
+      studentCustomFields: inst.studentCustomFields || [],
+      allowedFeatures: inst.allowedFeatures || [],
+      brandingEnabled: Boolean(inst.brandingEnabled),
+      themeColor: inst.themeColor || "#6366f1",
+      logoUrl: inst.logoUrl || null,
+      createdByName: inst.createdByName || inst.staffName || "",
       createdAt: inst.createdAt,
     }));
 
@@ -429,6 +457,17 @@ export const createSalesInstitute = async (req, res) => {
       subscriptionPlan,
       subscriptionAmount,
       tuitionType,
+      walletBalance,
+      aiWalletBalance,
+      aiEnabled,
+      recordedLecturesFeatureEnabled,
+      studentCustomFields,
+      allowedFeatures,
+      brandingEnabled,
+      themeColor,
+      logoUrl,
+      maxVideoStorageGb,
+      testSeriesFeatureEnabled,
     } = req.body;
 
     if (!name || !ownerName || !adminEmail || !adminPassword || !subscriptionPlan) {
@@ -448,6 +487,11 @@ export const createSalesInstitute = async (req, res) => {
       trialDays: 14,
     });
 
+    // Clean features: strip UPI for staff onboard
+    const cleanedAllowedFeatures = Array.isArray(allowedFeatures) && allowedFeatures.length > 0
+      ? allowedFeatures.filter((f) => f !== "upi")
+      : ["attendance", "notes", "marks", "tests", "test_series", "whatsapp", "notices"];
+
     const institute = await Institute.create({
       name: name.trim(),
       ownerName: ownerName.trim(),
@@ -461,8 +505,19 @@ export const createSalesInstitute = async (req, res) => {
       tuitionType: tuitionType || "institution",
       salesPerson: req.user._id || req.user.id,
       createdBy: req.user._id || req.user.id,
-      walletBalance: 100, // complimentary starter wallet
-      aiWalletBalance: 50, // complimentary starter AI balance
+      createdByName: req.user.name || "Sales Specialist",
+      staffName: req.user.name || "Sales Specialist",
+      walletBalance: Number(walletBalance !== undefined && !isNaN(Number(walletBalance)) ? walletBalance : 0),
+      aiWalletBalance: Number(aiWalletBalance !== undefined && !isNaN(Number(aiWalletBalance)) ? aiWalletBalance : 0),
+      aiEnabled: Boolean(aiEnabled),
+      recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== false,
+      maxVideoStorageGb: Number(maxVideoStorageGb !== undefined && !isNaN(Number(maxVideoStorageGb)) ? maxVideoStorageGb : 50),
+      testSeriesFeatureEnabled: Boolean(testSeriesFeatureEnabled),
+      studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
+      allowedFeatures: cleanedAllowedFeatures,
+      brandingEnabled: Boolean(brandingEnabled),
+      themeColor: themeColor || "#6366f1",
+      logoUrl: logoUrl || null,
     });
 
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
@@ -496,9 +551,18 @@ export const createSalesInstitute = async (req, res) => {
         adminPhone: institute.adminPhone,
         subscriptionPlan: institute.subscriptionPlan,
         subscriptionAmount: institute.subscriptionAmount,
+        tuitionType: institute.tuitionType,
         status: institute.status,
         walletBalance: institute.walletBalance,
         aiWalletBalance: institute.aiWalletBalance,
+        aiEnabled: institute.aiEnabled,
+        recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled,
+        studentCustomFields: institute.studentCustomFields,
+        allowedFeatures: institute.allowedFeatures,
+        brandingEnabled: institute.brandingEnabled,
+        themeColor: institute.themeColor,
+        logoUrl: institute.logoUrl,
+        createdByName: institute.createdByName,
       },
     });
   } catch (error) {
@@ -578,6 +642,248 @@ export const topupSalesInstituteAiWallet = async (req, res) => {
   } catch (error) {
     console.error("topupSalesInstituteAiWallet error:", error);
     return res.status(500).json({ message: "Could not top up AI credits" });
+  }
+};
+
+// POST /api/sales/institutes/:id/create-recharge-link
+export const createSalesInstituteRechargeLink = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, type } = req.body; // type: "wallet" (WhatsApp) or "ai_wallet" (AI credits)
+
+    const num = Number(amount);
+    if (isNaN(num) || num <= 0) {
+      return res.status(400).json({ message: "Valid positive amount is required." });
+    }
+
+    const institute = await Institute.findById(id);
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition account not found." });
+    }
+
+    const isAi = type === "ai_wallet" || type === "ai";
+    const paymentType = isAi ? "ai_wallet_recharge" : "wallet_recharge";
+    const planName = isAi ? "AI Credits Top Up" : "WhatsApp Wallet Recharge";
+
+    let config;
+    try {
+      config = await getCashfreeConfig();
+    } catch (cfgErr) {
+      return res.status(400).json({ message: cfgErr.message || "Cashfree payment gateway is not configured." });
+    }
+
+    const { appId, secretKey, environment } = config;
+    if (!appId || !secretKey) {
+      return res.status(400).json({ message: "Cashfree API credentials missing in system settings." });
+    }
+
+    const baseUrl = getBaseUrl(environment);
+    const prefix = isAi ? "ai_cf_" : "wp_cf_";
+    const cfOrderId = prefix + crypto.randomUUID().replace(/-/g, "").substring(0, 20);
+
+    let origin = req.headers.origin || "https://classtech-v1.up.railway.app";
+    if (!origin.startsWith("https://") && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
+      origin = "https://classtech-v1.up.railway.app";
+    }
+
+    const returnUrl = origin.includes("localhost") || origin.includes("127.0.0.1")
+      ? `${origin}/sales-dashboard?verify_recharge=${cfOrderId}`
+      : `${origin}/dashboard?verify_recharge=${cfOrderId}`;
+
+    const orderPayload = {
+      order_id: cfOrderId,
+      order_amount: num,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: String(institute._id || institute.id || "cust_" + Date.now()),
+        customer_name: institute.name || institute.ownerName || "Tuition Admin",
+        customer_email: institute.adminEmail || req.user?.email || "support@classtech.in",
+        customer_phone: (institute.adminPhone && /^[6-9]\d{9}$/.test(institute.adminPhone))
+          ? institute.adminPhone
+          : "9999999999",
+      },
+      order_meta: {
+        return_url: returnUrl,
+      },
+      order_note: `${planName} for ${institute.name}`,
+    };
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const response = await axios.post(`${baseUrl}/orders`, orderPayload, { headers });
+    const sessionId = response.data.payment_session_id;
+    const cleanEnv = String(environment || "").trim().toLowerCase();
+    const paymentLink = response.data.payments?.url ||
+      response.data.payment_link ||
+      ((cleanEnv === "production" || cleanEnv === "live")
+        ? `https://payments.cashfree.com/order/${sessionId}`
+        : `https://payments-test.cashfree.com/order/${sessionId}`);
+
+    const record = await CashfreePayment.create({
+      institute: institute._id || institute.id,
+      instituteName: institute.name,
+      plan: paymentType,
+      amount: num,
+      type: paymentType,
+      status: "pending",
+      cfOrderId,
+      paymentSessionId: sessionId,
+      autoRenew: false,
+      cfPaymentDetails: {
+        paymentLink,
+        environment,
+        createdBy: req.user._id || req.user.id,
+        createdByName: req.user.name || "Staff",
+      },
+    });
+
+    return res.status(201).json({
+      message: "Cashfree payment link generated successfully!",
+      cfOrderId,
+      paymentSessionId: sessionId,
+      paymentLink,
+      type: paymentType,
+      amount: num,
+      status: "pending",
+      recordId: record._id || record.id,
+    });
+  } catch (error) {
+    console.error("createSalesInstituteRechargeLink error:", error.response?.data || error);
+    const msg = error.response?.data?.message || error.message || "Could not generate Cashfree payment link";
+    return res.status(500).json({ message: msg });
+  }
+};
+
+// POST /api/sales/institutes/:id/verify-recharge
+export const verifySalesInstituteRecharge = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { cfOrderId } = req.body;
+
+    if (!cfOrderId) {
+      return res.status(400).json({ message: "cfOrderId is required" });
+    }
+
+    const cleanOrderId = String(cfOrderId).trim();
+    let payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId }
+      ]
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: "Recharge transaction record not found." });
+    }
+
+    const targetInstId = payment.institute || id;
+    const institute = await Institute.findById(targetInstId);
+
+    // If already marked success
+    if (payment.status === "success") {
+      const isAi = payment.type === "ai_wallet_recharge";
+      return res.json({
+        status: "success",
+        alreadyCredited: true,
+        message: "Payment is already completed and credited.",
+        walletBalance: institute?.walletBalance || 0,
+        aiWalletBalance: institute?.aiWalletBalance || 0,
+      });
+    }
+
+    let config;
+    try {
+      config = await getCashfreeConfig();
+    } catch (e) {
+      return res.status(400).json({ message: "Cashfree gateway credentials not available." });
+    }
+
+    const result = await checkCashfreeOrderStatus(payment.cfOrderId || cleanOrderId, config);
+    payment.status = result.status;
+    if (result.rawData && Object.keys(result.rawData).length > 0) {
+      payment.cfPaymentDetails = {
+        ...(payment.cfPaymentDetails || {}),
+        ...result.rawData,
+      };
+    }
+    await payment.save();
+
+    if (result.status === "success") {
+      const isAi = payment.type === "ai_wallet_recharge";
+      let updatedBalance;
+      if (isAi) {
+        updatedBalance = await creditInstituteAiWallet(targetInstId, payment.amount);
+      } else {
+        updatedBalance = await creditInstituteWallet(targetInstId, payment.amount);
+      }
+
+      const refreshedInst = await Institute.findById(targetInstId);
+      return res.json({
+        status: "success",
+        message: `Payment verified! INR ${payment.amount} added to ${isAi ? "AI Credits" : "WhatsApp Wallet"}.`,
+        walletBalance: refreshedInst?.walletBalance || 0,
+        aiWalletBalance: refreshedInst?.aiWalletBalance || 0,
+      });
+    }
+
+    return res.json({
+      status: result.status,
+      message: result.status === "pending"
+        ? "Payment is still pending. If payment was made, please click Refresh Status in a few seconds."
+        : `Payment status: ${result.status}`,
+    });
+  } catch (error) {
+    console.error("verifySalesInstituteRecharge error:", error);
+    return res.status(500).json({ message: error.response?.data?.message || error.message || "Could not verify payment." });
+  }
+};
+
+// GET /api/sales/institutes/:id/recharge-history
+export const getSalesInstituteRechargeHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cleanId = String(id).trim();
+
+    const payments = await CashfreePayment.find({
+      $or: [
+        { institute: cleanId },
+        { instituteName: cleanId }
+      ],
+      type: { $in: ["wallet_recharge", "ai_wallet_recharge"] }
+    }).sort({ createdAt: -1 });
+
+    const history = (payments || []).map((p) => {
+      const details = p.cfPaymentDetails || {};
+      const env = details.environment || "sandbox";
+      const cleanEnv = String(env).trim().toLowerCase();
+      const fallbackLink = p.paymentSessionId
+        ? ((cleanEnv === "production" || cleanEnv === "live")
+          ? `https://payments.cashfree.com/order/${p.paymentSessionId}`
+          : `https://payments-test.cashfree.com/order/${p.paymentSessionId}`)
+        : "";
+
+      return {
+        _id: p._id || p.id,
+        cfOrderId: p.cfOrderId,
+        amount: p.amount,
+        type: p.type,
+        status: p.status,
+        paymentLink: details.paymentLink || fallbackLink,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      };
+    });
+
+    return res.json(history);
+  } catch (error) {
+    console.error("getSalesInstituteRechargeHistory error:", error);
+    return res.status(500).json({ message: "Could not fetch recharge history." });
   }
 };
 

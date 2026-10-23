@@ -21,7 +21,7 @@ const cashfreePaymentSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["one_time", "recurring"],
+      enum: ["one_time", "recurring", "wallet_recharge", "ai_wallet_recharge"],
       required: true,
     },
     status: {
