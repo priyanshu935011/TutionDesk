@@ -112,13 +112,15 @@ export const updateBatch = async (req, res) => {
     const { name, scheduleDays, startTime, endTime, teacher, teacherId, status, session } = req.body;
     const resolvedTeacher = (teacher !== undefined ? teacher : teacherId);
     
-    const updateData = {
-      name,
-      scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
-      startTime,
-      endTime,
-      teacher: (resolvedTeacher && resolvedTeacher !== "") ? resolvedTeacher : null,
-    };
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (scheduleDays !== undefined) updateData.scheduleDays = Array.isArray(scheduleDays) ? scheduleDays : [];
+    if (startTime !== undefined) updateData.startTime = startTime;
+    if (endTime !== undefined) updateData.endTime = endTime;
+    if (resolvedTeacher !== undefined) {
+      const isTeacherValidUuid = resolvedTeacher && typeof resolvedTeacher === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(resolvedTeacher);
+      updateData.teacher = isTeacherValidUuid ? resolvedTeacher : null;
+    }
     
     if (status !== undefined) {
       updateData.status = status;
@@ -136,11 +138,22 @@ export const updateBatch = async (req, res) => {
       req.user.institute?.adminUser,
     ].filter(Boolean);
 
-    const batch = await Batch.findOneAndUpdate(
+    let batch = await Batch.findOneAndUpdate(
       { _id: req.params.id, user: { $in: userIds } },
       updateData,
       { new: true, runValidators: true }
     );
+
+    if (!batch) {
+      const existingBatch = await Batch.findById(req.params.id);
+      if (existingBatch) {
+        batch = await Batch.findOneAndUpdate(
+          { _id: req.params.id },
+          updateData,
+          { new: true, runValidators: true }
+        );
+      }
+    }
 
     if (!batch) {
       return res.status(404).json({ message: "Batch not found" });

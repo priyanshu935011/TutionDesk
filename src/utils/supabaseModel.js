@@ -1500,6 +1500,20 @@ class SupabaseQuery {
         dbPayload[dbKey] = val;
       }
 
+      const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+      for (const key of uuidPayloadKeys) {
+        if (key in dbPayload) {
+          if (dbPayload[key] === "" || dbPayload[key] === undefined || dbPayload[key] === "null") {
+            dbPayload[key] = null;
+          } else if (dbPayload[key] && typeof dbPayload[key] === "string") {
+            const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(dbPayload[key]);
+            if (!isUuid) {
+              dbPayload[key] = toValidUUID(dbPayload[key]);
+            }
+          }
+        }
+      }
+
       let updateQuery = this.model.supabase.from(tableName).update(dbPayload);
       updateQuery = this.model.applyFilters(updateQuery, filter);
       const { data, error } = await updateQuery.select();
@@ -1512,6 +1526,16 @@ class SupabaseQuery {
 
       const row = data?.[0];
       if (!row) return null;
+
+      if (tableName === "batches" && row && row.id) {
+        const metadata = readBatchesMetadata();
+        metadata[row.id] = {
+          ...(metadata[row.id] || {}),
+          status: row.status ?? "active",
+          session: row.session ?? metadata[row.id]?.session ?? ""
+        };
+        writeBatchesMetadata(metadata);
+      }
 
       const doc = new SupabaseDocument(tableName, row, this.model);
       await this.resolvePopulations([doc]);
@@ -3057,8 +3081,23 @@ class SupabaseModel {
     const payload = update.$set ? update.$set : update;
     const dbPayload = {};
     for (const [key, val] of Object.entries(payload)) {
+      if (key.startsWith("$")) continue;
       const dbKey = camelToSnake(key);
       dbPayload[dbKey] = val;
+    }
+
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+    for (const key of uuidPayloadKeys) {
+      if (key in dbPayload) {
+        if (dbPayload[key] === "" || dbPayload[key] === undefined || dbPayload[key] === "null") {
+          dbPayload[key] = null;
+        } else if (dbPayload[key] && typeof dbPayload[key] === "string") {
+          const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(dbPayload[key]);
+          if (!isUuid) {
+            dbPayload[key] = toValidUUID(dbPayload[key]);
+          }
+        }
+      }
     }
 
     const { data, error } = await this.supabase
@@ -3069,6 +3108,16 @@ class SupabaseModel {
       .maybeSingle();
 
     if (error) throw error;
+
+    if (this.tableName === "batches" && data && data.id) {
+      const metadata = readBatchesMetadata();
+      metadata[data.id] = {
+        ...(metadata[data.id] || {}),
+        status: data.status ?? "active",
+        session: data.session ?? metadata[data.id]?.session ?? ""
+      };
+      writeBatchesMetadata(metadata);
+    }
     return data ? new SupabaseDocument(this.tableName, data, this) : null;
   }
 
