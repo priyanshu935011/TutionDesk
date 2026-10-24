@@ -1601,16 +1601,56 @@ export const updateVideoPlaylist = async (req, res) => {
       return res.status(404).json({ message: "Playlist not found" });
     }
 
+    const oldName = playlist.name;
     const { name, description, thumbnailUrl } = req.body;
     if (name !== undefined && name.trim()) playlist.name = name.trim();
     if (description !== undefined) playlist.description = description.trim();
     if (thumbnailUrl !== undefined) playlist.thumbnailUrl = thumbnailUrl ? thumbnailUrl.trim() : "";
 
     await playlist.save();
+
+    if (name && name.trim() !== oldName) {
+      try {
+        await VideoLecture.updateMany(
+          { institute: instituteId, playlist: oldName },
+          { $set: { playlist: name.trim() } }
+        );
+      } catch (_) {}
+    }
+
     return res.json({ message: "Playlist updated successfully", playlist });
   } catch (error) {
     console.error("updateVideoPlaylist error:", error);
     return res.status(500).json({ message: "Could not update video playlist" });
+  }
+};
+
+export const deleteVideoPlaylist = async (req, res) => {
+  try {
+    const instituteId = resolveInstituteId(req);
+    const query = { _id: req.params.id };
+    if (instituteId) query.institute = instituteId;
+
+    const playlist = await VideoPlaylist.findOne(query);
+    if (!playlist) {
+      return res.status(404).json({ message: "Playlist not found" });
+    }
+
+    const playlistName = playlist.name;
+    await VideoPlaylistItem.deleteMany({ playlist: playlist._id });
+    await playlist.deleteOne();
+
+    try {
+      await VideoLecture.updateMany(
+        { institute: instituteId, playlist: playlistName },
+        { $set: { playlist: "" } }
+      );
+    } catch (_) {}
+
+    return res.json({ message: "Playlist deleted successfully" });
+  } catch (error) {
+    console.error("deleteVideoPlaylist error:", error);
+    return res.status(500).json({ message: "Could not delete video playlist" });
   }
 };
 

@@ -72,7 +72,7 @@ export const createBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot create batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher, teacherId } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, teacherId, session } = req.body;
 
     if (!name || !startTime || !endTime) {
       return res.status(400).json({ message: "Batch name and schedule time are required" });
@@ -89,6 +89,7 @@ export const createBatch = async (req, res) => {
       startTime,
       endTime,
       teacher: resolvedTeacher,
+      session: session ? String(session).trim() : "",
     });
 
     const populated = await Batch.findById(batch._id).populate("teacher", "name email");
@@ -108,7 +109,7 @@ export const updateBatch = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Teachers cannot modify batches." });
     }
 
-    const { name, scheduleDays, startTime, endTime, teacher, teacherId, status } = req.body;
+    const { name, scheduleDays, startTime, endTime, teacher, teacherId, status, session } = req.body;
     const resolvedTeacher = (teacher !== undefined ? teacher : teacherId);
     
     const updateData = {
@@ -121,6 +122,9 @@ export const updateBatch = async (req, res) => {
     
     if (status !== undefined) {
       updateData.status = status;
+    }
+    if (session !== undefined) {
+      updateData.session = String(session).trim();
     }
 
     const ownerId = req.user.institute?._id || req.user.institute || req.user._id;

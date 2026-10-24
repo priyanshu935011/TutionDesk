@@ -861,6 +861,7 @@ class SupabaseDocument {
       const metadata = readBatchesMetadata();
       const meta = metadata[this._id] || {};
       this.status = meta.status ?? this.status ?? "active";
+      this.session = this.session ?? meta.session ?? "";
     }
 
     if (tableName === "users" && this._id) {
@@ -1253,7 +1254,9 @@ class SupabaseDocument {
       if (this._tableName === "batches" && this._id) {
         const metadata = readBatchesMetadata();
         metadata[this._id] = {
-          status: this.status ?? "active"
+          ...(metadata[this._id] || {}),
+          status: this.status ?? "active",
+          session: this.session ?? metadata[this._id]?.session ?? ""
         };
         writeBatchesMetadata(metadata);
       }
@@ -1380,7 +1383,9 @@ class SupabaseDocument {
       if (this._tableName === "batches" && this._id) {
         const metadata = readBatchesMetadata();
         metadata[this._id] = {
-          status: this.status ?? "active"
+          ...(metadata[this._id] || {}),
+          status: this.status ?? "active",
+          session: this.session ?? metadata[this._id]?.session ?? ""
         };
         writeBatchesMetadata(metadata);
       }

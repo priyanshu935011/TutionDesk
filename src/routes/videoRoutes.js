@@ -15,6 +15,7 @@ import {
   getVideoPlaylists,
   createVideoPlaylist,
   updateVideoPlaylist,
+  deleteVideoPlaylist,
   getPlaylistVideos,
   createVideoRelease,
   getVideoReleases,
@@ -83,6 +84,8 @@ router.post("/playlists", createVideoPlaylist);
 router.post("/playlist", createVideoPlaylist);
 router.put("/playlists/:id", updateVideoPlaylist);
 router.put("/playlist/:id", updateVideoPlaylist);
+router.delete("/playlists/:id", deleteVideoPlaylist);
+router.delete("/playlist/:id", deleteVideoPlaylist);
 router.get("/playlists/:id/videos", getPlaylistVideos);
 router.get("/playlist/:id/videos", getPlaylistVideos);
 

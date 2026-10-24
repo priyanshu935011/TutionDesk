@@ -31,6 +31,11 @@ const batchSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    session: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     status: {
       type: String,
       enum: ["active", "archived"],
