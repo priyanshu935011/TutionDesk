@@ -11,6 +11,7 @@ import Notice from "../models/Notice.js";
 import VideoLecture from "../models/VideoLecture.js";
 import VideoRelease from "../models/VideoRelease.js";
 import VideoReleaseStudent from "../models/VideoReleaseStudent.js";
+import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
 import { supabase, readFallbackData, toValidUUID } from "../utils/supabaseModel.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -1284,6 +1285,47 @@ export const archiveStudent = async (req, res) => {
     const targetArchivedState = req.body.isArchived !== undefined ? Boolean(req.body.isArchived) : !student.isArchived;
     student.isArchived = targetArchivedState;
     student.is_archived = targetArchivedState;
+
+    if (!targetArchivedState) {
+      if (req.body.batchId) {
+        student.batch = req.body.batchId;
+        student.batches = [req.body.batchId];
+      }
+
+      // Reset student records to fresh state while keeping personal info
+      student.attendanceRecords = [];
+      student.paymentHistory = [];
+      student.dueDate = null;
+      student.joinedOn = new Date();
+
+      try {
+        await TestResult.deleteMany({ student: student._id });
+      } catch (err) {
+        console.error("Error clearing TestResult for student:", err);
+      }
+
+      try {
+        await TestSeriesAttempt.deleteMany({ student: student._id });
+      } catch (err) {
+        console.error("Error clearing TestSeriesAttempt for student:", err);
+      }
+
+      try {
+        await Note.updateMany(
+          { students: student._id },
+          { $pull: { students: student._id } }
+        );
+      } catch (err) {
+        console.error("Error clearing Note assignments for student:", err);
+      }
+
+      try {
+        await VideoReleaseStudent.deleteMany({ student: student._id });
+      } catch (err) {
+        console.error("Error clearing VideoReleaseStudent for student:", err);
+      }
+    }
+
     await student.save();
 
     if (!targetArchivedState && student.batch) {
