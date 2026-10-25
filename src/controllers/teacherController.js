@@ -132,7 +132,7 @@ export const getTeacherDashboard = async (req, res) => {
             institute = await Institute.findOne({
               $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
             }).select(
-              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiQueryRate aiVisionRate aiQuizRate aiDoubtRate"
+              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee aiQueryRate aiVisionRate aiQuizRate aiDoubtRate"
             );
           } catch (_) {}
         }
@@ -158,6 +158,8 @@ export const getTeacherDashboard = async (req, res) => {
         institute.aiEnabled = aiDetails.aiEnabled;
         institute.aiStudentEnabled = aiDetails.aiStudentEnabled;
         institute.aiWalletBalance = aiDetails.aiWalletBalance;
+        institute.aiCreditsPerRupee = aiDetails.aiCreditsPerRupee;
+        institute.aiWalletCredits = aiDetails.aiWalletCredits;
         institute.aiRates = aiDetails.rates;
         institute.aiQueryRate = aiDetails.rates.query;
         institute.aiVisionRate = aiDetails.rates.vision;

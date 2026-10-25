@@ -298,6 +298,9 @@ export const getAiStatus = async (req, res) => {
       aiEnabled: details.aiEnabled,
       aiStudentEnabled: details.aiStudentEnabled,
       aiWalletBalance: details.aiWalletBalance,
+      aiCreditsPerRupee: details.aiCreditsPerRupee,
+      aiWalletCredits: details.aiWalletCredits,
+      aiCredits: details.aiWalletCredits,
       isLocked,
       teacherAiDisabled,
       aiAccessEnabled: req.user.aiAccessEnabled !== false,
@@ -813,10 +816,16 @@ export const chatWithAi = async (req, res) => {
       creditsDeducted: replyPayload.creditsDeducted || 0,
     }).catch(() => null);
 
+    const remainingBal = replyPayload.remainingBalance !== undefined ? replyPayload.remainingBalance : details.aiWalletBalance;
+    const creditsPerRupee = Number(details.aiCreditsPerRupee || 10);
+    const remainingCredits = Math.round(remainingBal * creditsPerRupee);
+
     return res.json({
       success: true,
       taskType,
       ...replyPayload,
+      remainingCredits,
+      aiCreditsPerRupee: creditsPerRupee,
     });
   } catch (error) {
     console.error("chatWithAi error:", error);

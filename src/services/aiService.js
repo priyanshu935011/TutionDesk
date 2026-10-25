@@ -139,6 +139,10 @@ export async function getInstituteAiDetails(instituteId) {
   const rawBal = sbRow?.ai_wallet_balance ?? mongoInst?.aiWalletBalance ?? 0;
   const aiWalletBalance = Number(rawBal || 0);
 
+  const rawCreditsPerRupee = sbRow?.ai_credits_per_rupee ?? mongoInst?.aiCreditsPerRupee ?? 10;
+  const aiCreditsPerRupee = Number(rawCreditsPerRupee || 10);
+  const aiWalletCredits = Math.round(aiWalletBalance * aiCreditsPerRupee);
+
   const rates = {
     query: Number(
       sbRow?.ai_query_rate ??
@@ -169,6 +173,8 @@ export async function getInstituteAiDetails(instituteId) {
     aiEnabled: Boolean(aiEnabled),
     aiStudentEnabled: Boolean(aiStudentEnabled),
     aiWalletBalance,
+    aiCreditsPerRupee,
+    aiWalletCredits,
     rates,
     mongoInst,
     sbRow,

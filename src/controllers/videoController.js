@@ -239,7 +239,8 @@ export const initVideoUpload = async (req, res) => {
       } catch (_) {}
     }
 
-    if (req.user?.role !== "super_admin" && institute && institute.recordedLecturesFeatureEnabled === false) {
+    const isRecordedDisabled = institute && (institute.recorded_lectures_feature_enabled === false || institute.recordedLecturesFeatureEnabled === false);
+    if (req.user?.role !== "super_admin" && isRecordedDisabled) {
       return res.status(403).json({ message: "Recorded Lectures feature is disabled for this institute" });
     }
 
@@ -1163,7 +1164,13 @@ export const getTeacherVideos = async (req, res) => {
     };
 
     const isReleaseEnabled = checkReleaseVideosEnabled(institute);
-    const isRecordedEnabled = institute ? institute.recordedLecturesFeatureEnabled !== false : true;
+    const isRecordedEnabled = institute 
+      ? (institute.recorded_lectures_feature_enabled !== undefined 
+          ? Boolean(institute.recorded_lectures_feature_enabled) 
+          : (institute.recordedLecturesFeatureEnabled !== undefined 
+              ? Boolean(institute.recordedLecturesFeatureEnabled) 
+              : true))
+      : true;
 
     return res.json({
       featureEnabled: isRecordedEnabled,

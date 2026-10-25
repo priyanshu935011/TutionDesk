@@ -138,6 +138,10 @@ const instituteSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    recorded_lectures_feature_enabled: {
+      type: Boolean,
+      default: true,
+    },
     releaseVideosFeatureEnabled: {
       type: Boolean,
       default: true,
@@ -334,6 +338,10 @@ const instituteSchema = new mongoose.Schema(
     aiWalletBalance: {
       type: Number,
       default: 0,
+    },
+    aiCreditsPerRupee: {
+      type: Number,
+      default: 10,
     },
     aiQueryRate: {
       type: Number,

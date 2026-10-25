@@ -762,6 +762,9 @@ class SupabaseDocument {
       }
       this.ai_wallet_balance = this.aiWalletBalance;
 
+      this.aiCreditsPerRupee = Number(data.ai_credits_per_rupee ?? data.aiCreditsPerRupee ?? meta.aiCreditsPerRupee ?? this.aiCreditsPerRupee ?? 10);
+      this.ai_credits_per_rupee = this.aiCreditsPerRupee;
+
       this.aiQueryRate = Number(data.ai_query_rate ?? meta.aiQueryRate ?? this.aiQueryRate ?? 0.20);
       this.ai_query_rate = this.aiQueryRate;
       this.aiVisionRate = Number(data.ai_vision_rate ?? meta.aiVisionRate ?? this.aiVisionRate ?? 0.50);
@@ -1208,6 +1211,7 @@ class SupabaseDocument {
           aiEnabled: this.aiEnabled ?? false,
           aiStudentEnabled: this.aiStudentEnabled ?? false,
           aiWalletBalance: this.aiWalletBalance ?? 0,
+          aiCreditsPerRupee: this.aiCreditsPerRupee ?? 10,
           aiQueryRate: this.aiQueryRate ?? 0.20,
           aiVisionRate: this.aiVisionRate ?? 0.50,
           aiQuizRate: this.aiQuizRate ?? 0.40,
@@ -1346,6 +1350,7 @@ class SupabaseDocument {
           aiEnabled: this.aiEnabled ?? false,
           aiStudentEnabled: this.aiStudentEnabled ?? false,
           aiWalletBalance: this.aiWalletBalance ?? 0,
+          aiCreditsPerRupee: this.aiCreditsPerRupee ?? 10,
           aiQueryRate: this.aiQueryRate ?? 0.20,
           aiVisionRate: this.aiVisionRate ?? 0.50,
           aiQuizRate: this.aiQuizRate ?? 0.40,

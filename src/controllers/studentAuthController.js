@@ -192,7 +192,7 @@ export const studentLogin = async (req, res) => {
     }
 
     const matchedStudent = finalMatchedStudents[0];
-    const activeInstitute = await resolveInstituteForUserId(matchedStudent.user, "name brandingEnabled logoUrl themeColor aiStudentEnabled aiWalletBalance");
+    const activeInstitute = await resolveInstituteForUserId(matchedStudent.user, "name brandingEnabled logoUrl themeColor aiStudentEnabled aiWalletBalance aiCreditsPerRupee");
 
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
 
@@ -236,6 +236,8 @@ export const studentLogin = async (req, res) => {
               themeColor: (activeInstitute.brandingEnabled !== false) ? (activeInstitute.themeColor || "#4C3FBE") : "#4C3FBE",
               aiStudentEnabled: activeInstitute.aiStudentEnabled === true,
               aiWalletBalance: activeInstitute.aiWalletBalance || 0,
+              aiCreditsPerRupee: activeInstitute.aiCreditsPerRupee || 10,
+              aiWalletCredits: Math.round((activeInstitute.aiWalletBalance || 0) * (activeInstitute.aiCreditsPerRupee || 10)),
             }
           : null,
       },

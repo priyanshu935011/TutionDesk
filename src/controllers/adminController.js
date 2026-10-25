@@ -85,6 +85,7 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
   const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
   instObj.walletBalance = liveBal;
   instObj.aiWalletBalance = Number(institute.aiWalletBalance || 0);
+  instObj.aiCreditsPerRupee = Number(institute.aiCreditsPerRupee || 10);
   instObj.perMessageCharge = liveRate;
   let creatorName = institute.createdByName || institute.staffName || "";
   const creatorId = institute.createdBy || institute.salesPerson;
@@ -397,6 +398,7 @@ export const createInstitute = async (req, res) => {
       aiEnabled,
       aiStudentEnabled,
       aiWalletBalance,
+      aiCreditsPerRupee,
     } = req.body;
 
     if (
@@ -447,7 +449,8 @@ export const createInstitute = async (req, res) => {
       studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
       studentPortalEnabled: studentPortalEnabled !== false,
       quizFeatureEnabled: quizFeatureEnabled !== false,
-      recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== false,
+      recordedLecturesFeatureEnabled: (req.body.recorded_lectures_feature_enabled !== undefined ? Boolean(req.body.recorded_lectures_feature_enabled) : recordedLecturesFeatureEnabled !== false),
+      recorded_lectures_feature_enabled: (req.body.recorded_lectures_feature_enabled !== undefined ? Boolean(req.body.recorded_lectures_feature_enabled) : recordedLecturesFeatureEnabled !== false),
       releaseVideosFeatureEnabled: releaseVideosFeatureEnabled !== false,
       maxVideoStorageGb: maxVideoStorageGb !== undefined ? Number(maxVideoStorageGb) : 50,
       maxLeadFileSizeMb: Number(maxLeadFileSizeMb || 10),
@@ -461,6 +464,7 @@ export const createInstitute = async (req, res) => {
       aiEnabled: Boolean(aiEnabled),
       aiStudentEnabled: Boolean(aiStudentEnabled),
       aiWalletBalance: Number(aiWalletBalance || 0),
+      aiCreditsPerRupee: Number(aiCreditsPerRupee || 10),
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -542,6 +546,7 @@ export const updateInstitute = async (req, res) => {
       allowedTestSeries,
       aiStudentEnabled,
       aiWalletBalance,
+      aiCreditsPerRupee,
       aiQueryRate,
       aiVisionRate,
       aiQuizRate,
@@ -572,7 +577,13 @@ export const updateInstitute = async (req, res) => {
     if (maxLeadFileSizeMb !== undefined) institute.maxLeadFileSizeMb = Number(maxLeadFileSizeMb);
     if (maxVideoStorageGb !== undefined) institute.maxVideoStorageGb = Number(maxVideoStorageGb);
     if (quizFeatureEnabled !== undefined) institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
-    if (recordedLecturesFeatureEnabled !== undefined) institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+    if (recordedLecturesFeatureEnabled !== undefined) {
+      institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+      institute.recorded_lectures_feature_enabled = Boolean(recordedLecturesFeatureEnabled);
+    } else if (req.body.recorded_lectures_feature_enabled !== undefined) {
+      institute.recordedLecturesFeatureEnabled = Boolean(req.body.recorded_lectures_feature_enabled);
+      institute.recorded_lectures_feature_enabled = Boolean(req.body.recorded_lectures_feature_enabled);
+    }
     if (releaseVideosFeatureEnabled !== undefined) institute.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
     if (brandingEnabled !== undefined) institute.brandingEnabled = Boolean(brandingEnabled);
     if (logoUrl !== undefined) institute.logoUrl = logoUrl;
@@ -652,6 +663,19 @@ export const updateInstitute = async (req, res) => {
         }
       } catch (sbErr) {
         console.error("[Supabase updateInstitute AI wallet error]", sbErr.message);
+      }
+    }
+
+    if (aiCreditsPerRupee !== undefined && aiCreditsPerRupee !== null && !isNaN(Number(aiCreditsPerRupee))) {
+      const newCreditsPerRupee = Number(aiCreditsPerRupee);
+      institute.aiCreditsPerRupee = newCreditsPerRupee;
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ ai_credits_per_rupee: newCreditsPerRupee }).eq("id", sbRow.id);
+        }
+      } catch (sbErr) {
+        console.error("[Supabase updateInstitute AI credits per rupee error]", sbErr.message);
       }
     }
 

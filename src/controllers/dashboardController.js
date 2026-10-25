@@ -12,7 +12,7 @@ export const getDashboard = async (req, res) => {
     if (instIdStr) {
       institute = await Institute.findById(instIdStr)
         .select(
-          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
         );
     }
 
@@ -117,9 +117,20 @@ export const getDashboard = async (req, res) => {
       ? Math.round((summary.totalPresent / summary.totalAttendanceMarked) * 100)
       : 0;
 
+    let instObj = institute ? (institute.toObject ? institute.toObject() : { ...institute }) : {};
+    if (institute) {
+      const isRecEnabled = (instObj.recorded_lectures_feature_enabled !== undefined)
+        ? Boolean(instObj.recorded_lectures_feature_enabled)
+        : (instObj.recordedLecturesFeatureEnabled !== undefined
+            ? Boolean(instObj.recordedLecturesFeatureEnabled)
+            : true);
+      instObj.recorded_lectures_feature_enabled = isRecEnabled;
+      instObj.recordedLecturesFeatureEnabled = isRecEnabled;
+    }
+
     return res.json({
       summary,
-      institute: institute || {},
+      institute: instObj,
       user: {
         role: req.user.role,
       },
