@@ -1576,9 +1576,10 @@ Rules:
 - Title must be exactly: "${topic}". Do NOT output prompt instructions or request text.
 - STRICT BRANDING RULE: Do NOT mention "ClassTech", "classtech.in", or any corporate/app branding anywhere.
 - Format text continuously without artificial line breaks in the middle of sentences. Paragraphs and bullet points must flow as full continuous sentences.
-- STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art or box characters (┌, ─, │, ├, etc.). Use clean Markdown tables or arrow process steps.
+- STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art or box characters (┌, ─, │, ├, etc.) or tree branch characters (├──, └──).
 - COMPARISONS & FLOWCHARTS: When comparing concepts or illustrating categories/types, ALWAYS use a clean standard Markdown table (e.g. | Column 1 | Column 2 | with | --- | --- |) or clean bulleted process steps with arrows (e.g. Step 1 ➔ Step 2 ➔ Step 3).
-- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed.
+- UNICODE SYMBOLS: Always use standard Unicode symbols: →, ➔, ~, ≈, °, µm, ×, ±. NEVER write raw LaTeX commands like \\rightarrow, \\to, or \\sim.
+- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). If using Wikimedia Commons, ALWAYS use standard 800px thumbnail URLs (e.g. https://upload.wikimedia.org/wikipedia/commons/thumb/X/XX/Filename.jpg/800px-Filename.jpg) or Unsplash educational images (https://images.unsplash.com/...). Never use raw original Wikimedia file URLs. Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed.
 - Structure with clear sections:
   # ${topic}
   ## 1. Overview & Key Objectives
@@ -1595,7 +1596,7 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
   try {
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata.`,
+      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata. Use standard Unicode symbols (→, ~, °, ×, ±) instead of raw LaTeX backslash commands.`,
       temperature: 0.3,
     });
 
@@ -1611,6 +1612,32 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
       // Remove any prompt echoes if LLM repeated the prompt
       content = content.replace(/^Generate\s+Comprehensive\s+study\s+notes\s+on\s+topic:.*?\n+/i, '');
       content = content.replace(/^#\s*Generate\s+Comprehensive\s+study\s+notes\s+on\s+topic:.*?\n+/i, '');
+
+      // Sanitize LaTeX artifacts into clean readable Unicode
+      content = content
+        .replace(/\\rightarrow/g, '→')
+        .replace(/\\to\b/g, '→')
+        .replace(/\\leftarrow/g, '←')
+        .replace(/\\leftrightarrow/g, '↔')
+        .replace(/\\implies/g, '⇒')
+        .replace(/\\sim\b/g, '~')
+        .replace(/\\approx/g, '≈')
+        .replace(/\\pm\b/g, '±')
+        .replace(/\\times\b/g, '×')
+        .replace(/\\mu m\b/g, 'µm')
+        .replace(/\\mu\b/g, 'µ')
+        .replace(/\\degree/g, '°');
+
+      // Sanitize Wikimedia URLs to 800px thumbnail format to adhere to Wikimedia policy (https://w.wiki/GHai)
+      content = content.replace(
+        /https?:\/\/upload\.wikimedia\.org\/wikipedia\/commons\/(?:thumb\/)?([a-f0-9]\/[a-f0-9]{2})\/([^\/\)\s]+)(?:\/[^\)\s]+)?/gi,
+        (match, hash, filename) => {
+          const cleanFilename = filename.replace(/^\d+px-/, '');
+          const isSvg = cleanFilename.toLowerCase().endsWith('.svg');
+          const thumbName = isSvg ? `800px-${cleanFilename}.png` : `800px-${cleanFilename}`;
+          return `https://upload.wikimedia.org/wikipedia/commons/thumb/${hash}/${cleanFilename}/${thumbName}`;
+        }
+      );
 
       // Ensure it starts with # Topic
       if (!content.startsWith('#')) {
