@@ -1552,6 +1552,8 @@ User prompt: "${promptOrTopic}". Target Level: "${targetClass}".
 
 Create comprehensive, structured chapter revision notes.
 Rules:
+- STRICT BRANDING RULE: Do NOT mention "ClassTech", "classtech.in", or any corporate/app branding anywhere in the title, topic, or content. The notes must be 100% clean and unbranded academic notes.
+- Format text continuously without artificial line breaks in the middle of sentences. Paragraphs and bullet points must flow as full continuous sentences.
 - Structure with clear sections:
   1. Overview & Key Objectives
   2. Core Definitions & Principles
