@@ -185,6 +185,7 @@ export const updateBatch = async (req, res) => {
 
         if (!hasOtherActiveBatch) {
           student.isArchived = true;
+          student.is_archived = true;
           await student.save();
         }
       }
@@ -194,8 +195,9 @@ export const updateBatch = async (req, res) => {
         $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
       });
       for (const student of studentsInBatch) {
-        if (student.isArchived) {
+        if (student.isArchived || student.is_archived) {
           student.isArchived = false;
+          student.is_archived = false;
           await student.save();
         }
       }
