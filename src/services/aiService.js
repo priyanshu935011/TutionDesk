@@ -1547,55 +1547,92 @@ export async function generateStructuredNotes(
   targetClass = "Class 10",
   history = [],
 ) {
-  const prompt = `You are a master educator creating high-quality, structured study and revision notes.
-User prompt: "${promptOrTopic}". Target Level: "${targetClass}".
+  let topic = (promptOrTopic || "Revision Notes").trim();
+  const matchQuote = topic.match(/topic:\s*["']([^"']+)["']/i);
+  if (matchQuote && matchQuote[1]) {
+    topic = matchQuote[1].trim();
+  } else {
+    const matchOn = topic.match(/(?:notes\s+on|about)\s+([A-Za-z0-9\s\-]+?)(?:\s+for|\.|$)/i);
+    if (matchOn && matchOn[1]) {
+      topic = matchOn[1].trim();
+    } else if (topic.toLowerCase().startsWith("generate ")) {
+      topic = topic
+        .replace(/^Generate\s+(?:comprehensive\s+|detailed\s+|quick\s+)?(?:study\s+)?notes\s+(?:on\s+topic:\s*|on\s+|about\s+)?/i, "")
+        .replace(/\s+for\s+Class\s+\d+.*$/i, "")
+        .replace(/["']/g, "")
+        .trim();
+    }
+  }
+  if (!topic || topic.length > 60) {
+    topic = topic ? topic.substring(0, 60).trim() : "Revision Notes";
+  }
 
-Create comprehensive, structured chapter revision notes.
+  const prompt = `You are a master educator creating high-quality, comprehensive study and revision notes for students.
+Topic: "${topic}"
+Target Grade / Level: "${targetClass}"
+
+Create comprehensive, structured chapter revision notes on "${topic}".
 Rules:
-- STRICT BRANDING RULE: Do NOT mention "ClassTech", "classtech.in", or any corporate/app branding anywhere in the title, topic, or content. The notes must be 100% clean and unbranded academic notes.
+- Title must be exactly: "${topic}". Do NOT output prompt instructions or request text.
+- STRICT BRANDING RULE: Do NOT mention "ClassTech", "classtech.in", or any corporate/app branding anywhere.
 - Format text continuously without artificial line breaks in the middle of sentences. Paragraphs and bullet points must flow as full continuous sentences.
-- STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art, Unicode box-drawing characters (such as ┌, ─, │, ├, └, ┘, +---+, etc.), or text-drawn flowcharts/diagrams. These break completely and become ugly and misaligned on mobile screens.
+- STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art or box characters (┌, ─, │, ├, etc.). Use clean Markdown tables or arrow process steps.
 - COMPARISONS & FLOWCHARTS: When comparing concepts or illustrating categories/types, ALWAYS use a clean standard Markdown table (e.g. | Column 1 | Column 2 | with | --- | --- |) or clean bulleted process steps with arrows (e.g. Step 1 ➔ Step 2 ➔ Step 3).
-- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed. Do NOT include generic or irrelevant images.
+- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed.
 - Structure with clear sections:
-  1. Overview & Key Objectives
-  2. Core Definitions & Principles
-  3. Important Formulas & Equations (Use clean Unicode symbols: ∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ. Do NOT use raw $ or $$ signs)
-  4. Step-by-Step Concepts & Explanations
-  5. Solved Illustrations / Key Examples
-  6. Common Pitfalls & Exam Tips
-  7. Chapter Summary
-- Use clean headers with '#' or '##' and bullet points '•'.
-- Provide real, deeply educational content (not a placeholder).
+  # ${topic}
+  ## 1. Overview & Key Objectives
+  ## 2. Core Definitions & Foundational Principles
+  ## 3. Important Concepts & Detailed Explanations
+  ## 4. Key Classifications / Formulas / Comparisons
+  ## 5. Solved Illustrations & Key Examples
+  ## 6. Exam Tips, Common Mistakes & High-Yield Points
+  ## 7. Chapter Summary
+- Provide real, in-depth, deeply educational content explaining "${topic}" thoroughly.
 
-Return ONLY valid JSON:
-{
-  "title": "Clean Short Topic Name",
-  "topic": "Clean Short Topic Name",
-  "category": "Chapter Notes",
-  "notesText": "Full formatted notes content with headers, bullet points, tables and examples."
-}`;
+Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
 
   try {
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: "You are an expert teacher creating study notes. Always return strictly valid JSON.",
+      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata.`,
       temperature: 0.3,
-      history,
     });
-    const parsed = extractJsonFromText(raw);
-    if (parsed && parsed.notesText) {
-      return parsed;
+
+    if (raw && raw.trim().length > 30) {
+      let content = raw.trim();
+
+      // Check if wrapped in JSON codeblock
+      const parsed = extractJsonFromText(content);
+      if (parsed && parsed.notesText) {
+        content = parsed.notesText;
+      }
+
+      // Remove any prompt echoes if LLM repeated the prompt
+      content = content.replace(/^Generate\s+Comprehensive\s+study\s+notes\s+on\s+topic:.*?\n+/i, '');
+      content = content.replace(/^#\s*Generate\s+Comprehensive\s+study\s+notes\s+on\s+topic:.*?\n+/i, '');
+
+      // Ensure it starts with # Topic
+      if (!content.startsWith('#')) {
+        content = `# ${topic}\n\n` + content;
+      }
+
+      return {
+        title: `${topic} - ${targetClass} Notes`,
+        topic: topic,
+        category: "Chapter Notes",
+        notesText: content,
+      };
     }
   } catch (err) {
     console.error("generateStructuredNotes error:", err.message);
   }
 
   return {
-    title: promptOrTopic || "Revision Notes",
-    topic: promptOrTopic || "Revision Notes",
+    title: `${topic} - ${targetClass} Notes`,
+    topic: topic,
     category: "Chapter Notes",
-    notesText: `# ${promptOrTopic || "Study Notes"}\n\n## Overview\nComprehensive revision notes and key concepts.\n\n• Key Definitions & Core Ideas\n• Important Principles\n• Formulae & Problem-Solving Guidelines\n• Key Exam Takeaways`,
+    notesText: `# ${topic}\n\n## 1. Overview & Key Objectives\nComprehensive revision notes and foundational concepts for ${topic} (${targetClass}).\n\n## 2. Core Definitions & Principles\n• Fundamental principles and definitions of ${topic}.\n• Key conceptual frameworks and core laws.\n\n## 3. Important Concepts & Detailed Analysis\n• Critical components and operational mechanisms.\n• Detailed analysis and comparative distinctions.\n\n## 4. Key Takeaways & Exam Summary\n• High-yield exam points, formula review, and practical takeaways.`,
   };
 }
 

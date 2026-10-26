@@ -610,7 +610,29 @@ export const chatWithAi = async (req, res) => {
         const billing = await deductAiCredits(instituteId, "query");
         const availableBatches = await getInstituteBatches(req, instituteId);
         const targetClass = req.body.targetClass || req.body.classLevel || "Class 10";
-        const notesData = await generateStructuredNotes(message || "Revision Notes", targetClass, history);
+
+        // Extract clean topic name from body or message
+        let topic = (req.body.topic || "").trim();
+        if (!topic || topic.toLowerCase().startsWith("generate ")) {
+          const matchQuote = (message || "").match(/topic:\s*["']([^"']+)["']/i);
+          if (matchQuote && matchQuote[1]) {
+            topic = matchQuote[1].trim();
+          } else {
+            const matchOn = (message || "").match(/(?:notes\s+on|about)\s+([A-Za-z0-9\s\-]+?)(?:\s+for|\.|$)/i);
+            if (matchOn && matchOn[1]) {
+              topic = matchOn[1].trim();
+            } else {
+              topic = (message || "")
+                .replace(/^Generate\s+(?:comprehensive\s+|detailed\s+|quick\s+)?(?:study\s+)?notes\s+(?:on\s+topic:\s*|on\s+|about\s+)?/i, "")
+                .replace(/\s+for\s+Class\s+\d+.*$/i, "")
+                .replace(/["']/g, "")
+                .trim();
+            }
+          }
+        }
+        topic = (topic || "Study Notes").trim();
+
+        const notesData = await generateStructuredNotes(topic, targetClass);
 
         const payloadData = {
           ...notesData,
