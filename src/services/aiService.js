@@ -1554,6 +1554,9 @@ Create comprehensive, structured chapter revision notes.
 Rules:
 - STRICT BRANDING RULE: Do NOT mention "ClassTech", "classtech.in", or any corporate/app branding anywhere in the title, topic, or content. The notes must be 100% clean and unbranded academic notes.
 - Format text continuously without artificial line breaks in the middle of sentences. Paragraphs and bullet points must flow as full continuous sentences.
+- STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art, Unicode box-drawing characters (such as ┌, ─, │, ├, └, ┘, +---+, etc.), or text-drawn flowcharts/diagrams. These break completely and become ugly and misaligned on mobile screens.
+- COMPARISONS & FLOWCHARTS: When comparing concepts or illustrating categories/types, ALWAYS use a clean standard Markdown table (e.g. | Column 1 | Column 2 | with | --- | --- |) or clean bulleted process steps with arrows (e.g. Step 1 ➔ Step 2 ➔ Step 3).
+- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed. Do NOT include generic or irrelevant images.
 - Structure with clear sections:
   1. Overview & Key Objectives
   2. Core Definitions & Principles
@@ -1570,7 +1573,7 @@ Return ONLY valid JSON:
   "title": "Clean Short Topic Name",
   "topic": "Clean Short Topic Name",
   "category": "Chapter Notes",
-  "notesText": "Full formatted notes content with headers, bullet points, formulas and examples."
+  "notesText": "Full formatted notes content with headers, bullet points, tables and examples."
 }`;
 
   try {
