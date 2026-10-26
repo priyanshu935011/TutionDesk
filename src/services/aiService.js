@@ -1579,7 +1579,7 @@ Rules:
 - STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art or box characters (┌, ─, │, ├, etc.) or tree branch characters (├──, └──).
 - COMPARISONS & FLOWCHARTS: When comparing concepts or illustrating categories/types, ALWAYS use a clean standard Markdown table (e.g. | Column 1 | Column 2 | with | --- | --- |) or clean bulleted process steps with arrows (e.g. Step 1 ➔ Step 2 ➔ Step 3).
 - UNICODE SYMBOLS: Always use standard Unicode symbols: →, ➔, ~, ≈, °, µm, ×, ±. NEVER write raw LaTeX commands like \\rightarrow, \\to, or \\sim.
-- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). If using Wikimedia Commons, ALWAYS use standard 800px thumbnail URLs (e.g. https://upload.wikimedia.org/wikipedia/commons/thumb/X/XX/Filename.jpg/800px-Filename.jpg) or Unsplash educational images (https://images.unsplash.com/...). Never use raw original Wikimedia file URLs. Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed.
+- RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). Always use high-quality Unsplash educational image URLs (https://images.unsplash.com/...). NEVER use Wikimedia Commons or upload.wikimedia.org (Wikimedia is blocked). Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed.
 - Structure with clear sections:
   # ${topic}
   ## 1. Overview & Key Objectives
@@ -1596,7 +1596,7 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
   try {
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata. Use standard Unicode symbols (→, ~, °, ×, ±) instead of raw LaTeX backslash commands.`,
+      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata. Use standard Unicode symbols (→, ~, °, ×, ±) instead of raw LaTeX backslash commands. For images, only use Unsplash educational images (https://images.unsplash.com/...), never Wikimedia.`,
       temperature: 0.3,
     });
 
@@ -1628,15 +1628,50 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
         .replace(/\\mu\b/g, 'µ')
         .replace(/\\degree/g, '°');
 
-      // Sanitize Wikimedia URLs to 800px thumbnail format to adhere to Wikimedia policy (https://w.wiki/GHai)
-      content = content.replace(
-        /https?:\/\/upload\.wikimedia\.org\/wikipedia\/commons\/(?:thumb\/)?([a-f0-9]\/[a-f0-9]{2})\/([^\/\)\s]+)(?:\/[^\)\s]+)?/gi,
-        (match, hash, filename) => {
-          const cleanFilename = filename.replace(/^\d+px-/, '');
-          const isSvg = cleanFilename.toLowerCase().endsWith('.svg');
-          const thumbName = isSvg ? `800px-${cleanFilename}.png` : `800px-${cleanFilename}`;
-          return `https://upload.wikimedia.org/wikipedia/commons/thumb/${hash}/${cleanFilename}/${thumbName}`;
+      // Helper to map topics and captions to high-resolution, reliable educational Unsplash URLs
+      const getEducationalUnsplashUrl = (top, alt = '') => {
+        const q = `${alt} ${top}`.toLowerCase();
+        if (q.includes('reproduct') || q.includes('cell') || q.includes('gamete') || q.includes('embryo') || q.includes('sperm') || q.includes('ovum') || q.includes('fertiliz')) {
+          return 'https://images.unsplash.com/photo-1530497610245-94d3c16cda28?auto=format&fit=crop&w=800&q=80';
         }
+        if (q.includes('dna') || q.includes('gene') || q.includes('chromosome') || q.includes('genetics')) {
+          return 'https://images.unsplash.com/photo-1518152006812-edab29b069ac?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('brain') || q.includes('neuron') || q.includes('nervous')) {
+          return 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('heart') || q.includes('anatomy') || q.includes('organ') || q.includes('body')) {
+          return 'https://images.unsplash.com/photo-1579154204601-01588f351e67?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('plant') || q.includes('botany') || q.includes('leaf') || q.includes('photosyn')) {
+          return 'https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('circuit') || q.includes('electric') || q.includes('physic') || q.includes('current')) {
+          return 'https://images.unsplash.com/photo-1517420704952-d9f39e95b43e?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('chem') || q.includes('atom') || q.includes('molecule') || q.includes('reaction')) {
+          return 'https://images.unsplash.com/photo-1603126857599-f6e157fa2fe6?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('earth') || q.includes('space') || q.includes('planet') || q.includes('solar')) {
+          return 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80';
+        }
+        if (q.includes('map') || q.includes('geography')) {
+          return 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80';
+        }
+        return 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=800&q=80';
+      };
+
+      // Completely replace any Wikimedia Commons URLs with verified Unsplash educational images
+      content = content.replace(
+        /!\[(.*?)\]\(https?:\/\/(?:[a-z0-9\-]+\.)*(?:wikimedia|wikipedia)\.org[^\)]*\)/gi,
+        (match, alt) => {
+          const unsplashUrl = getEducationalUnsplashUrl(topic, alt);
+          return `![${alt || 'Educational Diagram'}](${unsplashUrl})`;
+        }
+      );
+      content = content.replace(
+        /https?:\/\/(?:[a-z0-9\-]+\.)*(?:wikimedia|wikipedia)\.org[^\s\)]+/gi,
+        () => getEducationalUnsplashUrl(topic)
       );
 
       // Ensure it starts with # Topic
