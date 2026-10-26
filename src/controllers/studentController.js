@@ -4285,4 +4285,225 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
   }
 };
 
+export const getBatchMonthlyAttendance = async (req, res) => {
+  try {
+    const { batchId, month } = req.query;
+    if (!batchId) {
+      return res.status(400).json({ message: "Batch ID parameter is required." });
+    }
+
+    const todayIST = getISTDateStr(new Date());
+    let targetMonth = month ? String(month).trim().substring(0, 7) : todayIST.substring(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(targetMonth)) {
+      targetMonth = todayIST.substring(0, 7);
+    }
+
+    const [yearStr, monthStr] = targetMonth.split("-");
+    const year = parseInt(yearStr, 10);
+    const mNum = parseInt(monthStr, 10);
+    const daysInMonth = new Date(year, mNum, 0).getDate();
+    const startDateStr = `${targetMonth}-01`;
+    const endDateStr = `${targetMonth}-${String(daysInMonth).padStart(2, "0")}`;
+
+    const cacheKey = `attendance:batch:monthly:${batchId}:${targetMonth}`;
+    const isRefresh = req.query.refresh === "true" || req.query.nocache === "true" || req.query.skipCache === "true";
+    if (!isRefresh) {
+      const cachedPayload = await getCache(cacheKey);
+      if (cachedPayload) {
+        return res.status(200).json(cachedPayload);
+      }
+    }
+
+    const userIds = getUserIds(req);
+
+    let batchObj = null;
+    const cleanBatchIdStr = String(batchId || "").trim();
+    const isUUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(cleanBatchIdStr);
+
+    if (isUUID) {
+      try {
+        batchObj = await Batch.findById(cleanBatchIdStr);
+      } catch (_) {}
+    }
+
+    if ((!batchObj || !batchObj.name) && cleanBatchIdStr) {
+      try {
+        const allBatches = await Batch.find({ user: { $in: userIds } });
+        const match = (allBatches || []).find(b => 
+          String(b.name || "").trim().toLowerCase() === cleanBatchIdStr.toLowerCase() || 
+          String(b._id || b.id || "").trim().toLowerCase() === cleanBatchIdStr.toLowerCase()
+        );
+        if (match) batchObj = match;
+      } catch (_) {}
+    }
+
+    const resolvedBatchIdStr = batchObj ? String(batchObj._id || batchObj.id) : String(batchId);
+    const resolvedBatchName = batchObj ? batchObj.name : String(batchId);
+
+    const allStudents = await Student.find({
+      user: { $in: userIds },
+      isArchived: { $ne: true }
+    });
+
+    const batchStudents = (allStudents || []).filter((s) => isStudentInBatch(s, batchObj, batchId));
+
+    const studentInfoMap = new Map();
+    for (const s of batchStudents) {
+      const sObj = s.toObject ? s.toObject() : (s.toJSON ? s.toJSON() : s);
+      const sId = String(sObj._id || sObj.id);
+      studentInfoMap.set(sId, {
+        id: sId,
+        _id: sId,
+        name: sObj.name || "",
+        enrollmentNumber: sObj.enrollmentNumber || "",
+        phone: sObj.phone || "",
+        parentPhone: sObj.parentPhone || "",
+      });
+    }
+
+    const dayMap = {};
+    const validBatchUuid = toValidUUID(resolvedBatchIdStr);
+
+    try {
+      const { data: dbRecords, error: dbErr } = await supabase
+        .from("batch_attendance_records")
+        .select("date, total_count, present_count, absent_count, attendance_map")
+        .eq("batch_id", validBatchUuid)
+        .gte("date", startDateStr)
+        .lte("date", endDateStr)
+        .order("date", { ascending: true });
+
+      if (!dbErr && Array.isArray(dbRecords)) {
+        for (const rec of dbRecords) {
+          const dStr = rec.date;
+          const attMap = rec.attendance_map || {};
+          const studentList = [];
+
+          for (const [sId, st] of Object.entries(attMap)) {
+            const sInfo = studentInfoMap.get(sId) || { id: sId, name: "Student", enrollmentNumber: "", phone: "" };
+            studentList.push({
+              ...sInfo,
+              status: st === "present" ? "present" : "absent"
+            });
+          }
+
+          dayMap[dStr] = {
+            date: dStr,
+            marked: true,
+            total: rec.total_count || studentList.length || batchStudents.length,
+            present: rec.present_count !== undefined && rec.present_count !== null ? rec.present_count : studentList.filter(s => s.status === "present").length,
+            absent: rec.absent_count !== undefined && rec.absent_count !== null ? rec.absent_count : studentList.filter(s => s.status === "absent").length,
+            students: studentList,
+          };
+        }
+      }
+    } catch (_) {}
+
+    for (const s of batchStudents) {
+      const sObj = s.toObject ? s.toObject() : (s.toJSON ? s.toJSON() : s);
+      const records = sObj.attendanceRecords || sObj.attendance_records || [];
+      const sId = String(sObj._id || sObj.id);
+      const sInfo = studentInfoMap.get(sId) || { id: sId, name: sObj.name || "", enrollmentNumber: sObj.enrollmentNumber || "", phone: sObj.phone || "" };
+
+      for (const r of records) {
+        if (!r || !r.date) continue;
+        const rDate = getISTDateStr(r.date);
+        if (rDate >= startDateStr && rDate <= endDateStr) {
+          if (!dayMap[rDate]) {
+            dayMap[rDate] = {
+              date: rDate,
+              marked: true,
+              total: batchStudents.length,
+              present: 0,
+              absent: 0,
+              students: [],
+            };
+          }
+          const exists = dayMap[rDate].students.some(item => item.id === sId);
+          if (!exists) {
+            const st = (r.status || "unmarked").toLowerCase();
+            dayMap[rDate].students.push({
+              ...sInfo,
+              status: st === "present" ? "present" : (st === "absent" ? "absent" : "unmarked"),
+            });
+            if (st === "present") dayMap[rDate].present++;
+            else if (st === "absent") dayMap[rDate].absent++;
+          }
+        }
+      }
+    }
+
+    const allDays = {};
+    let totalPresentMarks = 0;
+    let totalAbsentMarks = 0;
+    let markedDaysCount = 0;
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayStr = `${targetMonth}-${String(day).padStart(2, "0")}`;
+      const isToday = dayStr === todayIST;
+      const isFuture = dayStr > todayIST;
+
+      if (dayMap[dayStr]) {
+        markedDaysCount++;
+        totalPresentMarks += dayMap[dayStr].present;
+        totalAbsentMarks += dayMap[dayStr].absent;
+        allDays[dayStr] = {
+          ...dayMap[dayStr],
+          dayNumber: day,
+          isToday,
+          isFuture,
+        };
+      } else {
+        allDays[dayStr] = {
+          date: dayStr,
+          dayNumber: day,
+          marked: false,
+          total: batchStudents.length,
+          present: 0,
+          absent: 0,
+          isToday,
+          isFuture,
+          students: [],
+        };
+      }
+    }
+
+    const pastDaysInMonth = Math.min(
+      targetMonth === todayIST.substring(0, 7) ? parseInt(todayIST.substring(8, 10), 10) : daysInMonth,
+      daysInMonth
+    );
+    const unmarkedDaysCount = Math.max(0, pastDaysInMonth - markedDaysCount);
+    const totalMarkedRecords = totalPresentMarks + totalAbsentMarks;
+    const avgAttendancePercent = totalMarkedRecords > 0 
+      ? Math.round((totalPresentMarks / totalMarkedRecords) * 1000) / 10 
+      : 0;
+
+    const responsePayload = {
+      success: true,
+      batchId: resolvedBatchIdStr,
+      batchName: resolvedBatchName,
+      month: targetMonth,
+      totalStudents: batchStudents.length,
+      daysInMonth,
+      days: allDays,
+      summary: {
+        totalStudents: batchStudents.length,
+        markedDaysCount,
+        unmarkedDaysCount,
+        totalPresentMarks,
+        totalAbsentMarks,
+        avgAttendancePercent,
+      },
+    };
+
+    const isPastMonth = targetMonth < todayIST.substring(0, 7);
+    const ttlSeconds = isPastMonth ? (30 * 24 * 3600) : 300;
+    await setCache(cacheKey, responsePayload, ttlSeconds);
+
+    return res.status(200).json(responsePayload);
+  } catch (error) {
+    console.error("getBatchMonthlyAttendance error:", error);
+    return res.status(500).json({ message: "Could not fetch batch monthly attendance." });
+  }
+};
 

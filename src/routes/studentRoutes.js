@@ -8,6 +8,7 @@ import {
   deleteStudent,
   getBatchAttendanceByDate,
   getBatchAttendanceStatusMap,
+  getBatchMonthlyAttendance,
   getStudentAttendanceById,
   getStudentBasicById,
   getStudentById,
@@ -28,6 +29,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect);
 router.get("/batch-attendance/status-map", getBatchAttendanceStatusMap);
+router.get("/batch-attendance/monthly", getBatchMonthlyAttendance);
 router.get("/batch-attendance", getBatchAttendanceByDate);
 router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
