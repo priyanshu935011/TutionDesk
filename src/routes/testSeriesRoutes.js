@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import express from "express";
+import multer from "multer";
 import protect from "../middleware/authMiddleware.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
 import {
@@ -21,7 +22,13 @@ import {
   startStudentTest,
   submitStudentTest,
   getStudentAttemptResult,
+  convertPdfToTestSeries,
 } from "../controllers/testSeriesController.js";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
 
 const router = express.Router();
 
@@ -48,6 +55,9 @@ router.get("/student/attempt/:attemptId", studentAuth, getStudentAttemptResult);
 
 // ---------------- COMMON / TEACHER / ADMIN ROUTES ----------------
 router.use(protect);
+
+// AI PDF Converter
+router.post("/convert-pdf", upload.single("pdfFile"), convertPdfToTestSeries);
 
 // Categories
 router.get("/categories", getCategories);

@@ -3353,6 +3353,9 @@ const mockMongoose = {
     else if (modelName === "SupportTicket" || modelName === "SupportTickets") tableName = "support_tickets";
     else if (modelName === "SupportTutorial" || modelName === "SupportTutorials") tableName = "support_tutorials";
     else if (modelName === "AiHarvestLog" || modelName === "AiHarvestLogs") tableName = "ai_harvest_logs";
+    else if (modelName === "Product" || modelName === "Products") tableName = "products";
+    else if (modelName === "Order" || modelName === "Orders") tableName = "orders";
+    else if (modelName === "StudentAddress" || modelName === "StudentAddresses") tableName = "student_addresses";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";

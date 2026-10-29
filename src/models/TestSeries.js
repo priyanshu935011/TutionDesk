@@ -68,6 +68,25 @@ const testSeriesSchema = new mongoose.Schema(
       default: "General",
       trim: true,
     },
+    subject: {
+      type: String,
+      default: "General",
+      trim: true,
+    },
+    topic: {
+      type: String,
+      default: "General",
+      trim: true,
+    },
+    difficulty: {
+      type: String,
+      enum: ["Easy", "Medium", "Hard"],
+      default: "Medium",
+    },
+    isLocked: {
+      type: Boolean,
+      default: false,
+    },
     durationMinutes: {
       type: Number,
       default: 60,

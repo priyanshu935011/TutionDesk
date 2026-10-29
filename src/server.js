@@ -26,6 +26,7 @@ import aiRoutes from "./routes/aiRoutes.js";
 import testSeriesRoutes from "./routes/testSeriesRoutes.js";
 import salesRoutes from "./routes/salesRoutes.js";
 import supportRoutes from "./routes/supportRoutes.js";
+import storeRoutes from "./routes/storeRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
@@ -168,6 +169,7 @@ app.use("/api/ai", aiRoutes);
 app.use(["/test-series", "/api/test-series"], testSeriesRoutes);
 app.use(["/sales", "/api/sales"], salesRoutes);
 app.use(["/support", "/api/support"], supportRoutes);
+app.use(["/store", "/api/store"], storeRoutes);
 app.get("/debug-sentry", function mainHandler(req, res) {
   throw new Error("My first Sentry error!");
 });

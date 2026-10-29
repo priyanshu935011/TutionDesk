@@ -615,6 +615,8 @@ export async function callGeminiRaw({
   throw missingErr;
 }
 
+export const callGeminiApi = callGeminiRaw;
+
 // 5. Task A: Admission Form OCR
 export async function parseAdmissionForm(
   imageBase64,

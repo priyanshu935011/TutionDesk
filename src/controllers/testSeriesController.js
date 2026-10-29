@@ -7,6 +7,8 @@ import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import User from "../models/User.js";
+import Order from "../models/Order.js";
+import { callGeminiApi, extractJsonFromText } from "../services/aiService.js";
 import { isTeacherOfBatch } from "./teacherController.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
@@ -260,12 +262,19 @@ export const getTestSeriesList = async (req, res) => {
     const isSuperAdmin = req.user?.role === "super_admin" || req.user?.role === "tech_admin";
 
     if (isSuperAdmin) {
-      const filter = {};
+      const filter = {
+        $or: [{ institute: null }, { institute: { $exists: false } }],
+      };
       if (folder) filter.folder = folder;
-      if (category) filter.category = category;
+      if (category && category !== "All") filter.category = category;
       if (search) filter.title = { $regex: search, $options: "i" };
 
-      const testSeries = await TestSeries.find(filter).sort({ createdAt: -1 });
+      let testSeries = await TestSeries.find(filter).sort({ createdAt: -1 });
+      // Exclude institution-added test series
+      testSeries = (testSeries || []).filter((t) => {
+        const inst = t.institute || t.institute_id;
+        return !inst || inst === "null" || inst === "";
+      });
       return res.json({ testSeries });
     }
 
@@ -307,9 +316,13 @@ export const getTestSeriesList = async (req, res) => {
       globalTestCondition = {
         isGlobal: true,
         category: { $in: allowedCategories },
+        isLocked: { $ne: true }, // Only unlocked test series for allowed institute categories
       };
     } else {
-      globalTestCondition = { isGlobal: true };
+      globalTestCondition = {
+        isGlobal: true,
+        isLocked: { $ne: true },
+      };
     }
 
     // Query global tests
@@ -469,6 +482,10 @@ export const createTestSeries = async (req, res) => {
       description,
       folder,
       category,
+      subject,
+      topic,
+      difficulty,
+      isLocked,
       durationMinutes,
       totalMarks,
       passingMarks,
@@ -528,6 +545,10 @@ export const createTestSeries = async (req, res) => {
       folder_id: folder || null,
       folderPath,
       category: resolvedCategory,
+      subject: (subject || "General").trim(),
+      topic: (topic || "General").trim(),
+      difficulty: ["Easy", "Medium", "Hard"].includes(difficulty) ? difficulty : "Medium",
+      isLocked: isLocked === true || isLocked === "true",
       durationMinutes: Number(durationMinutes || 60),
       totalMarks: calculatedTotalMarks || 100,
       passingMarks: Number(passingMarks || 40),
@@ -590,6 +611,10 @@ export const updateTestSeries = async (req, res) => {
       description,
       folder,
       category,
+      subject,
+      topic,
+      difficulty,
+      isLocked,
       durationMinutes,
       totalMarks,
       passingMarks,
@@ -610,6 +635,10 @@ export const updateTestSeries = async (req, res) => {
       }
     }
     if (category) test.category = category;
+    if (subject !== undefined) test.subject = String(subject).trim();
+    if (topic !== undefined) test.topic = String(topic).trim();
+    if (difficulty && ["Easy", "Medium", "Hard"].includes(difficulty)) test.difficulty = difficulty;
+    if (isLocked !== undefined) test.isLocked = isLocked === true || isLocked === "true";
     if (durationMinutes !== undefined) test.durationMinutes = Number(durationMinutes);
     if (passingMarks !== undefined) test.passingMarks = Number(passingMarks);
     if (instructions !== undefined) test.instructions = instructions;
@@ -835,6 +864,27 @@ export const getStudentTests = async (req, res) => {
         return acc.assignedBatches.some((bId) => studentBatchIds.includes(String(bId)));
       })
       .map((acc) => acc.testSeries);
+
+    // Also include test series directly purchased by this student from the store
+    try {
+      const studentOrders = await Order.find({
+        studentId: student._id || student.id,
+        paymentStatus: "paid",
+      });
+      (studentOrders || []).forEach((ord) => {
+        (ord.items || []).forEach((item) => {
+          if (Array.isArray(item.testSeriesIds)) {
+            item.testSeriesIds.forEach((tId) => {
+              if (tId && !matchingTestIds.some((existing) => String(existing) === String(tId))) {
+                matchingTestIds.push(tId);
+              }
+            });
+          }
+        });
+      });
+    } catch (orderErr) {
+      console.warn("Could not check student store orders:", orderErr.message);
+    }
 
     const tests = await TestSeries.find({
       _id: { $in: matchingTestIds },
@@ -1142,5 +1192,90 @@ export const getStudentAttemptResult = async (req, res) => {
   } catch (error) {
     console.error("Error fetching student attempt result:", error);
     res.status(500).json({ message: "Failed to fetch attempt result" });
+  }
+};
+
+// -------------------------------------------------------------
+// AI PDF CONVERSION TO TEST SERIES
+// -------------------------------------------------------------
+export const convertPdfToTestSeries = async (req, res) => {
+  try {
+    let pdfBase64 = "";
+    let mimeType = "application/pdf";
+
+    if (req.file && req.file.buffer) {
+      pdfBase64 = req.file.buffer.toString("base64");
+      mimeType = req.file.mimetype || "application/pdf";
+    } else if (req.body.pdfBase64) {
+      pdfBase64 = req.body.pdfBase64.replace(/^data:[^;]+;base64,/, "");
+    }
+
+    if (!pdfBase64) {
+      return res.status(400).json({ message: "No PDF file or base64 data provided." });
+    }
+
+    const prompt = `Analyze this PDF document which contains an exam, question paper, quiz, test series, or study practice test material.
+Extract all questions and structure them into a comprehensive test series.
+Return STRICTLY valid JSON with this exact schema:
+{
+  "title": "Clean, descriptive test title (e.g. Class 10 Science - Chemical Reactions & Equations Test)",
+  "description": "Brief description of the test",
+  "category": "Target exam/class (e.g. Class 10, Class 11, Class 12, JEE Main & Advanced, NEET, Bank & SSC, CUET, General)",
+  "subject": "Subject name (e.g. Physics, Chemistry, Mathematics, Biology, Science)",
+  "topic": "Core chapter or topic name (e.g. Chemical Reactions, Optics, Organic Chemistry)",
+  "difficulty": "Easy" or "Medium" or "Hard",
+  "durationMinutes": 60,
+  "passingMarks": 40,
+  "totalMarks": 100,
+  "instructions": "Read all questions carefully. Choose the best option. Test cannot be paused once started.",
+  "questions": [
+    {
+      "id": "q_1",
+      "type": "single_choice",
+      "question": "Full question text with all context and equations",
+      "options": [
+        { "id": "opt_1", "text": "Option A text" },
+        { "id": "opt_2", "text": "Option B text" },
+        { "id": "opt_3", "text": "Option C text" },
+        { "id": "opt_4", "text": "Option D text" }
+      ],
+      "correctAnswers": ["opt_1"],
+      "marks": 4,
+      "negativeMarks": 1,
+      "explanation": "Detailed step-by-step reasoning for the correct option"
+    }
+  ]
+}
+If questions in the PDF have only 2 options (True/False), set "type" to "boolean". If multiple options are correct, set "type" to "multiple_choice".
+Make sure every question has 4 options (or 2 for boolean), correct answers identified, marks, and explanation.`;
+
+    const rawResponse = await callGeminiApi({
+      prompt,
+      imageBase64: pdfBase64,
+      imageMimeType: mimeType,
+      systemInstruction: "You are an expert exam extraction AI. Extract all test questions faithfully and return strictly valid JSON.",
+      temperature: 0.2,
+    });
+
+    const parsed = extractJsonFromText(rawResponse);
+    if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return res.status(500).json({
+        message: "Failed to parse questions from the PDF. Please ensure the PDF has legible test questions.",
+        raw: rawResponse ? rawResponse.substring(0, 500) : "",
+      });
+    }
+
+    parsed.totalMarks = parsed.questions.reduce((sum, q) => sum + (Number(q.marks) || 4), 0);
+    parsed.passingMarks = Math.round(parsed.totalMarks * 0.4);
+
+    return res.json({
+      success: true,
+      data: parsed,
+    });
+  } catch (err) {
+    console.error("convertPdfToTestSeries error:", err);
+    return res.status(500).json({
+      message: err.message || "Failed to convert PDF into test series",
+    });
   }
 };
