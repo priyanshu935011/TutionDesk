@@ -15,7 +15,7 @@ const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
 const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
 
 const generateToken = (payload) =>
-  jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
+  jwt.sign(payload, JWT_SECRET, { expiresIn: "3650d" });
 
 import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 

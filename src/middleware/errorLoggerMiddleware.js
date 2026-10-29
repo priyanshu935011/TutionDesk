@@ -11,21 +11,29 @@ export const errorLoggerMiddleware = (req, res, next) => {
 
   const captureApiError = (body) => {
     if (res.statusCode >= 400 && !res.locals.errorLogged) {
-      // Ignore routine unauthenticated 401 pings (e.g. auth status check on startup when not logged in)
-      const isRoutineAuthPing =
+      let errorMessage = `API Error ${res.statusCode}`;
+      if (typeof body === "object" && body !== null) {
+        errorMessage = body.message || body.error || body.msg || JSON.stringify(body);
+      } else if (typeof body === "string") {
+        errorMessage = body;
+      }
+
+      // Ignore routine unauthenticated / expired session 401s (not server bugs)
+      const isRoutineAuth =
         res.statusCode === 401 &&
-        !req.headers.authorization &&
-        (req.path === "/auth/me" || req.path === "/api/auth/me" || req.path === "/student/auth/me");
+        (
+          !req.headers.authorization ||
+          (req.path === "/auth/me" || req.path === "/api/auth/me" || req.path === "/student/auth/me") ||
+          errorMessage.includes("Session expired") ||
+          errorMessage.includes("jwt expired") ||
+          errorMessage.includes("Token expired") ||
+          errorMessage.includes("Not authorized") ||
+          errorMessage.includes("Invalid student token") ||
+          errorMessage.includes("Invalid token")
+        );
 
-      if (!isRoutineAuthPing) {
+      if (!isRoutineAuth) {
         res.locals.errorLogged = true;
-
-        let errorMessage = `API Error ${res.statusCode}`;
-        if (typeof body === "object" && body !== null) {
-          errorMessage = body.message || body.error || body.msg || JSON.stringify(body);
-        } else if (typeof body === "string") {
-          errorMessage = body;
-        }
 
         if (res.statusCode >= 500) {
           captureException(new Error(errorMessage), {

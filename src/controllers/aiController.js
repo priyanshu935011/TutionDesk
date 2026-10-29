@@ -15,6 +15,7 @@ import {
   generateComprehensiveTestSeries,
   generateAssignment,
   callGeminiRaw,
+  parsePromptWithAi,
 } from "../services/aiService.js";
 import { createStudent } from "./studentController.js";
 import { createTestResultsBulk } from "./teacherController.js";
@@ -401,11 +402,11 @@ export const chatWithAi = async (req, res) => {
       ) {
         taskType = "GENERATE_TEST_SERIES";
       } else if (
-        lowerMessage.includes("generate notes") ||
-        lowerMessage.includes("create notes") ||
+        /(?:generate|create|make|write|prepare|give\s+me)\s+(?:a\s+|an\s+|some\s+)?(?:study\s+|revision\s+)?notes/i.test(lowerMessage) ||
         lowerMessage.includes("study notes") ||
         lowerMessage.includes("revision notes") ||
-        lowerMessage.startsWith("notes on")
+        lowerMessage.startsWith("notes on") ||
+        lowerMessage.startsWith("notes for")
       ) {
         taskType = "GENERATE_NOTES";
       } else if (
@@ -623,8 +624,8 @@ export const chatWithAi = async (req, res) => {
               topic = matchOn[1].trim();
             } else {
               topic = (message || "")
-                .replace(/^Generate\s+(?:comprehensive\s+|detailed\s+|quick\s+)?(?:study\s+)?notes\s+(?:on\s+topic:\s*|on\s+|about\s+)?/i, "")
-                .replace(/\s+for\s+Class\s+\d+.*$/i, "")
+                .replace(/^Generate\s+(?:a\s+|an\s+|some\s+)?(?:comprehensive\s+|detailed\s+|quick\s+)?(?:study\s+|revision\s+)?notes\s+(?:on\s+topic:\s*|on\s+|about\s+)?/i, "")
+                .replace(/\s+for\s+(?:Class\s+\d+|jee|neet|cuet|banking|ssc|general).*$/i, "")
                 .replace(/["']/g, "")
                 .trim();
             }
@@ -721,7 +722,7 @@ export const chatWithAi = async (req, res) => {
           action: "ASSIGNMENT_PREVIEW",
           data: payloadData,
           parsedData: payloadData,
-          reply: assignmentData.assignmentText || `Generated homework assignment for **${assignmentData.title}** (${selectedBatchName})!`,
+          reply: `Generated homework assignment for **${assignmentData.title}** (${selectedBatchName})! Preview or upload it directly below.`,
           creditsDeducted: billing.deducted,
           remainingBalance: billing.newBalance,
         };
@@ -1024,5 +1025,23 @@ export const confirmAiAction = async (req, res) => {
   } catch (error) {
     console.error("confirmAiAction error:", error);
     return res.status(500).json({ message: error.message || "Failed to confirm action." });
+  }
+};
+
+// Parse user prompt using AI to extract clean topic and target class/exam
+export const parsePrompt = async (req, res) => {
+  try {
+    const message = req.body.message || req.body.prompt || "";
+    if (!message || !message.trim()) {
+      return res.status(400).json({ success: false, message: "Prompt message is required." });
+    }
+    const extracted = await parsePromptWithAi(message);
+    return res.json({
+      success: true,
+      data: extracted,
+    });
+  } catch (error) {
+    console.error("parsePrompt error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to parse prompt." });
   }
 };

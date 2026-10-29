@@ -1,3 +1,4 @@
+import jwt from "jsonwebtoken";
 import express from "express";
 import protect from "../middleware/authMiddleware.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
@@ -26,12 +27,17 @@ const router = express.Router();
 
 // Middleware to accept either student portal token or general user token
 const studentAuth = (req, res, next) => {
-  protectStudent(req, res, (err) => {
-    if (!err && req.student) {
-      return next();
-    }
-    protect(req, res, next);
-  });
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    try {
+      const token = authHeader.split(" ")[1];
+      const decoded = jwt.decode(token);
+      if (decoded && decoded.role && decoded.role !== "student") {
+        return protect(req, res, next);
+      }
+    } catch (_) {}
+  }
+  return protectStudent(req, res, next);
 };
 
 // ---------------- STUDENT ROUTES ----------------

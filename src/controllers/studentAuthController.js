@@ -15,7 +15,7 @@ import { deleteCache } from "../utils/cache.js";
 const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
 
 const generateToken = (payload) =>
-  jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
+  jwt.sign(payload, JWT_SECRET, { expiresIn: "3650d" });
 
 const resolveInstituteForUserId = async (
   userId,

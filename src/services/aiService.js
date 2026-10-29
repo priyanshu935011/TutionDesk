@@ -1541,6 +1541,119 @@ Formatting rules:
   });
 }
 
+// Converts pseudo-table comparisons and ASCII box structures into standard Markdown tables
+function formatComparisonsAndDiagramsToTables(content) {
+  if (!content) return content;
+  const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const result = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    const isPipeHeader = trimmed.includes('|') &&
+      !trimmed.startsWith('```') &&
+      !trimmed.includes('---') &&
+      trimmed.split('|').map(s => s.trim()).filter(Boolean).length >= 2;
+
+    if (isPipeHeader) {
+      const headerCols = trimmed.split('|').map(s => s.trim()).filter(Boolean);
+      const dataRows = [];
+      let j = i + 1;
+
+      let alreadyHasDivider = false;
+      if (j < lines.length && /^\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?$/.test(lines[j].trim())) {
+        alreadyHasDivider = true;
+      }
+
+      if (!alreadyHasDivider) {
+        while (j < lines.length) {
+          const nextLine = lines[j];
+          const nextTrimmed = nextLine.trim();
+          if (!nextTrimmed) {
+            if (j + 1 < lines.length && /^[-*•]/.test(lines[j + 1].trim())) {
+              j++;
+              continue;
+            }
+            break;
+          }
+
+          if (nextTrimmed.startsWith('#') || nextTrimmed === '---' || nextTrimmed === '***') break;
+          if (/^[=\-─_]{4,}$/.test(nextTrimmed)) {
+            j++;
+            break;
+          }
+
+          const isBullet = /^[-*•]/.test(nextTrimmed);
+          const hasVs = /\s+vs\.?\s+/i.test(nextTrimmed);
+          const hasPipes = nextTrimmed.includes('|');
+
+          if (isBullet && (hasVs || hasPipes || nextTrimmed.includes(':'))) {
+            let cleanBullet = nextTrimmed.replace(/^[-*•]\s*/, '').trim();
+            let cells = [];
+
+            if (hasPipes) {
+              cells = cleanBullet.split('|').map(c => c.trim());
+            } else if (cleanBullet.includes(':') && hasVs) {
+              const cIdx = cleanBullet.indexOf(':');
+              const label = cleanBullet.substring(0, cIdx).trim();
+              const rest = cleanBullet.substring(cIdx + 1).trim();
+              const parts = rest.split(/\s+vs\.?\s+/i).map(p => p.trim());
+              cells = [label, ...parts];
+            } else if (hasVs) {
+              cells = cleanBullet.split(/\s+vs\.?\s+/i).map(p => p.trim());
+            }
+
+            if (cells.length > 0) {
+              cells = cells.map(c => c.replace(/<br\s*\/?>/gi, ', ').replace(/^[-•*]\s*/, '').replace(/\|/g, '/').trim());
+              while (cells.length < headerCols.length) cells.push('-');
+              if (cells.length > headerCols.length) {
+                const extra = cells.slice(headerCols.length - 1).join(', ');
+                cells = [...cells.slice(0, headerCols.length - 1), extra];
+              }
+              dataRows.push(cells);
+              j++;
+              continue;
+            }
+          }
+
+          if (hasPipes && !nextTrimmed.startsWith('#')) {
+            let raw = nextTrimmed;
+            if (raw.startsWith('|')) raw = raw.substring(1);
+            if (raw.endsWith('|')) raw = raw.substring(0, raw.length - 1);
+            const cells = raw.split('|').map(c => c.trim());
+            if (cells.length > 0 && cells.some(Boolean)) {
+              dataRows.push(cells);
+              j++;
+              continue;
+            }
+          }
+
+          break;
+        }
+      }
+
+      if (dataRows.length > 0) {
+        result.push('');
+        result.push(`| ${headerCols.join(' | ')} |`);
+        result.push(`| ${headerCols.map(() => '---').join(' | ')} |`);
+        for (const row of dataRows) {
+          result.push(`| ${row.join(' | ')} |`);
+        }
+        result.push('');
+        i = j;
+        continue;
+      }
+    }
+
+    result.push(line);
+    i++;
+  }
+
+  return result.join('\n');
+}
+
 // 11. Task G: Structured Notes Generator
 export async function generateStructuredNotes(
   promptOrTopic,
@@ -1576,8 +1689,8 @@ Rules:
 - Title must be exactly: "${topic}". Do NOT output prompt instructions or request text.
 - STRICT BRANDING RULE: Do NOT mention "ClassTech", "classtech.in", or any corporate/app branding anywhere.
 - Format text continuously without artificial line breaks in the middle of sentences. Paragraphs and bullet points must flow as full continuous sentences.
-- STRICT NO-ASCII-ART / NO-BOX-DRAWING RULE: NEVER use ASCII art or box characters (┌, ─, │, ├, etc.) or tree branch characters (├──, └──).
-- COMPARISONS & FLOWCHARTS: When comparing concepts or illustrating categories/types, ALWAYS use a clean standard Markdown table (e.g. | Column 1 | Column 2 | with | --- | --- |) or clean bulleted process steps with arrows (e.g. Step 1 ➔ Step 2 ➔ Step 3).
+- STRICT NO-FLOWCHARTS / NO-BOX-DRAWING RULE: NEVER include any flowcharts, process flowcharts, ASCII art, or box characters (┌, ─, │, ├, etc.) or tree branch characters (├──, └──) anywhere in the notes. Do NOT draw or generate flowcharts. Instead, present all concepts, steps, classifications, and processes using clean bulleted lists or standard Markdown tables.
+- COMPARISONS: When comparing concepts or illustrating categories/types, ALWAYS use a clean standard Markdown table (e.g. | Column 1 | Column 2 | with | --- | --- |). Do NOT use flowcharts.
 - UNICODE SYMBOLS: Always use standard Unicode symbols: →, ➔, ~, ≈, °, µm, ×, ±. NEVER write raw LaTeX commands like \\rightarrow, \\to, or \\sim.
 - RELEVANT IMAGES: Include an educational illustration/diagram ONLY IF genuinely relevant to the topic (e.g. Science diagrams, Anatomy, Geography maps, Geometric figures, Physics circuits, Historical events). Always use high-quality Unsplash educational image URLs (https://images.unsplash.com/...). NEVER use Wikimedia Commons or upload.wikimedia.org (Wikimedia is blocked). Use standard markdown image format: ![Diagram: Description](url) or leave it out if not needed.
 - Structure with clear sections:
@@ -1596,7 +1709,7 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
   try {
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata. Use standard Unicode symbols (→, ~, °, ×, ±) instead of raw LaTeX backslash commands. For images, only use Unsplash educational images (https://images.unsplash.com/...), never Wikimedia.`,
+      systemInstruction: `You are an expert teacher. Write full comprehensive study and revision notes on topic: "${topic}" for ${targetClass}. Output directly in clean Markdown format starting with '# ${topic}'. Do not include prompt text or metadata. STRICTLY DO NOT INCLUDE ANY FLOWCHARTS OR BOX DIAGRAMS. Use standard Unicode symbols (→, ~, °, ×, ±) instead of raw LaTeX backslash commands. For images, only use Unsplash educational images (https://images.unsplash.com/...), never Wikimedia.`,
       temperature: 0.3,
     });
 
@@ -1612,6 +1725,9 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
       // Remove any prompt echoes if LLM repeated the prompt
       content = content.replace(/^Generate\s+Comprehensive\s+study\s+notes\s+on\s+topic:.*?\n+/i, '');
       content = content.replace(/^#\s*Generate\s+Comprehensive\s+study\s+notes\s+on\s+topic:.*?\n+/i, '');
+
+      // Strip any accidental ASCII flowcharts or box diagrams
+      content = content.replace(/```(?:flowchart|diagram|ascii)?\s*[\s\S]*?[┌┐└┘├┤┬┴┼─━═║▲▼►◄\+\-\|]{4,}[\s\S]*?```/gi, '');
 
       // Sanitize LaTeX artifacts into clean readable Unicode
       content = content
@@ -1673,6 +1789,9 @@ Output the notes directly in clean Markdown format starting with '# ${topic}'.`;
         /https?:\/\/(?:[a-z0-9\-]+\.)*(?:wikimedia|wikipedia)\.org[^\s\)]+/gi,
         () => getEducationalUnsplashUrl(topic)
       );
+
+      // Ensure comparisons & diagrams are structured into standard Markdown tables
+      content = formatComparisonsAndDiagramsToTables(content);
 
       // Ensure it starts with # Topic
       if (!content.startsWith('#')) {
@@ -1820,12 +1939,12 @@ Difficulty: "${difficulty}"
 Target Batch: "${batchName}"
 
 Rules:
-- Generate a well-structured assignment with:
+- Generate a well-structured question assignment for students with:
   * Title and target Batch
   * Section A: Conceptual & Short Answer Questions
   * Section B: Numerical / Problem-Solving Questions
   * Section C: Higher Order Thinking / Long Answer Questions
-  * Answer Key & Hints: Clear step-by-step solutions/hints at the end.
+- STRICT NO-HINTS / NO-SOLUTIONS RULE: NEVER include hints, solutions, answers, or an answer key. The assignment must only contain questions for students to solve independently.
 - Use standard Unicode mathematical symbols (∫, dy/dx, √, ², ³, ÷, ×, ±, ≈, ≤, ≥, ≠, π, θ). Do NOT use raw $ or $$ signs.
 
 Return ONLY valid JSON:
@@ -1835,13 +1954,13 @@ Return ONLY valid JSON:
   "numQuestions": ${count},
   "difficulty": "${difficulty}",
   "batchName": "${batchName}",
-  "assignmentText": "Full formatted assignment text with sections, question numbers, sub-parts, and solution key."
+  "assignmentText": "Full formatted assignment text with sections, question numbers, and sub-parts only. NO solutions or hints."
 }`;
 
   try {
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: "You are an expert curriculum designer. Return strictly valid JSON.",
+      systemInstruction: "You are an expert curriculum designer. Return strictly valid JSON without any hints, solutions, or answer key.",
       imageBase64,
       imageMimeType,
       temperature: 0.3,
@@ -1849,6 +1968,10 @@ Return ONLY valid JSON:
     });
     const parsed = extractJsonFromText(raw);
     if (parsed && parsed.assignmentText) {
+      // Strip any accidental hints or answer key sections generated by the LLM
+      parsed.assignmentText = parsed.assignmentText
+        .replace(/##\s*(?:Answer Key|Hints|Solutions|Answers|Step-by-step Solutions)[\s\S]*$/i, '')
+        .trim();
       return parsed;
     }
   } catch (err) {
@@ -1861,6 +1984,57 @@ Return ONLY valid JSON:
     numQuestions: count,
     difficulty,
     batchName,
-    assignmentText: `# ${topic} Assignment\n\n**Batch**: ${batchName} | **Difficulty**: ${difficulty}\n\n## Section A: Conceptual Questions\n1. Explain the fundamental principles of ${topic}.\n2. State the key laws and governing equations.\n\n## Section B: Practice Problems\n3. Solve the standard problem with given parameters.\n\n## Answer Key & Hints\n• Detailed hints and solutions for all problems.`,
+    assignmentText: `# ${topic} Assignment\n\n**Batch**: ${batchName} | **Difficulty**: ${difficulty}\n\n## Section A: Conceptual Questions\n1. Explain the fundamental principles of ${topic}.\n2. State the key laws and governing equations.\n\n## Section B: Practice Problems\n3. Solve the standard problem with given parameters.\n\n## Section C: Analytical Questions\n4. Analyze the core application of ${topic} under varying conditions.`,
   };
+}
+
+// 15. Task: Parse User Prompt Intent and Extract Topic, Class/Exam with AI
+export async function parsePromptWithAi(message) {
+  if (!message || !message.trim()) return null;
+
+  const prompt = `Analyze this teacher prompt: "${message.trim()}".
+Extract the educational task intent, clean topic, and class/exam.
+Rules:
+1. task: Determine what the user wants to create/generate:
+   - "notes": if asking for notes, study notes, revision notes, formula sheet, or study material.
+   - "test_series": if asking for test series, mock test, practice test, test paper, or exam.
+   - "assignment": if asking for assignment, homework, worksheet, or practice problems.
+   - "query": if general question or other query.
+2. topic: Extract ONLY the clean, essential educational topic or chapter name (e.g., "Human Reproduction", "Federalism", "Photosynthesis", "Trigonometry", "Electric Charges").
+   - Strip all command/request phrases: "generate a notes on", "give me notes on", "make notes for", "create a test on", "assignment on", "write about", etc.
+   - Strip all class/exam mentions: "for class 10", "class 12th", "for neet", etc.
+   - Properly capitalize the topic title (e.g., "Human Reproduction").
+3. targetClass: Extract the specific grade, class, or competitive exam mentioned (e.g., "Class 8", "Class 9", "Class 10", "Class 11", "Class 12", "JEE", "NEET", "CUET", "Banking", "SSC", "General") if mentioned in the prompt, or null.
+4. numQuestions: Integer count of questions if explicitly requested (e.g., "15 questions" -> 15), otherwise null.
+5. difficulty: "Easy", "Medium", or "Hard" if mentioned, otherwise null.
+
+Respond ONLY with valid JSON in this exact structure:
+{
+  "task": "notes",
+  "topic": "Human Reproduction",
+  "targetClass": "Class 10",
+  "numQuestions": null,
+  "difficulty": null
+}`;
+
+  try {
+    const raw = await callGeminiRaw({
+      prompt,
+      systemInstruction: "You are an entity extraction assistant. Output pure valid JSON only without markdown codeblocks.",
+      temperature: 0.1,
+    });
+    const parsed = extractJsonFromText(raw);
+    if (parsed && (parsed.task || parsed.topic)) {
+      return {
+        task: parsed.task || "query",
+        topic: (parsed.topic || "").trim(),
+        targetClass: parsed.targetClass || null,
+        numQuestions: typeof parsed.numQuestions === "number" ? parsed.numQuestions : null,
+        difficulty: parsed.difficulty || null,
+      };
+    }
+  } catch (err) {
+    console.error("parsePromptWithAi error:", err.message);
+  }
+  return null;
 }

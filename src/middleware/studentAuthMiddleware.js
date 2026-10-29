@@ -83,15 +83,8 @@ const protectStudent = async (req, res, next) => {
       return res.status(403).json({ message: "Student portal is disabled for this institute" });
     }
 
-    if (students[0].lastActiveAt) {
-      const fourteenDaysInMs = 14 * 24 * 60 * 60 * 1000;
-      if (Date.now() - new Date(students[0].lastActiveAt).getTime() > fourteenDaysInMs) {
-        return res.status(401).json({ message: "Session expired due to 14 days of inactivity." });
-      }
-    }
-
     req.students = students;
-    req.studentEmail = decoded.email.toLowerCase();
+    req.studentEmail = decoded.email ? String(decoded.email).toLowerCase().trim() : "";
 
     // Determine active student context for single-record endpoints
     const targetStudentId =
