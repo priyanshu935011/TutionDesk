@@ -430,16 +430,76 @@ export const getStoreSettings = async (req, res) => {
     const setting = await SystemSetting.findOne({ key: "store_settings" });
     const defaults = {
       isStoreEnabled: true,
-      storeName: "ClassTech Knowledge Store",
-      bannerText: "Boost your exam prep with verified Test Series, Revision Notes & Bundles!",
-      bannerImageUrl: "",
+      storeName: "ClassTech Store",
+      searchPlaceholder: "Search for Study Material",
+      logoUrl: "",
+      defaultGoal: "NEET",
+      goalsList: [
+        { title: "NEET", desc: "UG Medical Entrance", emoji: "🔬" },
+        { title: "JEE", desc: "Main & Advanced Engineering", emoji: "⚛️" },
+        { title: "Class 10", desc: "Board Exam Prep & Foundation", emoji: "🎓" },
+        { title: "Class 12", desc: "Board + CUET Preparation", emoji: "📚" },
+        { title: "UG Entrance", desc: "CUET, Nursing & Defense", emoji: "🏛️" },
+        { title: "All Categories", desc: "Explore entire store catalog", emoji: "✨" },
+      ],
+      flashSaleEnabled: true,
+      flashSaleTitle: "FLASH SALE",
+      flashSaleSubtitle: "STARTS ON 30TH OCT",
+      flashSaleHours: 17,
+      flashSaleMinutes: 29,
+      flashSaleSeconds: 38,
+      quickCategories: [
+        { emoji: "🎓", title: "UG Entrance\nExams", filterType: "category", filterValue: "UG Entrance", isActive: true },
+        { emoji: "🏛️", title: "PG/Govt\nEntrance...", filterType: "category", filterValue: "Govt Exams", isActive: true },
+        { emoji: "🏫", title: "School Prep\nBooks", filterType: "category", filterValue: "School Prep", isActive: true },
+        { emoji: "✏️", title: "Stationery &\nKits", filterType: "type", filterValue: "offline", isActive: true },
+        { emoji: "📝", title: "Test Series\nPacks", filterType: "type", filterValue: "test_series", isActive: true },
+        { emoji: "📄", title: "Revision\nPDF Notes", filterType: "type", filterValue: "notes", isActive: true },
+      ],
+      slides: [
+        {
+          id: "slide_1",
+          headline: "NEET\nMODULES",
+          tag: "COMPLETE THEORY & MCQ SETS",
+          buttonText: "Order Today!",
+          category: "NEET",
+          productType: "all",
+          theme: "emerald",
+          isActive: true,
+        },
+        {
+          id: "slide_2",
+          headline: "ALL-INDIA\nTEST SERIES",
+          tag: "EXAM MOCKS WITH INSTANT RANK",
+          buttonText: "Explore Tests",
+          category: "All",
+          productType: "test_series",
+          theme: "royal_violet",
+          isActive: true,
+        },
+        {
+          id: "slide_3",
+          headline: "TOPPER'S\nREVISION PDF",
+          tag: "HANDWRITTEN CHAPTER MINDMAPS",
+          buttonText: "View Notes",
+          category: "All",
+          productType: "notes",
+          theme: "amber",
+          isActive: true,
+        },
+      ],
+      dealOfTheDayEnabled: true,
+      dealOfTheDayTitle: "Deal of the Day",
+      dealBadgeText: "MULTICOLOUR EDITION",
       deliveryFeeOffline: 50,
       freeDeliveryThreshold: 499,
       supportEmail: "support@classtech.in",
       supportPhone: "919999999999",
     };
 
-    res.json({ settings: setting?.value || defaults });
+    const saved = setting?.value || {};
+    const merged = { ...defaults, ...saved };
+    res.json({ settings: merged });
   } catch (err) {
     console.error("getStoreSettings error:", err);
     res.status(500).json({ message: "Failed to get store settings", error: err.message });
