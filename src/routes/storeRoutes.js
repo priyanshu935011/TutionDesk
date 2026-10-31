@@ -16,6 +16,7 @@ import {
   getAdminTransactions,
   getStoreSettings,
   updateStoreSettings,
+  uploadStoreBanner,
   getStoreProducts,
   getStoreProductById,
   getStudentAddresses,
@@ -86,5 +87,6 @@ router.get("/admin/analytics", getAdminAnalytics);
 router.get("/admin/transactions", getAdminTransactions);
 router.get("/admin/settings", getStoreSettings);
 router.put("/admin/settings", updateStoreSettings);
+router.post("/admin/upload-banner", upload.single("bannerImage"), uploadStoreBanner);
 
 export default router;

@@ -581,6 +581,26 @@ export const updateStoreSettings = async (req, res) => {
   }
 };
 
+export const uploadStoreBanner = async (req, res) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ message: "No image file provided" });
+    }
+    const b64 = `data:${req.file.mimetype || "image/jpeg"};base64,${req.file.buffer.toString("base64")}`;
+    const uploadRes = await cloudinary.uploader.upload(b64, {
+      resource_type: "image",
+      folder: "store_banners",
+    });
+    return res.json({
+      success: true,
+      imageUrl: uploadRes.secure_url || uploadRes.url,
+    });
+  } catch (err) {
+    console.error("uploadStoreBanner error:", err);
+    return res.status(500).json({ message: "Failed to upload banner image", error: err.message });
+  }
+};
+
 // -------------------------------------------------------------
 // STUDENT & PUBLIC: STORE FRONT
 // -------------------------------------------------------------
