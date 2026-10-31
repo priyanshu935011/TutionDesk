@@ -101,11 +101,27 @@ export const createAdminProduct = async (req, res) => {
       return res.status(400).json({ message: "A valid price is required" });
     }
 
+    let resolvedThumbnail = thumbnail || "";
+    const thumbFile = req.files?.thumbnailFile?.[0] || (req.file?.fieldname === "thumbnailFile" ? req.file : null);
+    if (thumbFile && thumbFile.buffer) {
+      try {
+        const b64 = `data:${thumbFile.mimetype || "image/jpeg"};base64,${thumbFile.buffer.toString("base64")}`;
+        const uploadRes = await cloudinary.uploader.upload(b64, {
+          resource_type: "image",
+          folder: "store_thumbnails",
+        });
+        resolvedThumbnail = uploadRes.secure_url || uploadRes.url || resolvedThumbnail;
+      } catch (thumbErr) {
+        console.warn("Cloudinary thumbnail upload warning:", thumbErr.message);
+      }
+    }
+
     let resolvedPdfUrl = notesPdfUrl || "";
     // Handle PDF upload if multipart file was provided
-    if (req.file && req.file.buffer) {
+    const pdfFile = req.files?.notesFile?.[0] || (req.file?.fieldname === "notesFile" ? req.file : null);
+    if (pdfFile && pdfFile.buffer) {
       try {
-        const b64 = `data:${req.file.mimetype || "application/pdf"};base64,${req.file.buffer.toString("base64")}`;
+        const b64 = `data:${pdfFile.mimetype || "application/pdf"};base64,${pdfFile.buffer.toString("base64")}`;
         const uploadRes = await cloudinary.uploader.upload(b64, {
           resource_type: "raw",
           folder: "store_notes",
@@ -142,7 +158,7 @@ export const createAdminProduct = async (req, res) => {
       mrp: Number(mrp || price),
       productType: resolvedProductType,
       category: category || "General",
-      thumbnail: thumbnail || "",
+      thumbnail: resolvedThumbnail || "",
       images: Array.isArray(images) ? images : [],
       isDigital: resolvedIsDigital,
       status: status || "active",
@@ -173,10 +189,26 @@ export const updateAdminProduct = async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body };
 
-    // Handle optional file replacement
-    if (req.file && req.file.buffer) {
+    // Handle optional thumbnail image upload
+    const thumbFile = req.files?.thumbnailFile?.[0] || (req.file?.fieldname === "thumbnailFile" ? req.file : null);
+    if (thumbFile && thumbFile.buffer) {
       try {
-        const b64 = `data:${req.file.mimetype || "application/pdf"};base64,${req.file.buffer.toString("base64")}`;
+        const b64 = `data:${thumbFile.mimetype || "image/jpeg"};base64,${thumbFile.buffer.toString("base64")}`;
+        const uploadRes = await cloudinary.uploader.upload(b64, {
+          resource_type: "image",
+          folder: "store_thumbnails",
+        });
+        updateData.thumbnail = uploadRes.secure_url || uploadRes.url;
+      } catch (uploadErr) {
+        console.warn("Cloudinary thumbnail upload warning:", uploadErr.message);
+      }
+    }
+
+    // Handle optional PDF notes file replacement
+    const pdfFile = req.files?.notesFile?.[0] || (req.file?.fieldname === "notesFile" ? req.file : null);
+    if (pdfFile && pdfFile.buffer) {
+      try {
+        const b64 = `data:${pdfFile.mimetype || "application/pdf"};base64,${pdfFile.buffer.toString("base64")}`;
         const uploadRes = await cloudinary.uploader.upload(b64, {
           resource_type: "raw",
           folder: "store_notes",
@@ -185,6 +217,29 @@ export const updateAdminProduct = async (req, res) => {
       } catch (uploadErr) {
         console.warn("Cloudinary notes upload warning:", uploadErr.message);
       }
+    }
+
+    if (updateData.testSeriesIds) {
+      if (typeof updateData.testSeriesIds === "string") {
+        try {
+          updateData.testSeriesIds = JSON.parse(updateData.testSeriesIds);
+        } catch (_) {
+          updateData.testSeriesIds = updateData.testSeriesIds.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+      }
+    }
+
+    if (updateData.bundleItems && typeof updateData.bundleItems === "string") {
+      try {
+        updateData.bundleItems = JSON.parse(updateData.bundleItems);
+      } catch (_) {}
+    }
+
+    if (updateData.isDigital !== undefined) {
+      updateData.isDigital = updateData.isDigital === true || updateData.isDigital === "true";
+    }
+    if (updateData.featured !== undefined) {
+      updateData.featured = updateData.featured === true || updateData.featured === "true";
     }
 
     if (updateData.price !== undefined) updateData.price = Number(updateData.price);

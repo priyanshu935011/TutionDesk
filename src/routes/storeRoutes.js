@@ -31,6 +31,10 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB for notes PDF
 });
+const productUpload = upload.fields([
+  { name: "notesFile", maxCount: 1 },
+  { name: "thumbnailFile", maxCount: 1 },
+]);
 
 const router = express.Router();
 
@@ -68,8 +72,8 @@ router.use("/admin", protect);
 // Products
 router.get("/admin/products", getAdminProducts);
 router.get("/admin/locked-test-series", getLockedTestSeries);
-router.post("/admin/products", upload.single("notesFile"), createAdminProduct);
-router.put("/admin/products/:id", upload.single("notesFile"), updateAdminProduct);
+router.post("/admin/products", productUpload, createAdminProduct);
+router.put("/admin/products/:id", productUpload, updateAdminProduct);
 router.delete("/admin/products/:id", deleteAdminProduct);
 router.post("/admin/generate-description", generateProductDescription);
 
