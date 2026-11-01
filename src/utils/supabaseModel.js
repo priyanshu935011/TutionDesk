@@ -2032,7 +2032,7 @@ class SupabaseModel {
     let q = queryBuilder;
     const cleanValue = (v) => {
       if (v === null || v === undefined) return v;
-      if (typeof v === "object" && !(v instanceof Date) && !Array.isArray(v) && v.$in === undefined && v.$gte === undefined && v.$lte === undefined && v.$gt === undefined && v.$lt === undefined && v.$ne === undefined && v.$nin === undefined && v.$size === undefined) {
+      if (typeof v === "object" && !(v instanceof Date) && !(v instanceof RegExp) && !Array.isArray(v) && v.$in === undefined && v.$gte === undefined && v.$lte === undefined && v.$gt === undefined && v.$lt === undefined && v.$ne === undefined && v.$nin === undefined && v.$regex === undefined && v.$size === undefined) {
         if (v._id) return String(v._id);
         if (v.id) return String(v.id);
         return String(v);
@@ -2085,6 +2085,17 @@ class SupabaseModel {
             }
 
             let subVal = cleanValue(rawSubVal);
+            if (subVal && typeof subVal === "object" && subVal.$regex !== undefined) {
+              const raw = subVal.$regex instanceof RegExp ? subVal.$regex.source : String(subVal.$regex || "");
+              const isAnchored = raw.startsWith("^") && raw.endsWith("$");
+              const cleanPattern = raw.replace(/^[\^/]+|[$/i]+$/g, "").trim();
+              if (isAnchored) {
+                orParts.push(`${dbSubKey}.ilike.${cleanPattern}`);
+              } else {
+                orParts.push(`${dbSubKey}.ilike.*${cleanPattern}*`);
+              }
+              continue;
+            }
             if (subVal && typeof subVal === "object" && subVal.$in !== undefined) {
               subVal = subVal.$in;
             }
@@ -2225,6 +2236,15 @@ class SupabaseModel {
             }
           } else if (op === "$nin") {
             q = q.not(dbKey, "in", `(${formattedVal.map(v => String(v)).join(",")})`);
+          } else if (op === "$regex") {
+            const raw = formattedVal instanceof RegExp ? formattedVal.source : String(formattedVal || "");
+            const isAnchored = raw.startsWith("^") && raw.endsWith("$");
+            const cleanPattern = raw.replace(/^[\^/]+|[$/i]+$/g, "").trim();
+            if (isAnchored) {
+              q = q.ilike(dbKey, cleanPattern);
+            } else {
+              q = q.ilike(dbKey, `%${cleanPattern}%`);
+            }
           }
         }
       } else {

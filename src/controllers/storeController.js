@@ -673,18 +673,13 @@ export const getStoreProducts = async (req, res) => {
       category !== "All" &&
       category !== "All Categories" &&
       category !== "all" &&
-      category !== "New Goal" &&
       category.trim() !== ""
     ) {
       filter.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
     }
     if (type && type !== "all") filter.productType = type;
     if (subject && subject.trim() && subject !== "all") {
-      filter.$or = [
-        { subject: { $regex: subject.trim(), $options: "i" } },
-        { title: { $regex: subject.trim(), $options: "i" } },
-        { description: { $regex: subject.trim(), $options: "i" } },
-      ];
+      filter.subject = { $regex: new RegExp(`^${subject.trim()}$`, "i") };
     }
     if (search && search.trim()) {
       filter.title = { $regex: search.trim(), $options: "i" };
