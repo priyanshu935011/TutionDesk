@@ -79,6 +79,7 @@ export const createAdminProduct = async (req, res) => {
       mrp,
       productType,
       category,
+      subject,
       thumbnail,
       images,
       isDigital,
@@ -158,6 +159,7 @@ export const createAdminProduct = async (req, res) => {
       mrp: Number(mrp || price),
       productType: resolvedProductType,
       category: category || "General",
+      subject: (subject || "").trim(),
       thumbnail: resolvedThumbnail || "",
       images: Array.isArray(images) ? images : [],
       isDigital: resolvedIsDigital,
@@ -497,6 +499,42 @@ export const getStoreSettings = async (req, res) => {
         { title: "UG Entrance", desc: "CUET, Nursing & Defense", emoji: "🏛️" },
         { title: "All Categories", desc: "Explore entire store catalog", emoji: "✨" },
       ],
+      goalSubjects: {
+        "NEET": [
+          { name: "Physics", emoji: "⚡", description: "Mechanics, Electrodynamics & Modern Physics" },
+          { name: "Chemistry", emoji: "🧪", description: "Organic, Inorganic & Physical Chemistry" },
+          { name: "Botany", emoji: "🌿", description: "Plant Physiology, Genetics & Ecology" },
+          { name: "Zoology", emoji: "🧬", description: "Human Physiology, Animal Kingdom & Biotech" },
+        ],
+        "JEE": [
+          { name: "Physics", emoji: "⚡", description: "Mechanics, Optics & Thermodynamics" },
+          { name: "Chemistry", emoji: "🧪", description: "Physical, Organic & Inorganic" },
+          { name: "Mathematics", emoji: "📐", description: "Calculus, Algebra, Coordinate Geometry & Vectors" },
+        ],
+        "Class 10": [
+          { name: "Science", emoji: "🔬", description: "Physics, Chemistry & Biology" },
+          { name: "Mathematics", emoji: "📐", description: "Standard & Basic Mathematics" },
+          { name: "Social Science", emoji: "🌍", description: "History, Civics, Geography & Economics" },
+          { name: "English", emoji: "📖", description: "Literature & Grammar" },
+        ],
+        "Class 12": [
+          { name: "Physics", emoji: "⚡", description: "CBSE & State Board Modules" },
+          { name: "Chemistry", emoji: "🧪", description: "CBSE & State Board Modules" },
+          { name: "Mathematics", emoji: "📐", description: "Calculus, Vectors & Probability" },
+          { name: "Biology", emoji: "🌿", description: "Genetics, Biotech & Reproduction" },
+        ],
+        "UG Entrance": [
+          { name: "General Test", emoji: "🧠", description: "Logical Reasoning & Quantitative Aptitude" },
+          { name: "English / Language", emoji: "📖", description: "Reading Comprehension & Vocabulary" },
+          { name: "Domain Subjects", emoji: "📚", description: "Commerce, Humanities & Science Domains" },
+        ],
+        "All Categories": [
+          { name: "Physics", emoji: "⚡", description: "All levels" },
+          { name: "Chemistry", emoji: "🧪", description: "All levels" },
+          { name: "Mathematics", emoji: "📐", description: "All levels" },
+          { name: "Biology", emoji: "🌿", description: "All levels" },
+        ],
+      },
       flashSaleEnabled: true,
       flashSaleTitle: "FLASH SALE",
       flashSaleSubtitle: "STARTS ON 30TH OCT",
@@ -607,11 +645,27 @@ export const uploadStoreBanner = async (req, res) => {
 
 export const getStoreProducts = async (req, res) => {
   try {
-    const { category, type, search } = req.query;
+    const { category, type, search, subject } = req.query;
     const filter = { status: "active" };
 
-    if (category && category !== "All") filter.category = category;
+    if (
+      category &&
+      category !== "All" &&
+      category !== "All Categories" &&
+      category !== "all" &&
+      category !== "New Goal" &&
+      category.trim() !== ""
+    ) {
+      filter.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
+    }
     if (type && type !== "all") filter.productType = type;
+    if (subject && subject.trim() && subject !== "all") {
+      filter.$or = [
+        { subject: { $regex: subject.trim(), $options: "i" } },
+        { title: { $regex: subject.trim(), $options: "i" } },
+        { description: { $regex: subject.trim(), $options: "i" } },
+      ];
+    }
     if (search && search.trim()) {
       filter.title = { $regex: search.trim(), $options: "i" };
     }

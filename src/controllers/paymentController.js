@@ -2450,5 +2450,259 @@ export const verifyPublicPaymentOrder = async (req, res) => {
   }
 };
 
+/**
+ * Public HTML Cashfree Checkout Gateway Page
+ * Handles /payments/checkout?session_id=...&order_id=...
+ * Embeds Cashfree JS SDK v3 and auto-initiates checkout with redirectTarget: "_self"
+ */
+export const renderCashfreeCheckoutPage = async (req, res) => {
+  try {
+    const sessionId =
+      req.query.session_id ||
+      req.query.paymentSessionId ||
+      req.query.payment_session_id ||
+      "";
+    const cfOrderId =
+      req.query.order_id ||
+      req.query.cfOrderId ||
+      req.query.orderId ||
+      "";
+
+    if (!sessionId) {
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>ClassTech - Missing Session</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 16px; }
+            .card { background: white; padding: 36px 24px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); text-align: center; max-width: 400px; width: 100%; }
+            h2 { color: #ef4444; margin-top: 0; font-size: 20px; }
+            p { color: #64748b; font-size: 14px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>Payment Session Not Found</h2>
+            <p>A valid Cashfree payment session ID is required to launch secure checkout. Please return to your app or store and try checking out again.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    let isProd = true;
+    try {
+      const config = await getCashfreeConfig();
+      isProd = config.environment === "production";
+    } catch (e) {
+      isProd = process.env.NODE_ENV === "production";
+    }
+
+    const cashfreeMode = isProd ? "production" : "sandbox";
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ClassTech - Secure Checkout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #F8FAFC;
+      color: #0F172A;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .checkout-card {
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 24px;
+      box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.08);
+      max-width: 440px;
+      width: 100%;
+      padding: 36px 28px;
+      text-align: center;
+    }
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #EEF2FF;
+      color: #4C3FBE;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 999px;
+      margin-bottom: 20px;
+    }
+    .brand-badge svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 8px;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #64748B;
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+    .loader {
+      width: 48px;
+      height: 48px;
+      border: 4px solid #EEF2FF;
+      border-top: 4px solid #4C3FBE;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 24px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .order-pill {
+      background: #F1F5F9;
+      border-radius: 12px;
+      padding: 10px 16px;
+      font-size: 12px;
+      color: #475569;
+      margin-bottom: 24px;
+      word-break: break-all;
+    }
+    .order-pill strong {
+      color: #0F172A;
+    }
+    .pay-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      background: #4C3FBE;
+      color: #FFFFFF;
+      border: none;
+      border-radius: 14px;
+      padding: 14px 20px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(76, 63, 190, 0.3);
+      transition: all 0.2s ease;
+    }
+    .pay-btn:hover {
+      background: #3B2FAD;
+      transform: translateY(-1px);
+    }
+    .security-note {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #94A3B8;
+      margin-top: 20px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="checkout-card">
+    <div class="brand-badge">
+      <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+      ClassTech Secure Gateway
+    </div>
+    <h1>Connecting to Payment Gateway</h1>
+    <p class="subtitle">Opening Cashfree secure gateway. Please wait a moment while we redirect you to pay with UPI, Cards, or NetBanking.</p>
+
+    <div class="loader" id="loader"></div>
+
+    ${cfOrderId ? `<div class="order-pill">Order Reference: <strong>${cfOrderId}</strong></div>` : ""}
+
+    <button id="payBtn" class="pay-btn" onclick="startCheckout()" style="display: none;">
+      Click here to Pay Now
+    </button>
+
+    <div class="security-note">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+      256-Bit SSL Secured by Cashfree Payments
+    </div>
+  </div>
+
+  <script>
+    const sessionId = "${sessionId}";
+    const mode = "${cashfreeMode}";
+    let cashfree;
+
+    function initAndCheckout() {
+      try {
+        if (typeof Cashfree !== 'function') {
+          setTimeout(initAndCheckout, 200);
+          return;
+        }
+        cashfree = Cashfree({ mode: mode });
+        cashfree.checkout({
+          paymentSessionId: sessionId,
+          redirectTarget: "_self"
+        }).then(function(result) {
+          if (result && result.error) {
+            console.error("Cashfree checkout error:", result.error);
+            document.getElementById("payBtn").style.display = "inline-flex";
+          }
+        }).catch(function(err) {
+          console.error("Cashfree invoke error:", err);
+          document.getElementById("payBtn").style.display = "inline-flex";
+        });
+      } catch (err) {
+        console.error("Initialization error:", err);
+        document.getElementById("payBtn").style.display = "inline-flex";
+      }
+    }
+
+    function startCheckout() {
+      if (cashfree) {
+        cashfree.checkout({
+          paymentSessionId: sessionId,
+          redirectTarget: "_self"
+        });
+      } else {
+        initAndCheckout();
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", function() {
+      setTimeout(initAndCheckout, 400);
+      setTimeout(function() {
+        document.getElementById("payBtn").style.display = "inline-flex";
+      }, 3000);
+    });
+  </script>
+</body>
+</html>`;
+
+    res.setHeader("Content-Type", "text/html");
+    return res.status(200).send(html);
+  } catch (err) {
+    console.error("renderCashfreeCheckoutPage error:", err);
+    return res.status(500).send("Error rendering checkout page: " + err.message);
+  }
+};
+
+
 
 

@@ -31,6 +31,11 @@ const productSchema = new mongoose.Schema(
       default: "General",
       trim: true,
     },
+    subject: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     thumbnail: {
       type: String,
       default: "",

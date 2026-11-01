@@ -38,12 +38,14 @@ import {
   proxyImage,
   getPublicPaymentOrder,
   verifyPublicPaymentOrder,
+  renderCashfreeCheckoutPage,
 } from "../controllers/paymentController.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const router = express.Router();
 
 // Public webhook, payment checkout & proxy routes
+router.get("/checkout", renderCashfreeCheckoutPage);
 router.post("/webhook", handleCashfreeWebhook);
 router.get("/proxy-image", protect, proxyImage);
 router.get("/public/order/:orderId", getPublicPaymentOrder);
