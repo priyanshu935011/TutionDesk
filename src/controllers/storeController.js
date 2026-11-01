@@ -21,6 +21,40 @@ const getBaseUrl = (environment) => {
 // SUPER ADMIN: PRODUCTS MANAGEMENT
 // -------------------------------------------------------------
 
+export const extractCleanIds = (raw) => {
+  if (!raw) return [];
+  const results = [];
+  const processItem = (item) => {
+    if (!item) return;
+    if (Array.isArray(item)) {
+      item.forEach(processItem);
+      return;
+    }
+    if (typeof item === "object") {
+      const id = item._id || item.id;
+      if (id) processItem(id);
+      return;
+    }
+    if (typeof item === "string") {
+      const trimmed = item.trim();
+      if (!trimmed) return;
+      if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          processItem(parsed);
+          return;
+        } catch (_) {}
+      }
+      const clean = trimmed.replace(/^[\["']+|[\]"']+$/g, "").trim();
+      if (clean && !results.includes(clean)) {
+        results.push(clean);
+      }
+    }
+  };
+  processItem(raw);
+  return results;
+};
+
 export const getAdminProducts = async (req, res) => {
   try {
     const { type, category, status, search } = req.query;
@@ -34,7 +68,13 @@ export const getAdminProducts = async (req, res) => {
     }
 
     const products = await Product.find(filter).sort({ createdAt: -1 });
-    res.json({ products: products || [] });
+    const formatted = (products || []).map((p) => {
+      const pObj = typeof p.toObject === "function" ? p.toObject() : { ...p };
+      pObj.testSeriesIds = extractCleanIds(pObj.testSeriesIds || pObj.test_series_ids);
+      pObj.bundleItems = extractCleanIds(pObj.bundleItems || pObj.bundle_items);
+      return pObj;
+    });
+    res.json({ products: formatted });
   } catch (err) {
     console.error("getAdminProducts error:", err);
     res.status(500).json({ message: "Failed to fetch products", error: err.message });
@@ -137,20 +177,8 @@ export const createAdminProduct = async (req, res) => {
     const resolvedIsDigital =
       isDigital !== undefined ? (isDigital === true || isDigital === "true") : resolvedProductType !== "offline";
 
-    const parsedTestSeriesIds = Array.isArray(testSeriesIds)
-      ? testSeriesIds
-      : typeof testSeriesIds === "string" && testSeriesIds.trim()
-      ? testSeriesIds.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
-
-    let parsedBundleItems = [];
-    if (Array.isArray(bundleItems)) {
-      parsedBundleItems = bundleItems;
-    } else if (typeof bundleItems === "string") {
-      try {
-        parsedBundleItems = JSON.parse(bundleItems);
-      } catch (_) {}
-    }
+    const parsedTestSeriesIds = extractCleanIds(testSeriesIds);
+    const parsedBundleItems = extractCleanIds(bundleItems);
 
     const product = await Product.create({
       title: title.trim(),
@@ -221,20 +249,12 @@ export const updateAdminProduct = async (req, res) => {
       }
     }
 
-    if (updateData.testSeriesIds) {
-      if (typeof updateData.testSeriesIds === "string") {
-        try {
-          updateData.testSeriesIds = JSON.parse(updateData.testSeriesIds);
-        } catch (_) {
-          updateData.testSeriesIds = updateData.testSeriesIds.split(",").map((s) => s.trim()).filter(Boolean);
-        }
-      }
+    if (updateData.testSeriesIds !== undefined) {
+      updateData.testSeriesIds = extractCleanIds(updateData.testSeriesIds);
     }
 
-    if (updateData.bundleItems && typeof updateData.bundleItems === "string") {
-      try {
-        updateData.bundleItems = JSON.parse(updateData.bundleItems);
-      } catch (_) {}
+    if (updateData.bundleItems !== undefined) {
+      updateData.bundleItems = extractCleanIds(updateData.bundleItems);
     }
 
     if (updateData.isDigital !== undefined) {
@@ -699,9 +719,10 @@ export const getStoreProductById = async (req, res) => {
 
     // If product contains test series IDs, load their titles and question counts for clarity
     let attachedTestSeries = [];
-    if (Array.isArray(product.testSeriesIds) && product.testSeriesIds.length > 0) {
+    const cleanTestSeriesIds = extractCleanIds(product.testSeriesIds || product.test_series_ids);
+    if (cleanTestSeriesIds.length > 0) {
       attachedTestSeries = await TestSeries.find({
-        _id: { $in: product.testSeriesIds },
+        _id: { $in: cleanTestSeriesIds },
       }).select("title category totalMarks durationMinutes");
     }
 
