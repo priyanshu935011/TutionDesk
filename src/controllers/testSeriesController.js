@@ -921,13 +921,15 @@ export const getStudentTests = async (req, res) => {
         hasAttempted: Boolean(att),
         latestAttempt: att
           ? {
-              attemptId: att._id,
+              attemptId: att._id || att.id,
               score: att.score,
               totalMarks: att.totalMarks,
               percentage: att.percentage,
               isPassed: att.isPassed,
               timeTakenSeconds: att.timeTakenSeconds,
               submittedAt: att.submittedAt,
+              hasAiAnalysis: Boolean(att.aiAnalysis || att.ai_analysis),
+              aiAnalysis: att.aiAnalysis || att.ai_analysis || null,
             }
           : null,
       };
@@ -1194,12 +1196,184 @@ export const getStudentAttemptResult = async (req, res) => {
         wrongAnswersCount: attempt.wrongAnswersCount,
         unansweredCount: attempt.unansweredCount,
         submittedAt: attempt.submittedAt,
+        aiAnalysis: attempt.aiAnalysis || attempt.ai_analysis || null,
         review,
       },
     });
   } catch (error) {
     console.error("Error fetching student attempt result:", error);
     res.status(500).json({ message: "Failed to fetch attempt result" });
+  }
+};
+
+export const analyzeStudentTestAttempt = async (req, res) => {
+  try {
+    const { attemptId } = req.params;
+    const studentId = req.student?._id || req.user?._id;
+
+    const attempt = await TestSeriesAttempt.findById(attemptId);
+    if (!attempt) {
+      return res.status(404).json({ message: "Attempt not found" });
+    }
+
+    // Verify student ownership if student role
+    if (
+      studentId &&
+      attempt.student &&
+      String(attempt.student) !== String(studentId) &&
+      String(attempt.student_id) !== String(studentId) &&
+      req.user?.role !== "superadmin" &&
+      req.user?.role !== "admin"
+    ) {
+      return res.status(403).json({ message: "Unauthorized to view this attempt analysis" });
+    }
+
+    // 1. If analysis already exists in the database, return it immediately without re-calling AI!
+    const existingAnalysis = attempt.aiAnalysis || attempt.ai_analysis;
+    if (existingAnalysis && typeof existingAnalysis === "object" && Object.keys(existingAnalysis).length > 0) {
+      return res.json({
+        success: true,
+        cached: true,
+        analysis: existingAnalysis,
+      });
+    }
+
+    // 2. Fetch the test details
+    const test = await TestSeries.findById(attempt.testSeries || attempt.test_series_id);
+    if (!test) {
+      return res.status(404).json({ message: "Test series not found" });
+    }
+
+    const questionMap = new Map();
+    (test.questions || []).forEach((q) => questionMap.set(String(q.id), q));
+
+    // Prepare questions summary for AI
+    const questionsSummary = (attempt.answers || []).map((ans, idx) => {
+      const q = questionMap.get(String(ans.questionId)) || {};
+      return {
+        questionNumber: idx + 1,
+        questionText: q.question || "",
+        isCorrect: Boolean(ans.isCorrect),
+        marksObtained: ans.marksObtained || 0,
+        maxMarks: q.marks || 4,
+        options: (q.options || []).map((o) => o.text || o.title || ""),
+        correctAnswers: q.correctAnswers || [],
+        studentSelected: ans.selectedAnswers || [],
+      };
+    });
+
+    const totalQuestions = attempt.totalQuestions || test.questions?.length || questionsSummary.length;
+    const timeTakenMins = ((attempt.timeTakenSeconds || 0) / 60).toFixed(1);
+    const allocatedMins = test.durationMinutes || 60;
+    const avgSecPerQ = totalQuestions > 0 ? Math.round((attempt.timeTakenSeconds || 0) / totalQuestions) : 0;
+
+    const prompt = `You are Classtech AI, an expert exam coach and academic mentor.
+Analyze the following student test series attempt thoroughly and generate structured, encouraging, highly actionable diagnostic analysis.
+
+TEST CONTEXT:
+- Title: "${test.title}"
+- Subject/Category: "${test.category || "General"}"
+- Score: ${attempt.score} / ${attempt.totalMarks} (${attempt.percentage}%) - ${attempt.isPassed ? "PASSED" : "NEEDS WORK"}
+- Questions: ${attempt.correctAnswersCount} Correct, ${attempt.wrongAnswersCount} Wrong, ${attempt.unansweredCount} Unanswered (Total: ${totalQuestions})
+- Time Taken: ${attempt.timeTakenSeconds || 0} seconds (~${timeTakenMins} mins) out of ${allocatedMins} mins allocated (Average: ${avgSecPerQ} seconds/question).
+
+QUESTIONS PERFORMANCE:
+${JSON.stringify(questionsSummary, null, 2)}
+
+INSTRUCTIONS:
+Return a valid JSON object matching EXACTLY this structure:
+{
+  "summary": "2-3 motivational, diagnostic sentences evaluating their overall performance and mindset.",
+  "strongTopics": [
+    {
+      "topic": "Name of topic or question domain",
+      "insight": "Brief sentence explaining what the student mastered or answered well."
+    }
+  ],
+  "weakTopics": [
+    {
+      "topic": "Name of topic or question domain",
+      "insight": "Why the student struggled or what misconception occurred.",
+      "recommendation": "Concrete study recommendation, formula, or concept to review."
+    }
+  ],
+  "howToImprove": [
+    "Clear, prioritized bullet point step 1",
+    "Clear, prioritized bullet point step 2",
+    "Clear, prioritized bullet point step 3"
+  ],
+  "timeManagement": {
+    "paceRating": "Optimal",
+    "averageSecondsPerQuestion": ${avgSecPerQ},
+    "feedback": "Specific feedback on their speed and pacing strategy vs standard examination benchmarks."
+  }
+}
+Respond with ONLY the raw JSON object. Do not include markdown codeblocks or other formatting outside the JSON.`;
+
+    let analysis = null;
+    try {
+      const rawAi = await callGeminiApi({ prompt, jsonMode: true });
+      analysis = extractJsonFromText(rawAi);
+    } catch (aiErr) {
+      console.warn("AI analysis generation failed, using intelligent fallback:", aiErr.message);
+    }
+
+    // Fallback if AI fails or returns empty
+    if (!analysis || !analysis.summary) {
+      const isHigh = (attempt.percentage || 0) >= 70;
+      const isMid = (attempt.percentage || 0) >= 40;
+      analysis = {
+        summary: isHigh
+          ? `Outstanding performance on ${test.title}! You scored ${attempt.score}/${attempt.totalMarks} (${attempt.percentage}%), showing solid conceptual grasp.`
+          : isMid
+          ? `Solid effort on ${test.title} with ${attempt.score}/${attempt.totalMarks} (${attempt.percentage}%). Targeted review on tricky questions will elevate your rank.`
+          : `You scored ${attempt.score}/${attempt.totalMarks} on ${test.title}. Focus on revisiting foundational concepts to boost confidence for upcoming tests.`,
+        strongTopics: [
+          {
+            topic: (attempt.correctAnswersCount || 0) > 0 ? "Accurate Concept Application" : "Active Assessment",
+            insight: `Successfully solved ${attempt.correctAnswersCount || 0} question(s) with high precision.`,
+          },
+        ],
+        weakTopics: [
+          {
+            topic: (attempt.wrongAnswersCount || 0) > 0 ? "Incorrect Question Analysis" : "Speed & Revision",
+            insight: `${attempt.wrongAnswersCount || 0} question(s) had incorrect responses and ${attempt.unansweredCount || 0} were unattempted.`,
+            recommendation: "Review the detailed solutions below and make quick summary notes on formulas.",
+          },
+        ],
+        howToImprove: [
+          "Study every incorrect and unattempted question's solution in the review section below.",
+          "Note down key formulas and repeat 3-5 similar practice problems.",
+          "Re-attempt this test series within a week to track your improvement.",
+        ],
+        timeManagement: {
+          paceRating: avgSecPerQ < 40 ? "Fast" : avgSecPerQ > 120 ? "Slow" : "Balanced",
+          averageSecondsPerQuestion: avgSecPerQ,
+          feedback: `You completed this test in ~${timeTakenMins} minutes (${avgSecPerQ} seconds per question). Maintain consistent focus and keep 3-5 minutes for final review.`,
+        },
+      };
+    }
+
+    // 3. Save the analysis to the database on the attempt document!
+    try {
+      attempt.aiAnalysis = analysis;
+      attempt.ai_analysis = analysis;
+      await TestSeriesAttempt.updateOne(
+        { _id: attempt._id },
+        { $set: { aiAnalysis: analysis, ai_analysis: analysis } }
+      );
+    } catch (dbErr) {
+      console.warn("Could not persist AI analysis to DB:", dbErr.message);
+    }
+
+    res.json({
+      success: true,
+      cached: false,
+      analysis,
+    });
+  } catch (error) {
+    console.error("Error analyzing student test attempt:", error);
+    res.status(500).json({ message: "Failed to generate AI analysis", error: error.message });
   }
 };
 

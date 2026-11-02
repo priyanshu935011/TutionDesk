@@ -97,6 +97,10 @@ const testSeriesAttemptSchema = new mongoose.Schema(
         marksObtained: { type: Number, default: 0 },
       },
     ],
+    aiAnalysis: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
   },
   { timestamps: true }
 );

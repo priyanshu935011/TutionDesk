@@ -22,6 +22,7 @@ import {
   startStudentTest,
   submitStudentTest,
   getStudentAttemptResult,
+  analyzeStudentTestAttempt,
   convertPdfToTestSeries,
 } from "../controllers/testSeriesController.js";
 
@@ -52,6 +53,8 @@ router.get("/student/my-tests", studentAuth, getStudentTests);
 router.get("/student/:id/start", studentAuth, startStudentTest);
 router.post("/student/:id/submit", studentAuth, submitStudentTest);
 router.get("/student/attempt/:attemptId", studentAuth, getStudentAttemptResult);
+router.get("/student/attempt/:attemptId/analyze", studentAuth, analyzeStudentTestAttempt);
+router.post("/student/attempt/:attemptId/analyze", studentAuth, analyzeStudentTestAttempt);
 
 // ---------------- COMMON / TEACHER / ADMIN ROUTES ----------------
 router.use(protect);

@@ -704,6 +704,10 @@ class SupabaseDocument {
       this.createdBy = data.created_by;
       this.created_by = data.created_by;
     }
+    if (data.ai_analysis !== undefined) {
+      this.aiAnalysis = data.ai_analysis;
+      this.ai_analysis = data.ai_analysis;
+    }
 
     if (tableName === "whatsapp_logs") {
       this.recipient = data.recipient || data.to || this.to || "";
