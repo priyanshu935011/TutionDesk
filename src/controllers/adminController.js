@@ -457,7 +457,7 @@ export const createInstitute = async (req, res) => {
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
       themeColor: themeColor || "#6366f1",
-      allowedFeatures: allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp", "upi"],
+      allowedFeatures: allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp", "finances", "upi"],
       testSeriesFeatureEnabled: testSeriesFeatureEnabled !== undefined ? Boolean(testSeriesFeatureEnabled) : (allowedFeatures?.includes("test_series") || false),
       allowedTestSeriesCategories: Array.isArray(allowedTestSeriesCategories) ? allowedTestSeriesCategories : [],
       allowedTestSeries: Array.isArray(allowedTestSeries) ? allowedTestSeries : [],

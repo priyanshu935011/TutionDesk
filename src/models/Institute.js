@@ -160,7 +160,7 @@ const instituteSchema = new mongoose.Schema(
     },
     allowedFeatures: {
       type: [String],
-      default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads", "recorded_lectures", "release_videos", "upi"],
+      default: ["attendance", "notes", "marks", "tests", "whatsapp", "leads", "recorded_lectures", "release_videos", "finances", "upi"],
     },
     testSeriesFeatureEnabled: {
       type: Boolean,
