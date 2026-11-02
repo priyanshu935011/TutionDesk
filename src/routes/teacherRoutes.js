@@ -46,6 +46,7 @@ import {
   disburseStaffSalary,
   deleteStaffSalaryDisbursement,
 } from "../controllers/financeController.js";
+import { registerUserFcmToken } from "../controllers/pushNotificationController.js";
 import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -56,37 +57,48 @@ router.get("/notes/:id/download", downloadNote);
 
 router.use(protect);
 
+// FCM Token Registration for Teachers / Staff
+router.post("/fcm-token", registerUserFcmToken);
+
 router.get("/dashboard", getTeacherDashboard);
-router.get("/sync", getTeacherDashboard);
+router.get("/institute-features", getInstituteFeatures);
 router.get("/quick-summary", getQuickSummary);
-router.get("/outstanding-students", getOutstandingStudents);
 router.get("/whatsapp-logs", getWhatsappLogs);
+router.get("/outstanding-students", getOutstandingStudents);
 
-// Direct DB read — no cache/Redis — for always-fresh feature gating
-router.get("/features", getInstituteFeatures);
+router.route("/notes")
+  .get(getNotes)
+  .post(upload.single("file"), uploadNote);
 
-router.get("/notes", getNotes);
-router.get("/notes/:id/download", downloadNote);
-router.post("/notes", upload.single("pdf"), uploadNote);
-router.put("/notes/:id", updateNote);
+router.route("/notes/:id")
+  .put(upload.single("file"), updateNote)
+  .delete(deleteNote);
+
 router.post("/notes/:id/send-whatsapp", sendNoteWhatsApp);
-router.delete("/notes/:id", deleteNote);
 
-router.get("/test-results", getTestResults);
-router.post("/test-results", createTestResult);
+router.route("/test-results")
+  .get(getTestResults)
+  .post(createTestResult);
+
 router.post("/test-results/bulk", createTestResultsBulk);
-router.put("/test-results/:id", updateTestResult);
 router.post("/test-results/:id/send-whatsapp", sendTestResultWhatsApp);
-router.delete("/test-results/:id", deleteTestResult);
-router.post("/test-results/grouped/update", updateGroupedTestResults);
-router.post("/test-results/grouped/delete", deleteGroupedTestResults);
 
+router.route("/test-results/:id")
+  .put(updateTestResult)
+  .delete(deleteTestResult);
+
+router.put("/test-results-grouped", updateGroupedTestResults);
+router.delete("/test-results-grouped", deleteGroupedTestResults);
+
+// Hired Teachers
 router.route("/hired-teachers")
-  .get(getHiredTeachers)
-  .post(createHiredTeacher);
+  .post(createHiredTeacher)
+  .get(getHiredTeachers);
+
 router.route("/hired-teachers/:id")
   .put(updateHiredTeacher)
   .delete(deleteHiredTeacher);
+
 router.get("/hired-teachers/:id/activity", getHiredTeacherActivity);
 router.patch("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
 router.put("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);

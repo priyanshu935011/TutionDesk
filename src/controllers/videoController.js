@@ -18,6 +18,7 @@ import { supabase, readFallbackData, writeFallbackData, syncVideoFallback, toVal
 import Batch from "../models/Batch.js";
 import { isTeacherOfBatch } from "./teacherController.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
+import { sendStudentNotification } from "../services/notificationService.js";
 
 // Helper: Get Bunny Stream Settings
 export const getBunnySettingsHelper = async () => {
@@ -1865,6 +1866,22 @@ export const createVideoRelease = async (req, res) => {
         console.warn("logTeacherActivity warning in createVideoRelease:", logErr.message);
       }
     }
+
+    try {
+      const firstVid = targetVideos[0];
+      const videoTitle = firstVid?.title || "New Video Lecture";
+      const countMsg = targetVideos.length > 1 ? ` (+${targetVideos.length - 1} more)` : "";
+      sendStudentNotification({
+        studentIds,
+        instituteId,
+        title: "New Video Lecture Released",
+        message: `Watch "${videoTitle}"${countMsg} on your student portal.`,
+        type: "video",
+        imageUrl: firstVid?.thumbnailUrl || "",
+        actionUrl: "/student/videos",
+        data: { videoCount: targetVideos.length, title: videoTitle },
+      });
+    } catch (nErr) {}
 
     return res.status(201).json({
       message: `Successfully released ${targetVideos.length} video(s) to ${studentIds.length} student(s).`,

@@ -1,13 +1,21 @@
 import Notification from "../models/Notification.js";
+import Student from "../models/Student.js";
+import User from "../models/User.js";
+import mongoose from "mongoose";
+import { sendFcmPushNotification } from "./fcmService.js";
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Creates and dispatches notifications for students without duplication.
+ * Creates and dispatches push notifications & in-app notifications for students without duplication.
  * @param {Object} params
  * @param {String|Array<String>} params.studentIds - Target student ID or array of student IDs
  * @param {String} [params.instituteId] - Institute ID
  * @param {String} params.title - Notification Title
  * @param {String} params.message - Notification Message Body
- * @param {String} [params.type] - Type ('attendance', 'marks', 'video', 'notes', 'fee_paid', 'fee_reminder', 'notice')
+ * @param {String} [params.type] - Type ('attendance', 'marks', 'video', 'notes', 'fee_paid', 'fee_reminder', 'notice', 'announcement')
+ * @param {String} [params.imageUrl] - Optional banner image URL
+ * @param {String} [params.actionUrl] - Deep link / screen route
  * @param {Object} [params.data] - Additional metadata payload
  */
 export const sendStudentNotification = async ({
@@ -16,92 +24,227 @@ export const sendStudentNotification = async ({
   title,
   message,
   type = "general",
+  imageUrl = "",
+  actionUrl = "",
   data = {},
 }) => {
   try {
     if (!studentIds) return;
     const targets = Array.isArray(studentIds) ? studentIds : [studentIds];
-    const validTargets = targets.map((id) => String(id)).filter((id) => id && id !== "null" && id !== "undefined");
+    const validTargets = targets
+      .map((id) => (typeof id === "object" ? String(id?._id || id?.id || "") : String(id)))
+      .filter((id) => id && id !== "null" && id !== "undefined");
 
     if (validTargets.length === 0) return;
 
+    const cleanTitle = String(title || "").trim();
+    const cleanMessage = String(message || "").trim();
     const nowIso = new Date().toISOString();
-    const { supabase: sb } = await import("../utils/supabase.js");
 
-    const supabasePayloads = validTargets.map((stId) => ({
-      student_id: String(stId),
-      institute_id: instituteId ? String(instituteId) : null,
-      title: title.trim(),
-      message: message.trim(),
-      type,
-      data: data ? JSON.stringify(data) : "{}",
-      is_read: false,
-      created_at: nowIso,
-    }));
-
-    // Primary: Insert into Supabase notifications table directly
-    let inserted = false;
+    // 1. Save in-app notification to Supabase or MongoDB
     try {
-      const { error } = await sb.from("notifications").insert(supabasePayloads);
-      if (!error) {
-        inserted = true;
-      }
-    } catch (sbErr) {
-      console.error("Supabase notifications insert error:", sbErr.message);
-    }
+      const { supabase: sb } = await import("../utils/supabase.js");
+      const supabasePayloads = validTargets.map((stId) => ({
+        student_id: String(stId),
+        institute_id: instituteId ? String(instituteId) : null,
+        title: cleanTitle,
+        message: cleanMessage,
+        type,
+        data: data ? JSON.stringify(data) : "{}",
+        is_read: false,
+        created_at: nowIso,
+      }));
 
-    // Fallback: If Supabase direct insert failed, save to MongoDB model
-    if (!inserted) {
-      try {
+      let inserted = false;
+      if (sb) {
+        try {
+          const { error } = await sb.from("notifications").insert(supabasePayloads);
+          if (!error) {
+            inserted = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!inserted) {
         const notificationDocs = validTargets.map((stId) => ({
           student: stId,
           institute: instituteId || null,
-          title: title.trim(),
-          message: message.trim(),
+          title: cleanTitle,
+          message: cleanMessage,
           type,
           data,
           isRead: false,
           createdAt: new Date(),
         }));
-        await Notification.insertMany(notificationDocs);
-      } catch (mErr) {
-        console.error("Mongo notifications fallback error:", mErr.message);
+        await Notification.insertMany(notificationDocs).catch(() => {});
       }
+    } catch (saveErr) {
+      console.warn("Notification in-app save warning:", saveErr.message);
     }
 
-    // Fetch FCM Tokens for target students & send Push Notification to device status bar
+    // 2. Fetch FCM Tokens for device push notification
+    const tokenSet = new Set();
+
+    // A. Query MongoDB Student model
     try {
-      const Student = (await import("../models/Student.js")).default;
-      const { sendFcmPushNotification } = await import("./fcmService.js");
+      const validMongoIds = validTargets.filter((id) => mongoose.Types.ObjectId.isValid(id));
+      const orConditions = [];
+      if (validMongoIds.length > 0) {
+        orConditions.push({ _id: { $in: validMongoIds } });
+      }
+      orConditions.push({ id: { $in: validTargets } });
+      orConditions.push({ enrollmentNumber: { $in: validTargets } });
 
-      let fcmTokens = [];
-      try {
-        const { data: stRows } = await sb
-          .from("students")
-          .select("fcm_token")
-          .in("id", validTargets);
-        if (stRows && stRows.length > 0) {
-          fcmTokens = stRows.map((r) => r.fcm_token).filter(Boolean);
+      const mongoStudents = await Student.find({ $or: orConditions })
+        .select("fcmToken fcmTokens")
+        .lean();
+
+      for (const st of mongoStudents) {
+        if (st.fcmToken && String(st.fcmToken).trim().length > 10) {
+          tokenSet.add(String(st.fcmToken).trim());
         }
-      } catch (_) {}
-
-      if (fcmTokens.length === 0) {
-        const mongoStudents = await Student.find({ _id: { $in: validTargets } }).select("fcmToken");
-        fcmTokens = mongoStudents.map((s) => s.fcmToken).filter(Boolean);
+        if (Array.isArray(st.fcmTokens)) {
+          st.fcmTokens.forEach((t) => {
+            if (t && String(t).trim().length > 10) tokenSet.add(String(t).trim());
+          });
+        }
       }
+    } catch (mErr) {
+      console.warn("MongoDB student FCM token fetch warning:", mErr.message);
+    }
 
-      if (fcmTokens.length > 0) {
-        await sendFcmPushNotification({
-          fcmTokens,
-          title: title.trim(),
-          body: message.trim(),
-          data: { type, ...data },
-        });
+    // B. Query Supabase students table
+    try {
+      const { supabase: sb } = await import("../utils/supabase.js");
+      if (sb) {
+        const validUuids = validTargets.filter((id) => UUID_REGEX.test(id));
+        if (validUuids.length > 0) {
+          const { data: sbRows } = await sb
+            .from("students")
+            .select("fcm_token")
+            .in("id", validUuids);
+          if (Array.isArray(sbRows)) {
+            for (const r of sbRows) {
+              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
+                tokenSet.add(String(r.fcm_token).trim());
+              }
+            }
+          }
+        }
       }
-    } catch (fcmErr) {
-      console.error("FCM dispatch error in notificationService:", fcmErr.message);
+    } catch (_) {}
+
+    const allTokens = Array.from(tokenSet);
+    if (allTokens.length > 0) {
+      await sendFcmPushNotification({
+        fcmTokens: allTokens,
+        title: cleanTitle,
+        body: cleanMessage,
+        imageUrl: imageUrl ? String(imageUrl).trim() : "",
+        actionUrl: actionUrl ? String(actionUrl).trim() : "",
+        data: {
+          type,
+          instituteId: instituteId ? String(instituteId) : "",
+          ...data,
+        },
+        priority: "high",
+      });
     }
   } catch (err) {
     console.error("sendStudentNotification error:", err.message);
+  }
+};
+
+/**
+ * Creates and dispatches push notifications for staff/teachers/admins.
+ */
+export const sendUserNotification = async ({
+  userIds,
+  title,
+  message,
+  type = "general",
+  imageUrl = "",
+  actionUrl = "",
+  data = {},
+}) => {
+  try {
+    if (!userIds) return;
+    const targets = Array.isArray(userIds) ? userIds : [userIds];
+    const validTargets = targets
+      .map((id) => (typeof id === "object" ? String(id?._id || id?.id || "") : String(id)))
+      .filter((id) => id && id !== "null" && id !== "undefined");
+
+    if (validTargets.length === 0) return;
+
+    const cleanTitle = String(title || "").trim();
+    const cleanMessage = String(message || "").trim();
+    const tokenSet = new Set();
+
+    // Query MongoDB User model
+    try {
+      const validMongoIds = validTargets.filter((id) => mongoose.Types.ObjectId.isValid(id));
+      const orConditions = [];
+      if (validMongoIds.length > 0) {
+        orConditions.push({ _id: { $in: validMongoIds } });
+      }
+      orConditions.push({ id: { $in: validTargets } });
+      orConditions.push({ email: { $in: validTargets } });
+
+      const mongoUsers = await User.find({ $or: orConditions })
+        .select("fcmToken fcmTokens")
+        .lean();
+
+      for (const u of mongoUsers) {
+        if (u.fcmToken && String(u.fcmToken).trim().length > 10) {
+          tokenSet.add(String(u.fcmToken).trim());
+        }
+        if (Array.isArray(u.fcmTokens)) {
+          u.fcmTokens.forEach((t) => {
+            if (t && String(t).trim().length > 10) tokenSet.add(String(t).trim());
+          });
+        }
+      }
+    } catch (uErr) {
+      console.warn("MongoDB user FCM token fetch warning:", uErr.message);
+    }
+
+    // Query Supabase users table
+    try {
+      const { supabase: sb } = await import("../utils/supabase.js");
+      if (sb) {
+        const validUuids = validTargets.filter((id) => UUID_REGEX.test(id));
+        if (validUuids.length > 0) {
+          const { data: sbRows } = await sb
+            .from("users")
+            .select("fcm_token")
+            .in("id", validUuids);
+          if (Array.isArray(sbRows)) {
+            for (const r of sbRows) {
+              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
+                tokenSet.add(String(r.fcm_token).trim());
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    const allTokens = Array.from(tokenSet);
+    if (allTokens.length > 0) {
+      await sendFcmPushNotification({
+        fcmTokens: allTokens,
+        title: cleanTitle,
+        body: cleanMessage,
+        imageUrl: imageUrl ? String(imageUrl).trim() : "",
+        actionUrl: actionUrl ? String(actionUrl).trim() : "",
+        data: {
+          type,
+          ...data,
+        },
+        priority: "high",
+      });
+    }
+  } catch (err) {
+    console.error("sendUserNotification error:", err.message);
   }
 };

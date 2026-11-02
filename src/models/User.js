@@ -89,6 +89,14 @@ const userSchema = new mongoose.Schema(
         ref: "Batch",
       },
     ],
+    fcmToken: {
+      type: String,
+      default: null,
+    },
+    fcmTokens: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,

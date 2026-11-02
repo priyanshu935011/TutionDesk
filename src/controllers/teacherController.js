@@ -1265,7 +1265,15 @@ export const uploadNote = async (req, res) => {
     try {
       let targetStudentIds = resolvedStudentIds;
       if (targetType !== "student") {
-        const sQuery = primaryBatchId ? { batch: primaryBatchId } : {};
+        let sQuery = {};
+        if (resolvedBatchIds && resolvedBatchIds.length > 0) {
+          sQuery = {
+            institute: instituteId,
+            $or: [{ batch: { $in: resolvedBatchIds } }, { batches: { $in: resolvedBatchIds } }],
+          };
+        } else {
+          sQuery = { institute: instituteId };
+        }
         const batchStudents = await Student.find(sQuery).select("_id");
         targetStudentIds = batchStudents.map((s) => s._id);
       }
@@ -1275,7 +1283,8 @@ export const uploadNote = async (req, res) => {
         title: "New Study Material",
         message: `New study material uploaded: ${title.trim()}.`,
         type: "notes",
-        data: { title: title.trim() },
+        data: { title: title.trim(), noteCategory: noteCategory || "Notes" },
+        actionUrl: "/student/notes",
       });
     } catch (nErr) {}
 
@@ -1803,6 +1812,23 @@ export const createTestResult = async (req, res) => {
         batchId: req.body.batchId || req.body.batch || null,
       });
     }
+
+    try {
+      const totalNum = Number(totalMarks || 100);
+      const scoreNum = isAbsent ? "Absent" : Number(score);
+      const percentage = !isAbsent && totalNum > 0 ? Math.round((Number(score) / totalNum) * 100) : null;
+      sendStudentNotification({
+        studentIds: [studentId],
+        instituteId,
+        title: "New Test Result",
+        message: isAbsent
+          ? `You were marked absent for test: ${title.trim()} (${subject.trim()}).`
+          : `Your score for ${title.trim()} (${subject.trim()}): ${scoreNum}/${totalNum}${percentage !== null ? ` (${percentage}%)` : ""}.`,
+        type: "marks",
+        data: { title: title.trim(), score: scoreNum, totalMarks: totalNum, percentage, subject: subject.trim() },
+        actionUrl: "/student/marks",
+      });
+    } catch (nErr) {}
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
@@ -2738,6 +2764,24 @@ export const updateTestResult = async (req, res) => {
     if (remarks !== undefined) result.remarks = remarks;
 
     await result.save();
+
+    try {
+      const isAbsent = result.score === -1;
+      const totalNum = Number(result.totalMarks || 100);
+      const scoreNum = isAbsent ? "Absent" : Number(result.score);
+      const percentage = !isAbsent && totalNum > 0 ? Math.round((Number(result.score) / totalNum) * 100) : null;
+      sendStudentNotification({
+        studentIds: [result.student],
+        instituteId: result.institute,
+        title: "Test Result Updated",
+        message: isAbsent
+          ? `Your result for test: ${result.title} (${result.subject}) was updated to Absent.`
+          : `Your score for ${result.title} (${result.subject}) was updated to ${scoreNum}/${totalNum}${percentage !== null ? ` (${percentage}%)` : ""}.`,
+        type: "marks",
+        data: { title: result.title, score: scoreNum, totalMarks: totalNum, percentage, subject: result.subject },
+        actionUrl: "/student/marks",
+      });
+    } catch (nErr) {}
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");

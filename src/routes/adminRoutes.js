@@ -53,6 +53,13 @@ import {
   updateAdminFestivalTheme,
   getAiHarvestLogs,
 } from "../controllers/adminController.js";
+import {
+  sendBroadcastNotification,
+  getPushNotificationHistory,
+  getPushNotificationStats,
+  testPushNotification,
+  registerUserFcmToken,
+} from "../controllers/pushNotificationController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
 import {
@@ -107,6 +114,13 @@ router.put("/whatsapp-settings", updateMetaWhatsAppSettings);
 
 router.get("/fcm-settings", getFcmSettings);
 router.put("/fcm-settings", updateFcmSettings);
+
+// Push Notification Studio Routes
+router.post("/push-notifications/broadcast", sendBroadcastNotification);
+router.get("/push-notifications/history", getPushNotificationHistory);
+router.get("/push-notifications/stats", getPushNotificationStats);
+router.post("/push-notifications/test", testPushNotification);
+router.post("/fcm-token", registerUserFcmToken);
 
 router.get("/demo-accounts", getDemoAccounts);
 router.post("/demo-accounts", createDemoAccount);

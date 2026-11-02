@@ -4088,15 +4088,21 @@ export const updateStudentFcmToken = async (req, res) => {
       return res.status(400).json({ message: "fcmToken is required" });
     }
 
+    const cleanToken = String(fcmToken).trim();
     const { supabase: sb } = await import("../utils/supabase.js");
     try {
-      await sb
-        .from("students")
-        .update({ fcm_token: String(fcmToken).trim() })
-        .eq("id", String(studentId));
+      if (sb) {
+        await sb
+          .from("students")
+          .update({ fcm_token: cleanToken })
+          .eq("id", String(studentId));
+      }
     } catch (_) {}
 
-    await Student.findByIdAndUpdate(studentId, { fcmToken: String(fcmToken).trim() });
+    await Student.findByIdAndUpdate(studentId, {
+      fcmToken: cleanToken,
+      $addToSet: { fcmTokens: cleanToken },
+    });
 
     return res.json({ message: "FCM token registered successfully!" });
   } catch (error) {

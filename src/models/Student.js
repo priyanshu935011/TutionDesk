@@ -163,6 +163,14 @@ const studentSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    fcmToken: {
+      type: String,
+      default: null,
+    },
+    fcmTokens: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
