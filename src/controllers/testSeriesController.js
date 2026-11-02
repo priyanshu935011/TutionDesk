@@ -12,6 +12,7 @@ import { callGeminiApi, extractJsonFromText } from "../services/aiService.js";
 import { isTeacherOfBatch } from "./teacherController.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
+import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 
 const DEFAULT_CATEGORIES = [
   { name: "Class 10", icon: "🎓" },
@@ -730,6 +731,9 @@ export const assignTestSeries = async (req, res) => {
     }
 
     await access.save();
+    try {
+      await clearCachePattern("student:test_series:*");
+    } catch (_) {}
 
     res.json({
       message: "Test series assignment updated",
@@ -826,6 +830,23 @@ export const getTestSeriesAnalytics = async (req, res) => {
 export const getStudentTests = async (req, res) => {
   try {
     const studentId = req.student?._id || req.user?._id;
+    const isRefresh = req.query.nocache === "true" || req.query.refresh === "true";
+    const cacheKey = `student:test_series:${studentId}`;
+
+    if (isRefresh) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+    } else if (studentId) {
+      try {
+        const cached = await getCache(cacheKey);
+        if (cached) {
+          return res.json(cached);
+        }
+      } catch (_) {}
+    }
+
     const student = await Student.findById(studentId);
     if (!student) {
       return res.status(404).json({ message: "Student record not found" });
@@ -935,10 +956,18 @@ export const getStudentTests = async (req, res) => {
       };
     });
 
-    res.json({
+    const responsePayload = {
       enabled: true,
       testSeries: result,
-    });
+    };
+
+    if (studentId) {
+      try {
+        await setCache(cacheKey, responsePayload, 7200);
+      } catch (_) {}
+    }
+
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching student test series:", error);
     res.status(500).json({ message: "Failed to fetch student tests" });
@@ -1118,6 +1147,10 @@ export const submitStudentTest = async (req, res) => {
         marksObtained: ea.marksObtained,
       })),
     });
+
+    try {
+      await deleteCache(`student:test_series:${studentId}`);
+    } catch (_) {}
 
     res.json({
       message: "Test submitted successfully",

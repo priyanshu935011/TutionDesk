@@ -2871,10 +2871,39 @@ export const getStudentVideos = async (req, res) => {
 
 export const getStudentFeePayment = async (req, res) => {
   try {
+    const studentEnrollment =
+      req.student?.enrollmentNumber ||
+      req.students?.[0]?.enrollmentNumber ||
+      req.studentEmail ||
+      req.user?._id;
+    const cacheKey = `student:fee_payment:${studentEnrollment}`;
+    const isRefresh = req.query.nocache === "true" || req.query.refresh === "true";
+
+    if (isRefresh) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+    } else if (studentEnrollment) {
+      try {
+        const cached = await getCache(cacheKey);
+        if (cached) {
+          return res.json(cached);
+        }
+      } catch (_) {}
+    }
+
+    // Fetch fresh student records from database so latest payments and receipts are included
     const students = req.students || (req.student ? [req.student] : []);
+    const studentIds = students.map((s) => s._id || s.id).filter(Boolean);
+    const freshStudents = studentIds.length > 0
+      ? await Student.find({ _id: { $in: studentIds } })
+      : students;
+    const studentsToUse = freshStudents.length > 0 ? freshStudents : students;
+
     const feesMap = {};
 
-    for (const student of students) {
+    for (const student of studentsToUse) {
       const totalFees = Number(student.totalFees || 0);
       const paymentHistory = student.paymentHistory || [];
       const paidAmount = paymentHistory.reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -2892,7 +2921,14 @@ export const getStudentFeePayment = async (req, res) => {
       };
     }
 
-    return res.json({ success: true, fees: feesMap });
+    const payload = { success: true, fees: feesMap };
+    if (studentEnrollment) {
+      try {
+        await setCache(cacheKey, payload, 7200);
+      } catch (_) {}
+    }
+
+    return res.json(payload);
   } catch (error) {
     console.error("getStudentFeePayment error:", error);
     return res.status(500).json({ message: "Error fetching fee payment details" });
