@@ -1136,6 +1136,28 @@ class SupabaseDocument {
       }
     }
 
+    if (this._tableName === "test_series_attempts") {
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.test_series !== undefined || payload.test_series_id !== undefined || payload.testSeries !== undefined) {
+        const ts = payload.test_series_id || payload.test_series || payload.testSeries;
+        payload.test_series_id = toValidUUID(ts);
+        delete payload.test_series;
+        delete payload.testSeries;
+      }
+      if (payload.student !== undefined || payload.student_id !== undefined) {
+        payload.student_id = toValidUUID(payload.student_id || payload.student);
+        delete payload.student;
+      }
+      if (payload.batch !== undefined || payload.batch_id !== undefined) {
+        const b = payload.batch_id || payload.batch;
+        payload.batch_id = b ? toValidUUID(b) : null;
+        delete payload.batch;
+      }
+    }
+
     if (this._tableName === "support_tickets") {
       if (typeof payload.ticket_number === "string") {
         const numOnly = parseInt(payload.ticket_number.replace(/\D/g, ""), 10);
@@ -1505,7 +1527,7 @@ class SupabaseQuery {
         dbPayload[dbKey] = val;
       }
 
-      const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+      const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
       for (const key of uuidPayloadKeys) {
         if (key in dbPayload) {
           if (dbPayload[key] === "" || dbPayload[key] === undefined || dbPayload[key] === "null") {
@@ -2571,6 +2593,28 @@ class SupabaseModel {
       }
     }
 
+    if (this.tableName === "test_series_attempts") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.test_series || payload.test_series_id || payload.testSeries) {
+        const ts = payload.test_series_id || payload.test_series || payload.testSeries;
+        payload.test_series_id = toValidUUID(ts);
+        delete payload.test_series;
+        delete payload.testSeries;
+      }
+      if (payload.student || payload.student_id) {
+        payload.student_id = toValidUUID(payload.student_id || payload.student);
+        delete payload.student;
+      }
+      if (payload.batch || payload.batch_id) {
+        const b = payload.batch_id || payload.batch;
+        payload.batch_id = b ? toValidUUID(b) : null;
+        delete payload.batch;
+      }
+    }
+
     if (this.tableName === "support_tickets") {
       if (typeof payload.ticket_number === "string") {
         const numOnly = parseInt(payload.ticket_number.replace(/\D/g, ""), 10);
@@ -2596,7 +2640,7 @@ class SupabaseModel {
       delete payload.id;
     }
 
-    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
     for (const key of uuidPayloadKeys) {
       if (key in payload) {
         if (payload[key] === "" || payload[key] === undefined) {
@@ -2835,7 +2879,7 @@ class SupabaseModel {
 
     const payload = update.$set ? update.$set : update;
     const dbPayload = {};
-    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
     for (const [key, val] of Object.entries(payload)) {
       if (key.startsWith("$")) continue;
       const dbKey = camelToSnake(key);
@@ -3111,7 +3155,7 @@ class SupabaseModel {
       dbPayload[dbKey] = val;
     }
 
-    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user"];
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
     for (const key of uuidPayloadKeys) {
       if (key in dbPayload) {
         if (dbPayload[key] === "" || dbPayload[key] === undefined || dbPayload[key] === "null") {

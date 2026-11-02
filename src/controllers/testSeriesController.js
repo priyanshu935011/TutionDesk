@@ -997,20 +997,24 @@ export const submitStudentTest = async (req, res) => {
       return res.status(404).json({ message: "Test series not found" });
     }
 
-    const instId = student.user || student.institute;
+    const instId = student.user || student.institute || student.institute_id || test.institute || test.created_by || "00000000-0000-0000-0000-000000000000";
     let batchName = student.batch?.name || "";
     if (!batchName && student.batch) {
       const bDoc = await Batch.findById(student.batch);
       batchName = bDoc?.name || "";
     }
 
-    // Build answer map from submission
+    // Build answer map from submission (support selectedAnswers, selectedOptionIds, or scalar answers)
     const submittedAnswerMap = new Map();
     answers.forEach((ans) => {
       const selected = Array.isArray(ans.selectedAnswers)
         ? ans.selectedAnswers
+        : Array.isArray(ans.selectedOptionIds)
+        ? ans.selectedOptionIds
         : ans.selectedAnswer !== undefined
         ? [ans.selectedAnswer]
+        : ans.selectedOptionId !== undefined
+        ? [ans.selectedOptionId]
         : [];
       submittedAnswerMap.set(String(ans.questionId), selected);
     });
@@ -1020,7 +1024,7 @@ export const submitStudentTest = async (req, res) => {
     let wrongCount = 0;
     let unansweredCount = 0;
 
-    const evaluatedAnswers = test.questions.map((q) => {
+    const evaluatedAnswers = (test.questions || []).map((q) => {
       const submitted = submittedAnswerMap.get(String(q.id)) || [];
       const isUnanswered = submitted.length === 0;
 
@@ -1031,8 +1035,8 @@ export const submitStudentTest = async (req, res) => {
         unansweredCount++;
         marksObtained = 0;
       } else {
-        const correctSet = new Set(q.correctAnswers.map((a) => String(a).trim()));
-        const submittedSet = new Set(submitted.map((a) => String(a).trim()));
+        const correctSet = new Set((q.correctAnswers || []).map((a) => String(a).trim()));
+        const submittedSet = new Set((submitted || []).map((a) => String(a).trim()));
 
         if (q.type === "multiple_choice") {
           // Exactly matching set of answers
@@ -1082,17 +1086,21 @@ export const submitStudentTest = async (req, res) => {
 
     const attempt = await TestSeriesAttempt.create({
       testSeries: test._id,
+      test_series_id: test._id,
       student: student._id,
+      student_id: student._id,
       studentName: student.name || "Student",
       studentEmail: student.email || "",
       studentPhone: student.phone || student.contactNumber || "",
       institute: instId,
+      institute_id: instId,
       batch: student.batch?._id || student.batch || null,
+      batch_id: student.batch?._id || student.batch || null,
       batchName,
       startedAt: new Date(Date.now() - (Number(timeTakenSeconds) || 0) * 1000),
       submittedAt: new Date(),
       timeTakenSeconds: Number(timeTakenSeconds) || 0,
-      totalQuestions: test.questions.length,
+      totalQuestions: (test.questions || []).length,
       attemptedQuestions: correctCount + wrongCount,
       correctAnswersCount: correctCount,
       wrongAnswersCount: wrongCount,
@@ -1133,7 +1141,7 @@ export const submitStudentTest = async (req, res) => {
     });
   } catch (error) {
     console.error("Error submitting student test:", error);
-    res.status(500).json({ message: "Failed to submit test" });
+    res.status(500).json({ message: "Failed to submit test", error: error.message || String(error) });
   }
 };
 
