@@ -506,6 +506,7 @@ export const getStoreSettings = async (req, res) => {
   try {
     const setting = await SystemSetting.findOne({ key: "store_settings" });
     const defaults = {
+      isStoreVisibleInDashboard: true,
       isStoreEnabled: true,
       storeName: "ClassTech Store",
       searchPlaceholder: "Search for Study Material",
