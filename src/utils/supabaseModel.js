@@ -11,7 +11,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs"
+  "activity_logs", "activitylogs",
+  "staff_attendances", "institute_expenses", "institute_incomes", "staff_salaries"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -2218,6 +2219,18 @@ class SupabaseModel {
         else if (dbKey === "batch") dbKey = "batch_id";
         else if (dbKey === "test_series" || dbKey === "testSeries") dbKey = "test_series_id";
       }
+      if (this.tableName === "staff_attendances") {
+        if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "staff") dbKey = "staff_id";
+      }
+      if (this.tableName === "institute_expenses" || this.tableName === "institute_incomes") {
+        if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "created_by" || dbKey === "createdBy") dbKey = "created_by";
+      }
+      if (this.tableName === "staff_salaries") {
+        if (dbKey === "institute") dbKey = "institute_id";
+        else if (dbKey === "staff") dbKey = "staff_id";
+      }
 
       if (val === null) {
         q = q.is(dbKey, null);
@@ -3424,6 +3437,10 @@ const mockMongoose = {
     else if (modelName === "Product" || modelName === "Products") tableName = "products";
     else if (modelName === "Order" || modelName === "Orders") tableName = "orders";
     else if (modelName === "StudentAddress" || modelName === "StudentAddresses") tableName = "student_addresses";
+    else if (modelName === "StaffAttendance" || modelName === "StaffAttendances") tableName = "staff_attendances";
+    else if (modelName === "InstituteExpense" || modelName === "InstituteExpenses") tableName = "institute_expenses";
+    else if (modelName === "InstituteIncome" || modelName === "InstituteIncomes") tableName = "institute_incomes";
+    else if (modelName === "StaffSalary" || modelName === "StaffSalaries") tableName = "staff_salaries";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";

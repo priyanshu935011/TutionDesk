@@ -3,6 +3,8 @@ import Student from "../models/Student.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
 import Institute from "../models/Institute.js";
+import User from "../models/User.js";
+import { readUserMetadata } from "../utils/supabaseModel.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 
 
@@ -33,7 +35,21 @@ export const getBatches = async (req, res) => {
 
     const query = { user: { $in: userIds } };
     if (req.user.role === "teacher") {
-      query.teacher = req.user._id;
+      const teacherUser = await User.findById(req.user._id);
+      const meta = readUserMetadata()[String(req.user._id)] || {};
+      const rawAssigned = Array.isArray(teacherUser?.assignedBatches) && teacherUser.assignedBatches.length > 0
+        ? teacherUser.assignedBatches
+        : (Array.isArray(meta.assignedBatches) ? meta.assignedBatches : []);
+      const assignedIds = rawAssigned.map(b => String(b._id || b)).filter(Boolean);
+
+      if (assignedIds.length > 0) {
+        query.$or = [
+          { teacher: req.user._id },
+          { _id: { $in: assignedIds } }
+        ];
+      } else {
+        query.teacher = req.user._id;
+      }
     }
 
     if (req.query.status) {

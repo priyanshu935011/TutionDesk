@@ -32,6 +32,20 @@ import {
   getQuickSummary,
   getWhatsappLogs,
 } from "../controllers/teacherController.js";
+import {
+  markStaffAttendance,
+  getStaffAttendanceHistory,
+  getMyStaffAttendance,
+} from "../controllers/staffAttendanceController.js";
+import {
+  getFinanceAnalytics,
+  addExpense,
+  deleteExpense,
+  addIncome,
+  deleteIncome,
+  disburseStaffSalary,
+  deleteStaffSalaryDisbursement,
+} from "../controllers/financeController.js";
 import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -76,6 +90,20 @@ router.route("/hired-teachers/:id")
 router.get("/hired-teachers/:id/activity", getHiredTeacherActivity);
 router.patch("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
 router.put("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
+
+// Staff Attendance
+router.post("/staff-attendance", markStaffAttendance);
+router.get("/staff-attendance/my-attendance", getMyStaffAttendance);
+router.get("/staff-attendance/:staffId", getStaffAttendanceHistory);
+
+// Finance & Analytics
+router.get("/finance-analytics", getFinanceAnalytics);
+router.post("/finance/expenses", addExpense);
+router.delete("/finance/expenses/:id", deleteExpense);
+router.post("/finance/incomes", addIncome);
+router.delete("/finance/incomes/:id", deleteIncome);
+router.post("/finance/disburse-salary", disburseStaffSalary);
+router.delete("/finance/disburse-salary/:staffId/:monthKey", deleteStaffSalaryDisbursement);
 
 // Branding & UPI endpoints
 router.post("/branding/logo", upload.single("logo"), uploadBrandingLogo);

@@ -8,6 +8,7 @@ import Note from "../models/Note.js";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
+import StaffAttendance from "../models/StaffAttendance.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import cloudinary from "../utils/cloudinary.js";
 import {
@@ -2073,10 +2074,10 @@ export const createTestResultsBulk = async (req, res) => {
 
 export const createHiredTeacher = async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { name, email, phone, password, salary, staffRole, assignedBatches } = req.body;
 
     if (req.user.role !== "institute_admin") {
-      return res.status(403).json({ message: "Access denied. Only institute admins can add teachers." });
+      return res.status(403).json({ message: "Access denied. Only institute admins can add staff." });
     }
 
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
@@ -2110,7 +2111,7 @@ export const createHiredTeacher = async (req, res) => {
         (t) => (t.email || "").toLowerCase().trim() === cleanEmail
       );
       if (duplicateEmail) {
-        return res.status(400).json({ message: "A teacher with this email already exists." });
+        return res.status(400).json({ message: "A staff member with this email already exists." });
       }
     }
 
@@ -2122,7 +2123,7 @@ export const createHiredTeacher = async (req, res) => {
         return tLast10.length >= 10 && tLast10 === last10;
       });
       if (duplicatePhone) {
-        return res.status(400).json({ message: "A teacher with this phone number already exists in your institute." });
+        return res.status(400).json({ message: "A staff member with this phone number already exists in your institute." });
       }
     }
 
@@ -2136,6 +2137,10 @@ export const createHiredTeacher = async (req, res) => {
       }
     }
 
+    const batchIdList = Array.isArray(assignedBatches)
+      ? assignedBatches.map(b => String(b._id || b)).filter(Boolean)
+      : [];
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const newTeacher = await User.create({
       name: name.trim(),
@@ -2144,22 +2149,50 @@ export const createHiredTeacher = async (req, res) => {
       password: hashedPassword,
       role: "teacher",
       institute: instituteId,
+      salary: Number(salary || 0),
+      staffRole: staffRole ? String(staffRole).trim() : "Teacher",
+      assignedBatches: batchIdList,
     });
+
+    const tId = String(newTeacher._id || newTeacher.id);
+    const userMeta = readUserMetadata();
+    userMeta[tId] = {
+      ...(userMeta[tId] || {}),
+      salary: Number(salary || 0),
+      staffRole: staffRole ? String(staffRole).trim() : "Teacher",
+      assignedBatches: batchIdList,
+      aiAccessEnabled: true,
+    };
+    writeUserMetadata(userMeta);
+
+    // Sync batches if specified
+    if (batchIdList.length > 0) {
+      try {
+        await Batch.updateMany(
+          { _id: { $in: batchIdList } },
+          { teacher: newTeacher._id }
+        );
+        await clearCachePattern("teacher:batches:*");
+      } catch (_) {}
+    }
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
     return res.status(201).json({
-      _id: newTeacher._id || newTeacher.id,
-      id: newTeacher._id || newTeacher.id,
+      _id: tId,
+      id: tId,
       name: newTeacher.name,
       email: newTeacher.email,
       phone: newTeacher.phone,
       role: newTeacher.role,
+      staffRole: newTeacher.staffRole || "Teacher",
+      salary: Number(newTeacher.salary || 0),
+      assignedBatches: batchIdList,
     });
   } catch (error) {
     console.error("addHiredTeacher error:", error);
-    return res.status(500).json({ message: error.message || "Could not create teacher" });
+    return res.status(500).json({ message: error.message || "Could not create staff member" });
   }
 };
 
@@ -2169,16 +2202,35 @@ export const getHiredTeachers = async (req, res) => {
       return res.json([]);
     }
     if (req.user.role !== "institute_admin") {
-      return res.status(403).json({ message: "Access denied. Only institute admins can view teachers." });
+      return res.status(403).json({ message: "Access denied. Only institute admins can view staff." });
     }
 
     const instituteId = req.user.institute?._id || req.user.institute;
     const teachers = await User.find({
       institute: instituteId,
       role: "teacher",
-    }).select("name email phone role createdAt aiAccessEnabled activity");
+    }).select("name email phone role createdAt aiAccessEnabled activity salary staffRole assignedBatches");
 
     const userMeta = readUserMetadata();
+
+    // Fetch batches to resolve assigned batches
+    const batches = await Batch.find({
+      $or: [{ user: instituteId }, { user: req.user._id }],
+    }).select("name teacher");
+
+    // Fetch today's attendance for these staff members
+    const d = new Date();
+    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const todayAttendances = await StaffAttendance.find({
+      institute: instituteId,
+      date: todayStr,
+    });
+    const attendanceMap = new Map();
+    for (const att of todayAttendances) {
+      const aObj = att.toObject ? att.toObject() : att;
+      attendanceMap.set(String(aObj.staff), aObj);
+    }
+
     const formatted = teachers.map((t) => {
       const tId = String(t._id || t.id);
       const meta = userMeta[tId] || {};
@@ -2187,6 +2239,27 @@ export const getHiredTeachers = async (req, res) => {
         : (meta.aiAccessEnabled !== undefined ? meta.aiAccessEnabled : true);
       const act = Array.isArray(t.activity) && t.activity.length > 0 ? t.activity : (meta.activity || []);
 
+      const salaryVal = Number(t.salary !== undefined ? t.salary : (meta.salary || 0));
+      const roleVal = t.staffRole || meta.staffRole || "Teacher";
+
+      // Resolve assigned batches
+      const rawAssigned = Array.isArray(t.assignedBatches) && t.assignedBatches.length > 0
+        ? t.assignedBatches
+        : (Array.isArray(meta.assignedBatches) ? meta.assignedBatches : []);
+      const assignedIds = new Set(rawAssigned.map((b) => String(b._id || b)));
+
+      const teacherBatches = batches.filter((b) => {
+        const bId = String(b._id || b.id);
+        const bTeacherId = String(b.teacher?._id || b.teacher || "");
+        return bTeacherId === tId || assignedIds.has(bId);
+      }).map((b) => ({
+        _id: String(b._id || b.id),
+        id: String(b._id || b.id),
+        name: b.name,
+      }));
+
+      const todayAtt = attendanceMap.get(tId);
+
       return {
         _id: tId,
         id: tId,
@@ -2194,6 +2267,12 @@ export const getHiredTeachers = async (req, res) => {
         email: t.email,
         phone: t.phone,
         role: t.role,
+        staffRole: roleVal,
+        salary: salaryVal,
+        assignedBatches: teacherBatches,
+        assignedBatchIds: teacherBatches.map(b => b._id),
+        todayAttendance: todayAtt ? todayAtt.status : "unmarked",
+        todayAttendanceNotes: todayAtt ? todayAtt.notes : "",
         createdAt: t.createdAt,
         aiAccessEnabled: aiEnabled,
         activity: act,
@@ -2202,7 +2281,8 @@ export const getHiredTeachers = async (req, res) => {
 
     return res.json(formatted);
   } catch (error) {
-    return res.status(500).json({ message: "Could not fetch teachers" });
+    console.error("getHiredTeachers error:", error);
+    return res.status(500).json({ message: "Could not fetch staff" });
   }
 };
 
@@ -2288,7 +2368,7 @@ export const toggleTeacherAiAccess = async (req, res) => {
 export const deleteHiredTeacher = async (req, res) => {
   try {
     if (req.user.role !== "institute_admin") {
-      return res.status(403).json({ message: "Access denied. Only institute admins can delete teachers." });
+      return res.status(403).json({ message: "Access denied. Only institute admins can delete staff." });
     }
 
     const instituteId = req.user.institute?._id || req.user.institute;
@@ -2308,6 +2388,15 @@ export const deleteHiredTeacher = async (req, res) => {
       });
     }
 
+    // Unassign from all batches
+    try {
+      await Batch.updateMany(
+        { teacher: teacherId },
+        { teacher: null }
+      );
+      await clearCachePattern("teacher:batches:*");
+    } catch (_) {}
+
     try {
       const { supabase: sb } = await import("../utils/supabase.js");
       await sb.from("users").delete().or(`id.eq.${teacherId},_id.eq.${teacherId}`);
@@ -2316,19 +2405,19 @@ export const deleteHiredTeacher = async (req, res) => {
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
 
-    return res.json({ message: "Teacher deleted successfully" });
+    return res.json({ message: "Staff member deleted successfully" });
   } catch (error) {
-    return res.status(500).json({ message: "Could not delete teacher" });
+    return res.status(500).json({ message: "Could not delete staff member" });
   }
 };
 
 export const updateHiredTeacher = async (req, res) => {
   try {
     if (req.user.role !== "institute_admin") {
-      return res.status(403).json({ message: "Access denied. Only institute admins can edit teachers." });
+      return res.status(403).json({ message: "Access denied. Only institute admins can edit staff." });
     }
 
-    const { name, email, phone, password, aiAccessEnabled } = req.body;
+    const { name, email, phone, password, aiAccessEnabled, salary, staffRole, assignedBatches } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
 
     const teacher = await User.findOne({
@@ -2338,7 +2427,7 @@ export const updateHiredTeacher = async (req, res) => {
     });
 
     if (!teacher) {
-      return res.status(404).json({ message: "Teacher not found" });
+      return res.status(404).json({ message: "Staff member not found" });
     }
 
     if (name) {
@@ -2370,7 +2459,44 @@ export const updateHiredTeacher = async (req, res) => {
     if (aiAccessEnabled !== undefined) {
       teacher.aiAccessEnabled = Boolean(aiAccessEnabled);
     }
+    if (salary !== undefined) {
+      teacher.salary = Number(salary || 0);
+    }
+    if (staffRole !== undefined) {
+      teacher.staffRole = String(staffRole).trim();
+    }
 
+    const tId = String(teacher._id || teacher.id);
+    const meta = readUserMetadata();
+    meta[tId] = {
+      ...(meta[tId] || {}),
+      salary: teacher.salary !== undefined ? teacher.salary : (meta[tId]?.salary || 0),
+      staffRole: teacher.staffRole || meta[tId]?.staffRole || "Teacher",
+      aiAccessEnabled: teacher.aiAccessEnabled,
+    };
+
+    if (assignedBatches !== undefined && Array.isArray(assignedBatches)) {
+      const newBatchIds = assignedBatches.map(b => String(b._id || b)).filter(Boolean);
+      teacher.assignedBatches = newBatchIds;
+      meta[tId].assignedBatches = newBatchIds;
+
+      // Sync with Batch collection:
+      try {
+        await Batch.updateMany(
+          { teacher: teacher._id, _id: { $nin: newBatchIds } },
+          { teacher: null }
+        );
+        if (newBatchIds.length > 0) {
+          await Batch.updateMany(
+            { _id: { $in: newBatchIds } },
+            { teacher: teacher._id }
+          );
+        }
+        await clearCachePattern("teacher:batches:*");
+      } catch (_) {}
+    }
+
+    writeUserMetadata(meta);
     await teacher.save();
 
     await invalidateUserDashboard(req);
@@ -2378,15 +2504,19 @@ export const updateHiredTeacher = async (req, res) => {
 
     return res.json({
       _id: teacher._id,
+      id: teacher._id,
       name: teacher.name,
       email: teacher.email,
       phone: teacher.phone,
       role: teacher.role,
+      staffRole: teacher.staffRole || meta[tId]?.staffRole || "Teacher",
+      salary: Number(teacher.salary !== undefined ? teacher.salary : (meta[tId]?.salary || 0)),
+      assignedBatches: teacher.assignedBatches || meta[tId]?.assignedBatches || [],
       aiAccessEnabled: teacher.aiAccessEnabled,
     });
   } catch (error) {
     console.error("updateHiredTeacher error:", error);
-    return res.status(500).json({ message: error.message || "Could not update teacher" });
+    return res.status(500).json({ message: error.message || "Could not update staff member" });
   }
 };
 
@@ -2962,6 +3092,7 @@ export const getQuickSummary = async (req, res) => {
       },
       walletBalance: liveBal,
       perMessageCharge: institute?.perMessageCharge ?? 0.10,
+      whatsappSettings: institute?.whatsappSettings || {},
     });
   } catch (error) {
     console.error("getQuickSummary error:", error);

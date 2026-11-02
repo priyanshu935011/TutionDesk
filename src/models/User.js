@@ -75,6 +75,20 @@ const userSchema = new mongoose.Schema(
       type: Array,
       default: [],
     },
+    salary: {
+      type: Number,
+      default: 0,
+    },
+    staffRole: {
+      type: String,
+      default: "Teacher",
+    },
+    assignedBatches: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Batch",
+      },
+    ],
   },
   {
     timestamps: true,
