@@ -974,6 +974,17 @@ class SupabaseDocument {
           .eq("id", dbPayload.id)
           .select()
           .maybeSingle();
+        if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
         if (error) throw error;
         if (data) Object.assign(this, data);
         return this;
@@ -984,6 +995,17 @@ class SupabaseDocument {
           .insert(dbPayload)
           .select()
           .maybeSingle();
+        if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
         if (error) throw error;
         if (data) {
           Object.assign(this, data);
@@ -1222,6 +1244,17 @@ class SupabaseDocument {
           }
         }
 
+        if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
         if (error) throw error;
         if (data) Object.assign(this, data);
         break;
@@ -1358,6 +1391,17 @@ class SupabaseDocument {
           }
         }
 
+        if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
         if (error) throw error;
         if (data) {
           Object.assign(this, data);
@@ -1479,6 +1523,7 @@ class SupabaseQuery {
     this.selectFields = null;
     this.sortFields = null;
     this.limitVal = null;
+    this.skipVal = null;
     this.populateFields = [];
   }
 
@@ -1494,6 +1539,11 @@ class SupabaseQuery {
 
   limit(val) {
     this.limitVal = val;
+    return this;
+  }
+
+  skip(val) {
+    this.skipVal = val;
     return this;
   }
 
@@ -1613,6 +1663,11 @@ class SupabaseQuery {
         });
       }
 
+      // Skip
+      if (this.skipVal !== null && this.skipVal > 0) {
+        filtered = filtered.slice(this.skipVal);
+      }
+
       // Limit
       if (this.limitVal !== null) {
         filtered = filtered.slice(0, this.limitVal);
@@ -1675,7 +1730,11 @@ class SupabaseQuery {
         }
       }
 
-      if (this.limitVal !== null) {
+      if (this.skipVal !== null && this.skipVal > 0) {
+        const from = this.skipVal;
+        const to = this.limitVal !== null ? (from + this.limitVal - 1) : 50000;
+        query = query.range(from, to);
+      } else if (this.limitVal !== null) {
         query = query.limit(this.limitVal);
       }
 
@@ -1688,8 +1747,11 @@ class SupabaseQuery {
 
         const { data, error } = await finalQuery.limit(1);
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
-          console.warn(`Table "${tableName}" does not exist in DB, returning null.`);
-          return null;
+          MISSING_TABLES.add(tableName);
+          console.warn(`Table "${tableName}" does not exist in DB, falling back to local storage.`);
+          const fallbackData = readFallbackData(tableName);
+          const found = fallbackData.find(row => matchFilter(row, currentFilter));
+          return found ? new SupabaseDocument(tableName, found, this.model) : null;
         }
         if (error && error.message && error.message.includes("does not exist")) {
           const match = error.message.match(/column "?([^"\s]+)"?/);
@@ -1722,6 +1784,17 @@ class SupabaseQuery {
             }
           }
         }
+        if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
         if (error) throw error;
         const row = data?.[0];
         if (!row) return null;
@@ -1760,8 +1833,30 @@ class SupabaseQuery {
       } else {
         const { data, error } = await query;
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
-          console.warn(`Table "${tableName}" does not exist in DB, returning empty array.`);
-          return [];
+          MISSING_TABLES.add(tableName);
+          console.warn(`Table "${tableName}" does not exist in DB, falling back to local storage.`);
+          const fallbackData = readFallbackData(tableName);
+          let filtered = fallbackData.filter(row => matchFilter(row, currentFilter));
+          if (this.sortFields) {
+            let field = typeof this.sortFields === "string" ? this.sortFields.replace(/^-/, "") : Object.keys(this.sortFields)[0];
+            if (field === "createdAt") field = "created_at";
+            if (field === "updatedAt") field = "updated_at";
+            const desc = typeof this.sortFields === "string" ? this.sortFields.startsWith("-") : this.sortFields[field] === -1;
+            filtered.sort((a, b) => {
+              const valA = a[field] !== undefined ? a[field] : a._id;
+              const valB = b[field] !== undefined ? b[field] : b._id;
+              if (valA < valB) return desc ? 1 : -1;
+              if (valA > valB) return desc ? -1 : 1;
+              return 0;
+            });
+          }
+          if (this.skipVal !== null && this.skipVal > 0) {
+            filtered = filtered.slice(this.skipVal);
+          }
+          if (this.limitVal !== null) {
+            filtered = filtered.slice(0, this.limitVal);
+          }
+          return filtered.map(row => new SupabaseDocument(tableName, row, this.model));
         }
         if (error && error.message && error.message.includes("does not exist")) {
           const match = error.message.match(/column "?([^"\s]+)"?/);
@@ -1794,6 +1889,17 @@ class SupabaseQuery {
             }
           }
         }
+        if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
         if (error) throw error;
 
         let rows = data || [];
@@ -3014,13 +3120,35 @@ class SupabaseModel {
             .from("test_marks")
             .delete()
             .eq("id", realId);
-          if (error) throw error;
+          if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
+        if (error) throw error;
         } else {
           const { error } = await this.supabase
             .from("test_marks")
             .update({ marks: newMarksMap })
             .eq("id", realId);
-          if (error) throw error;
+          if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
+          MISSING_TABLES.add(this._tableName);
+          const fallbackData = readFallbackData(this._tableName);
+          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          if (idx !== -1) {
+            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
+            writeFallbackData(this._tableName, fallbackData);
+          }
+          return this;
+        }
+
+        if (error) throw error;
         }
       }
       return { deletedCount: 1 };
@@ -3486,6 +3614,7 @@ const mockMongoose = {
     else if (modelName === "InstituteIncome" || modelName === "InstituteIncomes") tableName = "institute_incomes";
     else if (modelName === "StaffSalary" || modelName === "StaffSalaries") tableName = "staff_salaries";
     else if (modelName === "DirectRegistration" || modelName === "DirectRegistrations") tableName = "direct_registrations";
+    else if (modelName === "PushNotificationLog" || modelName === "PushNotificationLogs") tableName = "push_notification_logs";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";

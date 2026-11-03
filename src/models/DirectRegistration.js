@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose from "../utils/supabaseModel.js";
 
 const directRegistrationSchema = new mongoose.Schema(
   {
@@ -83,8 +83,6 @@ const directRegistrationSchema = new mongoose.Schema(
   }
 );
 
-const DirectRegistration =
-  mongoose.models.DirectRegistration ||
-  mongoose.model("DirectRegistration", directRegistrationSchema);
+const DirectRegistration = mongoose.model("DirectRegistration", directRegistrationSchema);
 
 export default DirectRegistration;
