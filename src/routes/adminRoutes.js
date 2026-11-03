@@ -59,6 +59,7 @@ import {
   getPushNotificationStats,
   testPushNotification,
   registerUserFcmToken,
+  unregisterUserFcmToken,
 } from "../controllers/pushNotificationController.js";
 import protect from "../middleware/authMiddleware.js";
 import staffOnly from "../middleware/staffMiddleware.js";
@@ -121,6 +122,8 @@ router.get("/push-notifications/history", getPushNotificationHistory);
 router.get("/push-notifications/stats", getPushNotificationStats);
 router.post("/push-notifications/test", testPushNotification);
 router.post("/fcm-token", registerUserFcmToken);
+router.post("/fcm-token/unregister", unregisterUserFcmToken);
+router.delete("/fcm-token", unregisterUserFcmToken);
 
 router.get("/demo-accounts", getDemoAccounts);
 router.post("/demo-accounts", createDemoAccount);

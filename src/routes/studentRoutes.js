@@ -19,6 +19,7 @@ import {
   markBatchAttendance,
   updateStudent,
   updateStudentFcmToken,
+  unregisterStudentFcmToken,
   sendStudentCredentialsWhatsApp,
   sendPaymentReceiptWhatsApp,
   sendFeeReminderWhatsApp,
@@ -35,6 +36,8 @@ router.get("/batch-attendance", getBatchAttendanceByDate);
 router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
 router.post("/fcm-token", updateStudentFcmToken);
+router.post("/fcm-token/unregister", unregisterStudentFcmToken);
+router.delete("/fcm-token", unregisterStudentFcmToken);
 router.route("/").get(getStudents).post(createStudent);
 router.get("/:id/basic", getStudentBasicById);
 router.get("/:id/personal-info", getStudentPersonalInfoById);

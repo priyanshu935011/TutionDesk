@@ -3,6 +3,7 @@ import Student from "../models/Student.js";
 import User from "../models/User.js";
 import mongoose from "mongoose";
 import { sendFcmPushNotification } from "./fcmService.js";
+import { parseFcmTokens } from "../utils/fcmTokenHelper.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -100,14 +101,8 @@ export const sendStudentNotification = async ({
         .lean();
 
       for (const st of mongoStudents) {
-        if (st.fcmToken && String(st.fcmToken).trim().length > 10) {
-          tokenSet.add(String(st.fcmToken).trim());
-        }
-        if (Array.isArray(st.fcmTokens)) {
-          st.fcmTokens.forEach((t) => {
-            if (t && String(t).trim().length > 10) tokenSet.add(String(t).trim());
-          });
-        }
+        parseFcmTokens(st.fcmTokens).forEach((t) => tokenSet.add(t));
+        parseFcmTokens(st.fcmToken).forEach((t) => tokenSet.add(t));
       }
     } catch (mErr) {
       console.warn("MongoDB student FCM token fetch warning:", mErr.message);
@@ -125,9 +120,7 @@ export const sendStudentNotification = async ({
             .in("id", validUuids);
           if (Array.isArray(sbRows)) {
             for (const r of sbRows) {
-              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
-                tokenSet.add(String(r.fcm_token).trim());
-              }
+              parseFcmTokens(r.fcm_token).forEach((t) => tokenSet.add(t));
             }
           }
         }
@@ -139,9 +132,7 @@ export const sendStudentNotification = async ({
             .in("enrollment_number", nonUuids);
           if (Array.isArray(sbByEnr)) {
             for (const r of sbByEnr) {
-              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
-                tokenSet.add(String(r.fcm_token).trim());
-              }
+              parseFcmTokens(r.fcm_token).forEach((t) => tokenSet.add(t));
             }
           }
         }
@@ -209,14 +200,8 @@ export const sendUserNotification = async ({
         .lean();
 
       for (const u of mongoUsers) {
-        if (u.fcmToken && String(u.fcmToken).trim().length > 10) {
-          tokenSet.add(String(u.fcmToken).trim());
-        }
-        if (Array.isArray(u.fcmTokens)) {
-          u.fcmTokens.forEach((t) => {
-            if (t && String(t).trim().length > 10) tokenSet.add(String(t).trim());
-          });
-        }
+        parseFcmTokens(u.fcmTokens).forEach((t) => tokenSet.add(t));
+        parseFcmTokens(u.fcmToken).forEach((t) => tokenSet.add(t));
       }
     } catch (uErr) {
       console.warn("MongoDB user FCM token fetch warning:", uErr.message);
@@ -234,9 +219,7 @@ export const sendUserNotification = async ({
             .in("id", validUuids);
           if (Array.isArray(sbRows)) {
             for (const r of sbRows) {
-              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
-                tokenSet.add(String(r.fcm_token).trim());
-              }
+              parseFcmTokens(r.fcm_token).forEach((t) => tokenSet.add(t));
             }
           }
         }

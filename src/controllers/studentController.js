@@ -22,6 +22,7 @@ import cloudinary from "../utils/cloudinary.js";
 import Notification from "../models/Notification.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
+import { parseFcmTokens, addFcmToken, removeFcmToken, serializeTokensForDb } from "../utils/fcmTokenHelper.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -4097,27 +4098,107 @@ export const updateStudentFcmToken = async (req, res) => {
       ? req.students.map((s) => String(s._id || s.id))
       : [String(studentId)];
 
+    // 1. Fetch existing tokens from first student record
+    let existingTokens = [];
+    const stDoc = await Student.findById(studentIds[0]).select("fcmToken fcmTokens").lean();
+    if (stDoc) {
+      existingTokens = parseFcmTokens(stDoc.fcmTokens).concat(parseFcmTokens(stDoc.fcmToken));
+    }
+
     const { supabase: sb } = await import("../utils/supabase.js");
-    try {
-      if (sb) {
+    if (sb) {
+      try {
+        const { data: sbStudent } = await sb.from("students").select("fcm_token").eq("id", studentIds[0]).maybeSingle();
+        if (sbStudent && sbStudent.fcm_token) {
+          existingTokens = existingTokens.concat(parseFcmTokens(sbStudent.fcm_token));
+        }
+      } catch (_) {}
+    }
+
+    const updatedTokens = addFcmToken(existingTokens, cleanToken);
+    const serialized = serializeTokensForDb(updatedTokens);
+
+    // 2. Update Supabase
+    if (sb) {
+      try {
         await sb
           .from("students")
-          .update({ fcm_token: cleanToken })
+          .update({ fcm_token: serialized })
           .in("id", studentIds);
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
+    // 3. Update Mongo / metadata
     for (const sId of studentIds) {
       await Student.findByIdAndUpdate(sId, {
         fcmToken: cleanToken,
-        $addToSet: { fcmTokens: cleanToken },
+        fcmTokens: updatedTokens,
       }).catch(() => {});
     }
 
-    return res.json({ success: true, message: "FCM token registered successfully!" });
+    return res.json({ success: true, message: "FCM token registered successfully!", deviceCount: updatedTokens.length });
   } catch (error) {
     console.error("updateStudentFcmToken error:", error);
     return res.status(500).json({ success: false, message: "Could not register FCM token" });
+  }
+};
+
+/**
+ * Unregister FCM Token on device logout for Student
+ */
+export const unregisterStudentFcmToken = async (req, res) => {
+  try {
+    const studentId = req.student?._id || req.student?.id || req.user?._id || req.user?.id;
+    const { fcmToken } = req.body;
+    const cleanToken = fcmToken ? String(fcmToken).trim() : "";
+
+    if (!studentId) {
+      return res.status(401).json({ message: "Unauthorized: student context missing" });
+    }
+
+    const studentIds = Array.isArray(req.students) && req.students.length > 0
+      ? req.students.map((s) => String(s._id || s.id))
+      : [String(studentId)];
+
+    let existingTokens = [];
+    const stDoc = await Student.findById(studentIds[0]).select("fcmToken fcmTokens").lean();
+    if (stDoc) {
+      existingTokens = parseFcmTokens(stDoc.fcmTokens).concat(parseFcmTokens(stDoc.fcmToken));
+    }
+
+    const { supabase: sb } = await import("../utils/supabase.js");
+    if (sb) {
+      try {
+        const { data: sbStudent } = await sb.from("students").select("fcm_token").eq("id", studentIds[0]).maybeSingle();
+        if (sbStudent && sbStudent.fcm_token) {
+          existingTokens = existingTokens.concat(parseFcmTokens(sbStudent.fcm_token));
+        }
+      } catch (_) {}
+    }
+
+    const remainingTokens = removeFcmToken(existingTokens, cleanToken);
+    const serialized = serializeTokensForDb(remainingTokens);
+
+    if (sb) {
+      try {
+        await sb
+          .from("students")
+          .update({ fcm_token: serialized })
+          .in("id", studentIds);
+      } catch (_) {}
+    }
+
+    for (const sId of studentIds) {
+      await Student.findByIdAndUpdate(sId, {
+        fcmToken: remainingTokens[0] || null,
+        fcmTokens: remainingTokens,
+      }).catch(() => {});
+    }
+
+    return res.json({ success: true, message: "Device FCM token removed successfully on logout.", deviceCount: remainingTokens.length });
+  } catch (error) {
+    console.error("unregisterStudentFcmToken error:", error);
+    return res.status(500).json({ success: false, message: "Could not unregister FCM token" });
   }
 };
 

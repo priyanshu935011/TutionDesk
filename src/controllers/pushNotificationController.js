@@ -9,6 +9,12 @@ import {
   testFcmCredentials,
   getFcmSettingsHelper,
 } from "../services/fcmService.js";
+import {
+  parseFcmTokens,
+  addFcmToken,
+  removeFcmToken,
+  serializeTokensForDb,
+} from "../utils/fcmTokenHelper.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -54,14 +60,8 @@ export const sendBroadcastNotification = async (req, res) => {
     // Helper to extract tokens from a list of docs
     const collectFromDocs = (docs) => {
       for (const doc of docs) {
-        if (doc.fcmToken && String(doc.fcmToken).trim().length > 10) {
-          tokenSet.add(String(doc.fcmToken).trim());
-        }
-        if (Array.isArray(doc.fcmTokens)) {
-          doc.fcmTokens.forEach((t) => {
-            if (t && String(t).trim().length > 10) tokenSet.add(String(t).trim());
-          });
-        }
+        parseFcmTokens(doc.fcmTokens).forEach((t) => tokenSet.add(t));
+        parseFcmTokens(doc.fcmToken || doc.fcm_token).forEach((t) => tokenSet.add(t));
       }
     };
 
@@ -118,9 +118,7 @@ export const sendBroadcastNotification = async (req, res) => {
             .not("fcm_token", "is", null);
           if (Array.isArray(sbStudents)) {
             sbStudents.forEach((r) => {
-              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
-                tokenSet.add(String(r.fcm_token).trim());
-              }
+              parseFcmTokens(r.fcm_token).forEach((t) => tokenSet.add(t));
             });
           }
         }
@@ -170,9 +168,7 @@ export const sendBroadcastNotification = async (req, res) => {
             .not("fcm_token", "is", null);
           if (Array.isArray(sbUsers)) {
             sbUsers.forEach((r) => {
-              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
-                tokenSet.add(String(r.fcm_token).trim());
-              }
+              parseFcmTokens(r.fcm_token).forEach((t) => tokenSet.add(t));
             });
           }
         }
@@ -414,26 +410,98 @@ export const registerUserFcmToken = async (req, res) => {
 
     const cleanToken = String(fcmToken).trim();
 
-    // 1. Update Mongo User
+    // 1. Gather existing user tokens from Mongo and Supabase
+    const userDoc = await User.findById(userId).select("fcmToken fcmTokens").lean();
+    let existingTokens = [];
+    if (userDoc) {
+      existingTokens = parseFcmTokens(userDoc.fcmTokens).concat(parseFcmTokens(userDoc.fcmToken));
+    }
+
+    const { supabase: sb } = await import("../utils/supabase.js");
+    if (sb) {
+      try {
+        const { data: sbUser } = await sb.from("users").select("fcm_token").eq("id", String(userId)).maybeSingle();
+        if (sbUser && sbUser.fcm_token) {
+          existingTokens = existingTokens.concat(parseFcmTokens(sbUser.fcm_token));
+        }
+      } catch (_) {}
+    }
+
+    const updatedTokens = addFcmToken(existingTokens, cleanToken);
+    const serialized = serializeTokensForDb(updatedTokens);
+
+    // 2. Update Mongo User
     await User.findByIdAndUpdate(userId, {
       fcmToken: cleanToken,
-      $addToSet: { fcmTokens: cleanToken },
+      fcmTokens: updatedTokens,
     });
 
-    // 2. Sync to Supabase users table if available
-    try {
-      const { supabase: sb } = await import("../utils/supabase.js");
-      if (sb) {
+    // 3. Sync to Supabase users table
+    if (sb) {
+      try {
         await sb
           .from("users")
-          .update({ fcm_token: cleanToken })
+          .update({ fcm_token: serialized })
           .eq("id", String(userId));
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
-    return res.json({ success: true, message: "User FCM token registered successfully!" });
+    return res.json({ success: true, message: "User FCM token registered successfully!", deviceCount: updatedTokens.length });
   } catch (error) {
     console.error("registerUserFcmToken error:", error);
     return res.status(500).json({ success: false, message: "Failed to register user FCM token" });
+  }
+};
+
+/**
+ * Unregister FCM Token on device logout for User (Teacher, Admin, Institute)
+ */
+export const unregisterUserFcmToken = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { fcmToken } = req.body;
+    const cleanToken = fcmToken ? String(fcmToken).trim() : "";
+
+    const userDoc = await User.findById(userId).select("fcmToken fcmTokens").lean();
+    let existingTokens = [];
+    if (userDoc) {
+      existingTokens = parseFcmTokens(userDoc.fcmTokens).concat(parseFcmTokens(userDoc.fcmToken));
+    }
+
+    const { supabase: sb } = await import("../utils/supabase.js");
+    if (sb) {
+      try {
+        const { data: sbUser } = await sb.from("users").select("fcm_token").eq("id", String(userId)).maybeSingle();
+        if (sbUser && sbUser.fcm_token) {
+          existingTokens = existingTokens.concat(parseFcmTokens(sbUser.fcm_token));
+        }
+      } catch (_) {}
+    }
+
+    const remainingTokens = removeFcmToken(existingTokens, cleanToken);
+    const serialized = serializeTokensForDb(remainingTokens);
+
+    await User.findByIdAndUpdate(userId, {
+      fcmToken: remainingTokens[0] || null,
+      fcmTokens: remainingTokens,
+    });
+
+    if (sb) {
+      try {
+        await sb
+          .from("users")
+          .update({ fcm_token: serialized })
+          .eq("id", String(userId));
+      } catch (_) {}
+    }
+
+    return res.json({ success: true, message: "Device FCM token removed successfully on logout.", deviceCount: remainingTokens.length });
+  } catch (error) {
+    console.error("unregisterUserFcmToken error:", error);
+    return res.status(500).json({ success: false, message: "Failed to unregister user FCM token" });
   }
 };

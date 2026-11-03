@@ -46,7 +46,7 @@ import {
   disburseStaffSalary,
   deleteStaffSalaryDisbursement,
 } from "../controllers/financeController.js";
-import { registerUserFcmToken } from "../controllers/pushNotificationController.js";
+import { registerUserFcmToken, unregisterUserFcmToken } from "../controllers/pushNotificationController.js";
 import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -67,8 +67,10 @@ router.get("/notes/:id/download", downloadNote);
 
 router.use(protect);
 
-// FCM Token Registration for Teachers / Staff
+// FCM Token Registration & Unregistration for Teachers / Staff
 router.post("/fcm-token", registerUserFcmToken);
+router.post("/fcm-token/unregister", unregisterUserFcmToken);
+router.delete("/fcm-token", unregisterUserFcmToken);
 
 // Support both /sync and /dashboard
 router.get("/sync", getTeacherDashboard);
