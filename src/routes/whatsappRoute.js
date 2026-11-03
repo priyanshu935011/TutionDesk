@@ -91,6 +91,7 @@ const handleGetStatusAndSettings = async (req, res) => {
 
     return res.json({
       ...statusObj,
+      ...settings,
       settings,
     });
   } catch (error) {
@@ -128,7 +129,7 @@ router.post("/logout", async (req, res) => {
   }
 });
 
-router.post("/settings", async (req, res) => {
+const handleSaveSettings = async (req, res) => {
   try {
     let instituteId = getInstId(req);
     if (!instituteId) {
@@ -169,12 +170,19 @@ router.post("/settings", async (req, res) => {
       console.error("Cache update error in whatsapp settings:", cacheErr);
     }
 
-    return res.json({ message: "WhatsApp configuration saved successfully.", settings: updatedSettings });
+    return res.json({
+      message: "WhatsApp configuration saved successfully.",
+      ...updatedSettings,
+      settings: updatedSettings,
+    });
   } catch (error) {
     console.error("Save WhatsApp settings error:", error);
     return res.status(500).json({ message: error?.message || "Could not save settings." });
   }
-});
+};
+
+router.post("/settings", handleSaveSettings);
+router.put("/settings", handleSaveSettings);
 
 router.post("/test", async (req, res) => {
   try {

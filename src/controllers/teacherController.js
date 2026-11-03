@@ -152,6 +152,7 @@ export const getTeacherDashboard = async (req, res) => {
       instIdStr = String(req.user._id).trim();
     }
 
+    let instituteId = instIdStr;
     let institute = null;
     try {
       if (isValidEntityId(instIdStr)) {
@@ -166,8 +167,8 @@ export const getTeacherDashboard = async (req, res) => {
 
       if (institute) {
         instIdStr = String(institute._id || institute.id);
+        instituteId = instIdStr;
       }
-      const instituteId = instIdStr;
 
       const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
       const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
