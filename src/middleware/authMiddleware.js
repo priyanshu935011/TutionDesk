@@ -192,6 +192,61 @@ const protect = async (req, res, next) => {
           institute = await Institute.findOne({ adminUser: req.user._id });
         }
 
+        // Check DirectRegistration table for trial accounts if not found in Institute table
+        if (!institute) {
+          try {
+            const DirectRegistration = (await import("../models/DirectRegistration.js")).default;
+            let reg = null;
+            if (instIdStr && instIdStr.length >= 8 && instIdStr !== "[object Object]") {
+              reg = await DirectRegistration.findById(instIdStr);
+            }
+            if (!reg && req.user.phone) {
+              const cleanPhone = String(req.user.phone).replace(/\D/g, "").slice(-10);
+              reg = await DirectRegistration.findOne({ phone: cleanPhone });
+            }
+            if (reg) {
+              const isExpired =
+                reg.status === "expired" ||
+                (reg.trialEndsAt && new Date(reg.trialEndsAt).getTime() < Date.now());
+
+              if (isExpired && !isPaymentRoute) {
+                return res.status(403).json({
+                  message: "Your 7-day free trial has expired. Please contact support or upgrade to continue.",
+                  trialExpired: true,
+                  subscriptionExpired: true,
+                });
+              }
+
+              req.user.isDirectTrial = true;
+              req.user.institute = {
+                id: String(reg._id || reg.id),
+                _id: String(reg._id || reg.id),
+                name: reg.instituteName || "My Academy",
+                subscriptionPlan: "7-day-trial",
+                trialDays: 7,
+                subscriptionStart: reg.createdAt,
+                subscriptionEnd: reg.trialEndsAt,
+                status: reg.status || "trial_active",
+                allowedFeatures: reg.features || [
+                  "attendance",
+                  "notes",
+                  "marks",
+                  "tests",
+                  "whatsapp",
+                  "finances",
+                  "ai",
+                  "homework",
+                  "quizzes",
+                ],
+                walletBalance: Number(reg.wpBalance || 0),
+                aiBalance: Number(reg.aiBalance || 0),
+                storageLimitMb: Number(reg.storageLimitMb || 500),
+                isDirectTrial: true,
+              };
+            }
+          } catch (_) {}
+        }
+
         if (institute) {
           const isExpired =
             institute.status !== "active" ||

@@ -48,6 +48,61 @@ const buildInstituteState = async (user) => {
   const liveBalance = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
   const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
 
+  if (!institute && instIdStr) {
+    try {
+      const DirectRegistration = (await import("../models/DirectRegistration.js")).default;
+      let reg = null;
+      if (mongoose.Types.ObjectId.isValid(instIdStr) || instIdStr.length >= 8) {
+        reg = await DirectRegistration.findById(instIdStr);
+      }
+      if (!reg && user.phone) {
+        const cleanPhone = String(user.phone).replace(/\D/g, "").slice(-10);
+        reg = await DirectRegistration.findOne({ phone: cleanPhone });
+      }
+      if (reg) {
+        const now = Date.now();
+        const trialEndMs = new Date(reg.trialEndsAt).getTime();
+        const daysLeft = Math.max(0, Math.ceil((trialEndMs - now) / (1000 * 60 * 60 * 24)));
+        return {
+          id: String(reg._id || reg.id),
+          _id: String(reg._id || reg.id),
+          name: reg.instituteName || "My Academy",
+          subscriptionPlan: "7-day-trial",
+          subscriptionAmount: 0,
+          trialDays: 7,
+          subscriptionStart: reg.createdAt,
+          subscriptionEnd: reg.trialEndsAt,
+          status: reg.status || "trial_active",
+          tuitionType: "solo",
+          quizFeatureEnabled: true,
+          testSeriesFeatureEnabled: true,
+          recordedLecturesFeatureEnabled: true,
+          releaseVideosFeatureEnabled: true,
+          brandingEnabled: true,
+          logoUrl: null,
+          themeColor: "#4C3FBE",
+          allowedFeatures: reg.features || [
+            "attendance",
+            "notes",
+            "marks",
+            "tests",
+            "whatsapp",
+            "finances",
+            "ai",
+            "homework",
+            "quizzes",
+          ],
+          whatsappSettings: { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
+          studentCustomFields: [],
+          walletBalance: Number(reg.wpBalance || 0),
+          perMessageCharge: Number(liveRate ?? 0.10),
+          isDirectTrial: true,
+          trialDaysLeft: daysLeft,
+        };
+      }
+    } catch (_) {}
+  }
+
   if (!institute) {
     return {
       id: instIdStr,

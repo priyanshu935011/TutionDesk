@@ -3485,6 +3485,7 @@ const mockMongoose = {
     else if (modelName === "InstituteExpense" || modelName === "InstituteExpenses") tableName = "institute_expenses";
     else if (modelName === "InstituteIncome" || modelName === "InstituteIncomes") tableName = "institute_incomes";
     else if (modelName === "StaffSalary" || modelName === "StaffSalaries") tableName = "staff_salaries";
+    else if (modelName === "DirectRegistration" || modelName === "DirectRegistrations") tableName = "direct_registrations";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
