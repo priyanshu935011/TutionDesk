@@ -31,6 +31,7 @@ import { reconnectAllSessions } from "./services/whatsappService.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js";
+import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
 import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
 
 import { errorLoggerMiddleware, globalErrorHandler } from "./middleware/errorLoggerMiddleware.js";
@@ -184,6 +185,7 @@ initializeSupabaseStorage().then(() => {
     flushMemoryCache();
     clearCachePattern("*").catch(() => {});
     startVideoProcessingWorker();
+    startAttendanceReminderScheduler();
     reconnectAllSessions().catch((err) => {
       console.error("Failed to auto-resume WhatsApp sessions:", err);
     });
@@ -193,6 +195,7 @@ initializeSupabaseStorage().then(() => {
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startVideoProcessingWorker();
+    startAttendanceReminderScheduler();
     reconnectAllSessions().catch((err) => {
       console.error("Failed to auto-resume WhatsApp sessions:", err);
     });

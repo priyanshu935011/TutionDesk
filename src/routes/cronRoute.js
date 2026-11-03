@@ -5,6 +5,7 @@ import { sendMessage } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatFeeReminderMessage } from "../utils/whatsappTemplateHelper.js";
 import { cronVerifyPendingRecharges } from "../controllers/paymentController.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
+import { checkPendingBatchAttendanceReminders } from "../services/attendanceReminderService.js";
 
 const router = express.Router();
 
@@ -96,6 +97,21 @@ router.post("/fee-reminders", async (req, res) => {
   } catch (error) {
     console.error("Cron fee reminders error:", error);
     return res.status(500).json({ message: "Cron execution failed" });
+  }
+});
+
+router.post("/attendance-reminders", async (req, res) => {
+  const token = req.headers["x-cron-token"];
+  if (process.env.CRON_SECRET && token !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const result = await checkPendingBatchAttendanceReminders();
+    return res.json({ success: true, message: "Attendance reminder check completed.", ...result });
+  } catch (error) {
+    console.error("Cron attendance reminder error:", error);
+    return res.status(500).json({ success: false, message: "Cron execution failed", error: error.message });
   }
 });
 
