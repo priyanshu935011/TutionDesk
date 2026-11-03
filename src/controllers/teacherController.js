@@ -2210,6 +2210,7 @@ export const createHiredTeacher = async (req, res) => {
       : [];
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const isAiAccess = req.body.aiAccessEnabled === true || req.body.aiAccessEnabled === "true"; // Defaults to false
     const newTeacher = await User.create({
       name: name.trim(),
       email: finalEmail,
@@ -2220,6 +2221,7 @@ export const createHiredTeacher = async (req, res) => {
       salary: Number(salary || 0),
       staffRole: staffRole ? String(staffRole).trim() : "Teacher",
       assignedBatches: batchIdList,
+      aiAccessEnabled: isAiAccess,
     });
 
     const tId = String(newTeacher._id || newTeacher.id);
@@ -2229,7 +2231,7 @@ export const createHiredTeacher = async (req, res) => {
       salary: Number(salary || 0),
       staffRole: staffRole ? String(staffRole).trim() : "Teacher",
       assignedBatches: batchIdList,
-      aiAccessEnabled: true,
+      aiAccessEnabled: isAiAccess,
     };
     writeUserMetadata(userMeta);
 
@@ -2257,6 +2259,7 @@ export const createHiredTeacher = async (req, res) => {
       staffRole: newTeacher.staffRole || "Teacher",
       salary: Number(newTeacher.salary || 0),
       assignedBatches: batchIdList,
+      aiAccessEnabled: isAiAccess,
     });
   } catch (error) {
     console.error("addHiredTeacher error:", error);
@@ -2303,8 +2306,8 @@ export const getHiredTeachers = async (req, res) => {
       const tId = String(t._id || t.id);
       const meta = userMeta[tId] || {};
       const aiEnabled = t.aiAccessEnabled !== undefined
-        ? t.aiAccessEnabled
-        : (meta.aiAccessEnabled !== undefined ? meta.aiAccessEnabled : true);
+        ? (t.aiAccessEnabled === true || t.aiAccessEnabled === "true" || t.aiAccessEnabled === 1)
+        : (meta.aiAccessEnabled !== undefined ? (meta.aiAccessEnabled === true || meta.aiAccessEnabled === "true" || meta.aiAccessEnabled === 1) : false);
       const act = Array.isArray(t.activity) && t.activity.length > 0 ? t.activity : (meta.activity || []);
 
       const salaryVal = Number(t.salary !== undefined ? t.salary : (meta.salary || 0));

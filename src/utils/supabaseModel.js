@@ -882,7 +882,9 @@ class SupabaseDocument {
       this.payout_config = this.payoutConfig;
 
       const rawAiAccess = data.ai_access_enabled ?? data.aiAccessEnabled ?? meta.aiAccessEnabled;
-      this.aiAccessEnabled = rawAiAccess !== undefined ? (rawAiAccess === true || rawAiAccess === "true" || rawAiAccess === 1) : true;
+      this.aiAccessEnabled = rawAiAccess !== undefined
+        ? (rawAiAccess === true || rawAiAccess === "true" || rawAiAccess === 1)
+        : (this.role === "teacher" ? false : true);
       this.ai_access_enabled = this.aiAccessEnabled;
       const rawStudentAi = data.allow_student_ai_doubt_solver ?? data.allowStudentAiDoubtSolver ?? meta.allowStudentAiDoubtSolver;
       this.allowStudentAiDoubtSolver = rawStudentAi !== undefined ? (rawStudentAi === true || rawStudentAi === "true" || rawStudentAi === 1) : true;
@@ -1308,7 +1310,7 @@ class SupabaseDocument {
         metadata[this._id] = {
           ...(metadata[this._id] || {}),
           payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
-          aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? true,
+          aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? (this.role === "teacher" ? false : true),
           activity: this.activity ?? metadata[this._id]?.activity ?? [],
         };
         writeUserMetadata(metadata);
@@ -1426,7 +1428,7 @@ class SupabaseDocument {
         metadata[this._id] = {
           ...(metadata[this._id] || {}),
           payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
-          aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? true,
+          aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? (this.role === "teacher" ? false : true),
           activity: this.activity ?? metadata[this._id]?.activity ?? [],
         };
         writeUserMetadata(metadata);
