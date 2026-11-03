@@ -77,7 +77,7 @@ export const sendBroadcastNotification = async (req, res) => {
       const studentQuery = {};
 
       if (targetAudience === "specific_students" && studentIds.length > 0) {
-        const validIds = studentIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+        const validIds = studentIds.filter((id) => mongoose.Types.ObjectId.isValid(id) || UUID_REGEX.test(id));
         studentQuery.$or = [
           { _id: { $in: validIds } },
           { id: { $in: studentIds } },

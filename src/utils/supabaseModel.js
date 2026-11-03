@@ -3096,9 +3096,11 @@ class SupabaseModel {
       return new SupabaseDocument(this.tableName, updated, this);
     }
 
-    const payload = update.$set ? update.$set : update;
+    const payload = update.$set ? { ...update, ...update.$set } : { ...update };
+    delete payload.$set;
     const dbPayload = {};
     for (const [key, val] of Object.entries(payload)) {
+      if (key.startsWith("$")) continue;
       const dbKey = camelToSnake(key);
       dbPayload[dbKey] = val;
     }

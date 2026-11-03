@@ -4082,32 +4082,42 @@ export const markNotificationRead = async (req, res) => {
 
 export const updateStudentFcmToken = async (req, res) => {
   try {
-    const studentId = req.student._id;
+    const studentId = req.student?._id || req.student?.id || req.user?._id || req.user?.id;
     const { fcmToken } = req.body;
-    if (!fcmToken) {
+    if (!fcmToken || !String(fcmToken).trim()) {
       return res.status(400).json({ message: "fcmToken is required" });
     }
 
+    if (!studentId) {
+      return res.status(401).json({ message: "Unauthorized: student context missing" });
+    }
+
     const cleanToken = String(fcmToken).trim();
+    const studentIds = Array.isArray(req.students) && req.students.length > 0
+      ? req.students.map((s) => String(s._id || s.id))
+      : [String(studentId)];
+
     const { supabase: sb } = await import("../utils/supabase.js");
     try {
       if (sb) {
         await sb
           .from("students")
           .update({ fcm_token: cleanToken })
-          .eq("id", String(studentId));
+          .in("id", studentIds);
       }
     } catch (_) {}
 
-    await Student.findByIdAndUpdate(studentId, {
-      fcmToken: cleanToken,
-      $addToSet: { fcmTokens: cleanToken },
-    });
+    for (const sId of studentIds) {
+      await Student.findByIdAndUpdate(sId, {
+        fcmToken: cleanToken,
+        $addToSet: { fcmTokens: cleanToken },
+      }).catch(() => {});
+    }
 
-    return res.json({ message: "FCM token registered successfully!" });
+    return res.json({ success: true, message: "FCM token registered successfully!" });
   } catch (error) {
     console.error("updateStudentFcmToken error:", error);
-    return res.status(500).json({ message: "Could not register FCM token" });
+    return res.status(500).json({ success: false, message: "Could not register FCM token" });
   }
 };
 

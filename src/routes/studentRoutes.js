@@ -18,6 +18,7 @@ import {
   markAttendance,
   markBatchAttendance,
   updateStudent,
+  updateStudentFcmToken,
   sendStudentCredentialsWhatsApp,
   sendPaymentReceiptWhatsApp,
   sendFeeReminderWhatsApp,
@@ -33,6 +34,7 @@ router.get("/batch-attendance/monthly", getBatchMonthlyAttendance);
 router.get("/batch-attendance", getBatchAttendanceByDate);
 router.post("/bulk", bulkCreateStudents);
 router.post("/batch-attendance", markBatchAttendance);
+router.post("/fcm-token", updateStudentFcmToken);
 router.route("/").get(getStudents).post(createStudent);
 router.get("/:id/basic", getStudentBasicById);
 router.get("/:id/personal-info", getStudentPersonalInfoById);

@@ -231,11 +231,11 @@ export const sendFcmPushNotification = async ({
               notification: notificationPayload,
               data: mergedData,
               android: {
-                priority: priority === "high" ? "high" : "normal",
+                priority: priority === "high" ? "HIGH" : "NORMAL",
                 notification: {
                   sound: "default",
                   channel_id: "high_importance_channel",
-                  priority: priority === "high" ? "high" : "default",
+                  notification_priority: priority === "high" ? "PRIORITY_HIGH" : "PRIORITY_DEFAULT",
                   ...(imageUrl ? { image: String(imageUrl).trim() } : {}),
                 },
               },

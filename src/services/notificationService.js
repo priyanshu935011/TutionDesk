@@ -131,6 +131,20 @@ export const sendStudentNotification = async ({
             }
           }
         }
+        const nonUuids = validTargets.filter((id) => !UUID_REGEX.test(id) && typeof id === "string" && id.length > 2);
+        if (nonUuids.length > 0) {
+          const { data: sbByEnr } = await sb
+            .from("students")
+            .select("fcm_token")
+            .in("enrollment_number", nonUuids);
+          if (Array.isArray(sbByEnr)) {
+            for (const r of sbByEnr) {
+              if (r.fcm_token && String(r.fcm_token).trim().length > 10) {
+                tokenSet.add(String(r.fcm_token).trim());
+              }
+            }
+          }
+        }
       }
     } catch (_) {}
 
