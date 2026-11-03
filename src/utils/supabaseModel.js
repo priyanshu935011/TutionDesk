@@ -1089,6 +1089,8 @@ class SupabaseDocument {
       delete payload.student_portal_enabled;
       delete payload.whatsapp_settings;
       delete payload.whatsappSettings;
+      delete payload.staff_name;
+      delete payload.staffName;
     }
 
     if (this._tableName === "students") {

@@ -121,6 +121,34 @@ export const sendRegistrationOtp = async (req, res) => {
       });
     }
 
+    // Check if an account already exists for this phone number
+    const existingUser = await User.findOne({ phone: cleanPhone });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        isExistingUser: true,
+        message: "An account with this mobile number already exists. Please log in directly.",
+      });
+    }
+
+    const existingInst = await Institute.findOne({ adminPhone: cleanPhone });
+    if (existingInst) {
+      return res.status(400).json({
+        success: false,
+        isExistingUser: true,
+        message: "An academy is already registered with this mobile number. Please log in directly.",
+      });
+    }
+
+    const existingTrial = await DirectRegistration.findOne({ phone: cleanPhone });
+    if (existingTrial) {
+      return res.status(400).json({
+        success: false,
+        isExistingUser: true,
+        message: "An account has already been registered with this mobile number. Please log in directly.",
+      });
+    }
+
     const clientIp = getClientIp(req);
 
     // 1. IP-based rate limiting (Max 3 OTP requests per 10 mins)
@@ -264,85 +292,73 @@ export const verifyOtpAndRegister = async (req, res) => {
     const clientIp = getClientIp(req);
     const defaults = await getGlobalTrialDefaults();
 
-    // 2. Check if a DirectRegistration already exists for this phone
-    let isNewRegistration = false;
+    // 2. Check if user already exists
+    const existingUser = await User.findOne({ phone: cleanPhone });
+    const existingInst = await Institute.findOne({ adminPhone: cleanPhone });
     let registration = await DirectRegistration.findOne({ phone: cleanPhone });
 
-    if (!registration) {
-      isNewRegistration = true;
-      const trialEnds = new Date(Date.now() + defaults.trialDays * 24 * 60 * 60 * 1000);
-      const regName = (name || "Educator").trim();
-      const regInstName = (
-        instituteName || (name ? `${name.trim()}'s Classes` : "My Academy")
-      ).trim();
+    if (existingUser || existingInst || registration) {
+      return res.status(400).json({
+        success: false,
+        isExistingUser: true,
+        message: "This mobile number is already registered. Please log in directly.",
+      });
+    }
 
-      const fcmList = fcmToken ? [fcmToken] : [];
+    const trialEnds = new Date(Date.now() + defaults.trialDays * 24 * 60 * 60 * 1000);
+    const regName = (name || "Educator").trim();
+    const regInstName = (
+      instituteName || (name ? `${name.trim()}'s Classes` : "My Academy")
+    ).trim();
 
-      registration = await DirectRegistration.create({
-        phone: cleanPhone,
-        name: regName,
-        instituteName: regInstName,
-        trialEndsAt: trialEnds,
-        status: "trial_active",
-        features: defaults.features,
-        wpBalance: defaults.wpBalance,
-        aiBalance: defaults.aiBalance,
-        storageLimitMb: defaults.storageLimitMb,
-        storageUsedBytes: 0,
-        ipAddress: clientIp,
-        fcmToken: JSON.stringify(fcmList),
-        lastActiveAt: new Date(),
+    const fcmList = fcmToken ? [fcmToken] : [];
+
+    registration = await DirectRegistration.create({
+      phone: cleanPhone,
+      name: regName,
+      instituteName: regInstName,
+      trialEndsAt: trialEnds,
+      status: "trial_active",
+      features: defaults.features,
+      wpBalance: defaults.wpBalance,
+      aiBalance: defaults.aiBalance,
+      storageLimitMb: defaults.storageLimitMb,
+      storageUsedBytes: 0,
+      ipAddress: clientIp,
+      fcmToken: JSON.stringify(fcmList),
+      lastActiveAt: new Date(),
+    });
+
+    // 3. Dispatch WhatsApp Notification to 9934597030 on every new registration
+    try {
+      const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+      const alertPhone = "9934597030";
+      const trialDateFormatted = new Date(trialEnds).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
       });
 
-      // 3. Dispatch WhatsApp Notification to 9934597030 on every new registration
-      try {
-        const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-        const alertPhone = "9934597030";
-        const trialDateFormatted = new Date(trialEnds).toLocaleDateString("en-IN", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        });
+      const wpMessage =
+        `🎉 *NEW EDUCATOR APP REGISTRATION*\n\n` +
+        `👤 *Educator:* ${regName}\n` +
+        `📱 *Phone:* ${cleanPhone}\n` +
+        `🏫 *Academy:* ${regInstName}\n` +
+        `⏳ *Trial Plan:* 7 Days (Until ${trialDateFormatted})\n` +
+        `🌐 *IP:* ${clientIp}\n` +
+        `⏰ *Time:* ${timeStr}\n\n` +
+        `_Login to Super Admin to configure trial features & balances._`;
 
-        const wpMessage =
-          `🎉 *NEW EDUCATOR APP REGISTRATION*\n\n` +
-          `👤 *Educator:* ${regName}\n` +
-          `📱 *Phone:* ${cleanPhone}\n` +
-          `🏫 *Academy:* ${regInstName}\n` +
-          `⏳ *Trial Plan:* 7 Days (Until ${trialDateFormatted})\n` +
-          `🌐 *IP:* ${clientIp}\n` +
-          `⏰ *Time:* ${timeStr}\n\n` +
-          `_Login to Super Admin to configure trial features & balances._`;
+      const templateConfig = {
+        templateName: process.env.META_REGISTRATION_TEMPLATE_NAME || "app_educator_registration",
+        parameters: [regName, cleanPhone, regInstName, timeStr],
+      };
 
-        const templateConfig = {
-          templateName: process.env.META_REGISTRATION_TEMPLATE_NAME || "app_educator_registration",
-          parameters: [regName, cleanPhone, regInstName, timeStr],
-        };
-
-        sendMessage("admin_test", alertPhone, wpMessage, "custom", templateConfig).catch((err) => {
-          console.warn("[DirectRegistration] WhatsApp alert to 9934597030 warning:", err.message);
-        });
-      } catch (wpErr) {
-        console.warn("[DirectRegistration] WhatsApp alert exception:", wpErr.message);
-      }
-    } else {
-      // Existing registration: update last active and name if provided
-      if (name && name.trim()) registration.name = name.trim();
-      if (instituteName && instituteName.trim()) registration.instituteName = instituteName.trim();
-      registration.lastActiveAt = new Date();
-
-      if (fcmToken) {
-        let existingTokens = [];
-        try {
-          existingTokens = JSON.parse(registration.fcmToken || "[]");
-        } catch (_) {}
-        if (!Array.isArray(existingTokens)) existingTokens = [];
-        if (!existingTokens.includes(fcmToken)) {
-          existingTokens.push(fcmToken);
-          registration.fcmToken = JSON.stringify(existingTokens);
-        }
-      }
-      await registration.save().catch(() => {});
+      sendMessage("admin_test", alertPhone, wpMessage, "custom", templateConfig).catch((err) => {
+        console.warn("[DirectRegistration] WhatsApp alert to 9934597030 warning:", err.message);
+      });
+    } catch (wpErr) {
+      console.warn("[DirectRegistration] WhatsApp alert exception:", wpErr.message);
     }
 
     const regId = String(registration._id || registration.id);
