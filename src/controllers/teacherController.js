@@ -25,6 +25,15 @@ import { syncInstituteStorage } from "./videoController.js";
 import { sendMessage, getSessionStatus, sendTemplateMessage, getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 import { getGlobalTemplates, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 
+const isValidEntityId = (id) => {
+  if (!id) return false;
+  const s = String(id).trim();
+  if (s === "[object Object]" || s === "null" || s === "undefined") return false;
+  const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s);
+  const isMongoId = /^[0-9a-fA-F]{24}$/.test(s);
+  return isUuid || isMongoId;
+};
+
 const uploadBufferToCloudinary = (buffer, options = {}) =>
   new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
@@ -93,18 +102,34 @@ const invalidateUserDashboard = async (req) => {
 export const getInstituteFeatures = async (req, res) => {
   try {
     const rawInst = req.user.institute;
-    const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : String(req.user._id || ""));
-
-    let institute = null;
-    if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
-      institute = await Institute.findById(instIdStr).select("allowedFeatures");
+    let instIdStr = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instIdStr = String(rawInst._id || rawInst.id || "").trim();
+      } else {
+        instIdStr = String(rawInst).trim();
+      }
+    }
+    if ((!instIdStr || instIdStr === "[object Object]") && req.user._id) {
+      instIdStr = String(req.user._id).trim();
     }
 
-    return res.json({
-      allowedFeatures: (institute && Array.isArray(institute.allowedFeatures))
-        ? institute.allowedFeatures
-        : ["attendance", "notes", "marks", "tests", "whatsapp", "recorded_lectures"],
-    });
+    let institute = null;
+    if (isValidEntityId(instIdStr)) {
+      institute = await Institute.findById(instIdStr);
+      if (!institute) {
+        institute = await Institute.findOne({ adminUser: instIdStr });
+      }
+    }
+    if (!institute && req.user._id && isValidEntityId(req.user._id)) {
+      institute = await Institute.findOne({ adminUser: req.user._id });
+    }
+
+    const feats = (institute && Array.isArray(institute.allowedFeatures))
+      ? institute.allowedFeatures
+      : (rawInst && Array.isArray(rawInst.allowedFeatures) ? rawInst.allowedFeatures : ["attendance", "notes", "marks", "tests", "whatsapp", "recorded_lectures"]);
+
+    return res.json({ allowedFeatures: feats });
   } catch (error) {
     console.error("getInstituteFeatures error:", error);
     return res.status(500).json({ message: "Could not load features" });
@@ -115,29 +140,34 @@ export const getTeacherDashboard = async (req, res) => {
   const steps = {};
   try {
     const rawInst = req.user.institute;
-    const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
-    const instituteId = instIdStr;
+    let instIdStr = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instIdStr = String(rawInst._id || rawInst.id || "").trim();
+      } else {
+        instIdStr = String(rawInst).trim();
+      }
+    }
+    if ((!instIdStr || instIdStr === "[object Object]") && req.user._id) {
+      instIdStr = String(req.user._id).trim();
+    }
 
     let institute = null;
     try {
-      if (instIdStr) {
-        if (mongoose.Types.ObjectId.isValid(instIdStr)) {
-          try {
-            institute = await Institute.findById(instIdStr).select(
-              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge"
-            );
-          } catch (_) {}
-        }
+      if (isValidEntityId(instIdStr)) {
+        institute = await Institute.findById(instIdStr);
         if (!institute) {
-          try {
-            institute = await Institute.findOne({
-              $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
-            }).select(
-              "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings studentCustomFields upiId walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee aiQueryRate aiVisionRate aiQuizRate aiDoubtRate"
-            );
-          } catch (_) {}
+          institute = await Institute.findOne({ adminUser: instIdStr });
         }
       }
+      if (!institute && req.user._id && isValidEntityId(req.user._id)) {
+        institute = await Institute.findOne({ adminUser: req.user._id });
+      }
+
+      if (institute) {
+        instIdStr = String(institute._id || institute.id);
+      }
+      const instituteId = instIdStr;
 
       const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
       const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
@@ -197,14 +227,18 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
-    const userIds = [
+    const rawUserIds = [
       ownerId,
       req.user._id,
-      rawInst?._id,
-      rawInst,
       institute?._id,
       institute?.adminUser,
-    ].filter(Boolean);
+    ];
+    const userIds = Array.from(new Set(
+      rawUserIds
+        .map(id => (typeof id === "object" && id !== null ? (id._id || id.id) : id))
+        .map(id => String(id || "").trim())
+        .filter(id => isValidEntityId(id))
+    ));
 
     let studentQuery = { user: { $in: userIds }, isArchived: { $ne: true } };
     let batchQuery = { user: { $in: userIds } };
@@ -2106,10 +2140,17 @@ export const createHiredTeacher = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Only institute admins can add staff." });
     }
 
-    const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+    const rawInst = req.user.institute;
+    let instituteId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
+    if (!instituteId || instituteId === "[object Object]") {
+      instituteId = req.user._id;
+    }
     let institute = null;
-    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
+    if (instituteId && isValidEntityId(String(instituteId))) {
       institute = await Institute.findById(instituteId);
+      if (!institute) {
+        institute = await Institute.findOne({ adminUser: instituteId });
+      }
     }
 
     if (institute && institute.tuitionType !== "institution") {
@@ -2588,13 +2629,13 @@ export const updateBrandingSettings = async (req, res) => {
     };
 
     let institute = null;
-    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
+    if (instituteId && isValidEntityId(String(instituteId))) {
       institute = await Institute.findByIdAndUpdate(instituteId, updateFields, { new: true });
     }
-    if (!institute) {
+    if (!institute && req.user._id && isValidEntityId(String(req.user._id))) {
       institute = await Institute.findOneAndUpdate({ adminUser: req.user._id }, updateFields, { new: true });
     }
-    if (!institute && req.user._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+    if (!institute && req.user._id && isValidEntityId(String(req.user._id))) {
       institute = await Institute.findByIdAndUpdate(req.user._id, updateFields, { new: true });
     }
 
@@ -2651,13 +2692,13 @@ export const updateInstituteUpi = async (req, res) => {
     const updateFields = { upiId: cleanUpiId };
 
     let institute = null;
-    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
+    if (instituteId && isValidEntityId(String(instituteId))) {
       institute = await Institute.findByIdAndUpdate(instituteId, updateFields, { new: true });
     }
-    if (!institute) {
+    if (!institute && req.user._id && isValidEntityId(String(req.user._id))) {
       institute = await Institute.findOneAndUpdate({ adminUser: req.user._id }, updateFields, { new: true });
     }
-    if (!institute && req.user._id && mongoose.Types.ObjectId.isValid(String(req.user._id))) {
+    if (!institute && req.user._id && isValidEntityId(String(req.user._id))) {
       institute = await Institute.findByIdAndUpdate(req.user._id, updateFields, { new: true });
     }
 
@@ -3085,16 +3126,35 @@ export const getOutstandingStudents = async (req, res) => {
 export const getQuickSummary = async (req, res) => {
   try {
     const rawInst = req.user.institute;
-    const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || req.user._id || "").trim();
+    let instIdStr = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instIdStr = String(rawInst._id || rawInst.id || "").trim();
+      } else {
+        instIdStr = String(rawInst).trim();
+      }
+    }
+    if ((!instIdStr || instIdStr === "[object Object]") && req.user._id) {
+      instIdStr = String(req.user._id).trim();
+    }
     if (!instIdStr) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
 
     let institute = null;
-    if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
+    if (isValidEntityId(instIdStr)) {
       try {
         institute = await Institute.findById(instIdStr);
+        if (!institute) {
+          institute = await Institute.findOne({ adminUser: instIdStr });
+        }
       } catch (_) {}
+    }
+    if (!institute && req.user._id && isValidEntityId(req.user._id)) {
+      institute = await Institute.findOne({ adminUser: req.user._id });
+    }
+    if (institute) {
+      instIdStr = String(institute._id || institute.id);
     }
 
     let storageInfo = {
@@ -3121,6 +3181,14 @@ export const getQuickSummary = async (req, res) => {
 
     const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
 
+    let wpSettings = institute?.whatsappSettings;
+    if (!wpSettings || Object.keys(wpSettings).length === 0) {
+      const cachedWp = await getCache(`institute:whatsapp_settings:${instIdStr}`);
+      if (cachedWp && Object.keys(cachedWp).length > 0) {
+        wpSettings = cachedWp;
+      }
+    }
+
     return res.json({
       storage: {
         maxStorageGb: storageInfo.maxGb,
@@ -3136,7 +3204,7 @@ export const getQuickSummary = async (req, res) => {
       },
       walletBalance: liveBal,
       perMessageCharge: institute?.perMessageCharge ?? 0.10,
-      whatsappSettings: institute?.whatsappSettings || {},
+      whatsappSettings: wpSettings || {},
     });
   } catch (error) {
     console.error("getQuickSummary error:", error);
@@ -3165,9 +3233,18 @@ export const getWhatsappLogs = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Only institute administrators can view WhatsApp logs." });
     }
     const rawInst = req.user.institute;
-    const instituteId = rawInst?._id || rawInst?.id || rawInst;
-    const instStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
-    if (!instituteId) {
+    let instStr = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instStr = String(rawInst._id || rawInst.id || "").trim();
+      } else {
+        instStr = String(rawInst).trim();
+      }
+    }
+    if ((!instStr || instStr === "[object Object]") && req.user._id) {
+      instStr = String(req.user._id).trim();
+    }
+    if (!instStr || instStr === "[object Object]") {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
 
@@ -3176,12 +3253,7 @@ export const getWhatsappLogs = async (req, res) => {
 
     let mongoLogs = [];
     try {
-      mongoLogs = await WhatsappLog.find({
-        $or: [
-          { institute: instituteId },
-          { institute: instStr }
-        ]
-      }).sort({ createdAt: -1, _id: -1 }).limit(500).lean();
+      mongoLogs = await WhatsappLog.find({ institute: instStr }).sort({ createdAt: -1, _id: -1 }).limit(500).lean();
     } catch (e) {
       console.warn("WhatsappLog.find query warning:", e.message);
     }

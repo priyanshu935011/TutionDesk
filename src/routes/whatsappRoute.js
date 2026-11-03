@@ -37,17 +37,49 @@ router.post("/webhook", (req, res) => {
 
 router.use(protect);
 
-router.get("/status", async (req, res) => {
+const getInstId = (req) => {
+  const rawInst = req.user?.institute;
+  let id = "";
+  if (rawInst) {
+    if (typeof rawInst === "object") {
+      id = String(rawInst._id || rawInst.id || "").trim();
+    } else {
+      id = String(rawInst).trim();
+    }
+  }
+  if (!id || id === "[object Object]") {
+    if (req.user?.institute_id) {
+      id = String(req.user.institute_id).trim();
+    }
+  }
+  if ((!id || id === "[object Object]") && req.user?._id) {
+    id = String(req.user._id).trim();
+  }
+  return (id && id !== "[object Object]") ? id : null;
+};
+
+const handleGetStatusAndSettings = async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    let instituteId = getInstId(req);
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
+
+    let inst = await Institute.findById(instituteId);
+    if (!inst) {
+      inst = await Institute.findOne({ adminUser: instituteId });
+    }
+    if (inst) {
+      instituteId = String(inst._id || inst.id);
+    }
+
     const statusObj = await getSessionStatus(String(instituteId));
 
     let settings = await getCache(`institute:whatsapp_settings:${instituteId}`);
     if (!settings || Object.keys(settings).length === 0 || settings.absentAlertsEnabled === undefined) {
-      const inst = await Institute.findById(instituteId);
+      if (!inst) {
+        inst = await Institute.findById(instituteId);
+      }
       settings = inst?.whatsappSettings || {
         absentAlertsEnabled: false,
         feeRemindersEnabled: false,
@@ -64,11 +96,14 @@ router.get("/status", async (req, res) => {
   } catch (error) {
     return res.status(500).json({ message: "Could not fetch WhatsApp status" });
   }
-});
+};
+
+router.get("/status", handleGetStatusAndSettings);
+router.get("/settings", handleGetStatusAndSettings);
 
 router.post("/initialize", async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const instituteId = getInstId(req);
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
@@ -82,7 +117,7 @@ router.post("/initialize", async (req, res) => {
 
 router.post("/logout", async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const instituteId = getInstId(req);
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
@@ -95,15 +130,19 @@ router.post("/logout", async (req, res) => {
 
 router.post("/settings", async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    let instituteId = getInstId(req);
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }
     const { absentAlertsEnabled, feeRemindersEnabled, feeReminderDaysBefore, customMessageTemplate, feeReminderTemplate, sendCredentialsEnabled } = req.body;
-    const inst = await Institute.findById(instituteId);
+    let inst = await Institute.findById(instituteId);
+    if (!inst) {
+      inst = await Institute.findOne({ adminUser: instituteId });
+    }
     if (!inst) {
       return res.status(404).json({ message: "Institute not found." });
     }
+    instituteId = String(inst._id || inst.id);
 
     const updatedSettings = {
       absentAlertsEnabled: typeof absentAlertsEnabled === "boolean" ? absentAlertsEnabled : Boolean(inst.whatsappSettings?.absentAlertsEnabled),
@@ -139,7 +178,7 @@ router.post("/settings", async (req, res) => {
 
 router.post("/test", async (req, res) => {
   try {
-    const instituteId = req.user.institute?._id || req.user.institute;
+    const instituteId = getInstId(req);
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with this account." });
     }

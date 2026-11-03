@@ -173,43 +173,44 @@ const protect = async (req, res, next) => {
       req.user.role === "student" ||
       req.user.role === "student_parent";
 
-    if (req.user && !skipSubscriptionCheck && req.user.institute) {
+    if (req.user && !skipSubscriptionCheck && (req.user.institute || req.user._id)) {
       const isPaymentRoute = req.originalUrl && (req.originalUrl.includes("/payments") || req.originalUrl.includes("/payment"));
       const rawInst = req.user.institute;
-      const instId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
+      const instIdStr = (rawInst && typeof rawInst === "object")
+        ? String(rawInst._id || rawInst.id || "").trim()
+        : String(rawInst || "").trim();
 
-      if (instId && String(instId).trim().length >= 8) {
-        try {
-          const selectFields =
-            "status subscriptionEnd adminUser tuitionType quizFeatureEnabled subscriptionPlan recordedLecturesFeatureEnabled releaseVideosFeatureEnabled";
-          let institute = await Institute.findById(instId).select(selectFields);
+      try {
+        let institute = null;
+        if (instIdStr && instIdStr.length >= 8 && instIdStr !== "[object Object]") {
+          institute = await Institute.findById(instIdStr);
           if (!institute) {
-            institute = await Institute.findOne({ adminUser: instId }).select(selectFields);
+            institute = await Institute.findOne({ adminUser: instIdStr });
           }
-          if (!institute && mongoose.Types.ObjectId.isValid(instId)) {
-            const uDoc = await User.findById(instId).select("institute");
-            if (uDoc && uDoc.institute) {
-              institute = await Institute.findById(uDoc.institute).select(selectFields);
-            }
+        }
+        if (!institute && req.user._id && String(req.user._id) !== "[object Object]") {
+          institute = await Institute.findOne({ adminUser: req.user._id });
+        }
+
+        if (institute) {
+          const isExpired =
+            institute.status !== "active" ||
+            (institute.subscriptionEnd && new Date(institute.subscriptionEnd).getTime() < Date.now());
+
+          if (isExpired && !isPaymentRoute) {
+            return res.status(403).json({
+              message:
+                "Your subscription has expired. Please renew to access the institute features.",
+              subscriptionExpired: true,
+            });
           }
 
-          if (institute) {
-            const isExpired =
-              institute.status !== "active" ||
-              (institute.subscriptionEnd && new Date(institute.subscriptionEnd).getTime() < Date.now());
-
-            if (isExpired && !isPaymentRoute) {
-              return res.status(403).json({
-                message:
-                  "Your subscription has expired. Please renew to access the institute features.",
-                subscriptionExpired: true,
-              });
-            }
-
-            req.user.institute = institute;
-          }
-        } catch (_) {}
-      }
+          // Preserve full institute details (including whatsappSettings and allowedFeatures)
+          req.user.institute = typeof rawInst === "object"
+            ? Object.assign({}, rawInst, institute._doc || institute)
+            : institute;
+        }
+      } catch (_) {}
     }
 
     next();

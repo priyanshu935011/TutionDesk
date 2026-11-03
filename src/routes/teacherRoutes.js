@@ -52,6 +52,16 @@ import protect from "../middleware/authMiddleware.js";
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+const uploadAnyFile = (req, res, next) => {
+  upload.any()(req, res, (err) => {
+    if (err) return res.status(400).json({ message: err.message });
+    if (req.files && req.files.length > 0) {
+      req.file = req.files.find(f => f.fieldname === "pdf" || f.fieldname === "file") || req.files[0];
+    }
+    next();
+  });
+};
+
 router.get("/notes/:id/view", viewNote);
 router.get("/notes/:id/download", downloadNote);
 
@@ -60,7 +70,12 @@ router.use(protect);
 // FCM Token Registration for Teachers / Staff
 router.post("/fcm-token", registerUserFcmToken);
 
+// Support both /sync and /dashboard
+router.get("/sync", getTeacherDashboard);
 router.get("/dashboard", getTeacherDashboard);
+
+// Support both /features and /institute-features
+router.get("/features", getInstituteFeatures);
 router.get("/institute-features", getInstituteFeatures);
 router.get("/quick-summary", getQuickSummary);
 router.get("/whatsapp-logs", getWhatsappLogs);
@@ -68,10 +83,10 @@ router.get("/outstanding-students", getOutstandingStudents);
 
 router.route("/notes")
   .get(getNotes)
-  .post(upload.single("file"), uploadNote);
+  .post(uploadAnyFile, uploadNote);
 
 router.route("/notes/:id")
-  .put(upload.single("file"), updateNote)
+  .put(uploadAnyFile, updateNote)
   .delete(deleteNote);
 
 router.post("/notes/:id/send-whatsapp", sendNoteWhatsApp);
@@ -89,6 +104,8 @@ router.route("/test-results/:id")
 
 router.put("/test-results-grouped", updateGroupedTestResults);
 router.delete("/test-results-grouped", deleteGroupedTestResults);
+router.post("/test-results/grouped/delete", deleteGroupedTestResults);
+router.delete("/test-results/grouped/delete", deleteGroupedTestResults);
 
 // Hired Teachers
 router.route("/hired-teachers")

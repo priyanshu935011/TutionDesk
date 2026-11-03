@@ -1507,6 +1507,22 @@ class SupabaseQuery {
   async exec() {
     const tableName = this.model.tableName;
 
+    // Security guard: findById with invalid or missing ID must immediately return null
+    if (this.queryType === "findById") {
+      const rawArg = this.args[0];
+      const targetId = (typeof rawArg === "object" && rawArg !== null) ? (rawArg._id ?? rawArg.id) : rawArg;
+      if (
+        targetId === null ||
+        targetId === undefined ||
+        targetId === "" ||
+        targetId === "[object Object]" ||
+        targetId === "null" ||
+        targetId === "undefined"
+      ) {
+        return null;
+      }
+    }
+
     if (this.queryType === "findOneAndUpdate") {
       const filter = this.args[0] || {};
       const update = this.args[1] || {};
@@ -1684,6 +1700,9 @@ class SupabaseQuery {
             if (filterKey) {
               console.debug(`Stripping missing filter column "${filterKey}" from ${tableName} findOne query.`);
               delete currentFilter[filterKey];
+              if (Object.keys(currentFilter).length === 0 && Object.keys(initialFilter).length > 0) {
+                return null;
+              }
               attempt++;
               continue;
             }
@@ -1694,6 +1713,7 @@ class SupabaseQuery {
               });
               if (currentFilter.$or.length === 0) {
                 delete currentFilter.$or;
+                return null;
               }
               attempt++;
               continue;
@@ -1752,6 +1772,9 @@ class SupabaseQuery {
             if (filterKey) {
               console.debug(`Stripping missing filter column "${filterKey}" from ${tableName} find query.`);
               delete currentFilter[filterKey];
+              if (Object.keys(currentFilter).length === 0 && Object.keys(initialFilter).length > 0) {
+                return [];
+              }
               attempt++;
               continue;
             }
@@ -1762,6 +1785,7 @@ class SupabaseQuery {
               });
               if (currentFilter.$or.length === 0) {
                 delete currentFilter.$or;
+                return [];
               }
               attempt++;
               continue;
@@ -2159,11 +2183,14 @@ class SupabaseModel {
                 orParts.push(`${dbSubKey}.eq.${subVal.toISOString()}`);
               } else {
                 const cleanItem = cleanValue(subVal);
-                if (cleanItem && String(cleanItem) !== "[object Object]") {
+                if (cleanItem !== undefined && cleanItem !== null && String(cleanItem) !== "[object Object]") {
                   const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
                   const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbSubKey);
                   const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbSubKey === "institute_id" || dbSubKey === "created_by");
-                  if (!isUuidCol || isUuid || isTextIdCol) {
+                  if (isUuidCol && !isUuid && !isTextIdCol) {
+                    const targetSubVal = toValidUUID(String(cleanItem));
+                    orParts.push(`${dbSubKey}.eq.${targetSubVal}`);
+                  } else {
                     orParts.push(`${dbSubKey}.eq.${cleanItem}`);
                   }
                 }
@@ -2171,7 +2198,10 @@ class SupabaseModel {
             }
           }
         }
-        if (orParts.length > 0) {
+        if (Array.isArray(val) && val.length > 0 && orParts.length === 0) {
+          // If caller provided $or conditions but none could be matched, must match 0 rows
+          q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+        } else if (orParts.length > 0) {
           q = q.or(orParts.join(","));
         }
         continue;
@@ -2296,14 +2326,24 @@ class SupabaseModel {
           }
         } else {
           const cleanItem = cleanValue(val);
-          const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
+          const isInvalidValue = cleanItem === undefined || cleanItem === null || cleanItem === "" || String(cleanItem) === "[object Object]" || String(cleanItem) === "null" || String(cleanItem) === "undefined";
           const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbKey);
-          if (dbKey === "id" && !isUuid) {
-            // Non-UUID string passed for Postgres UUID 'id' column, skip eq to prevent 22P02
-          } else if (isUuidCol && !isUuid) {
-            q = q.eq(dbKey, toValidUUID(String(cleanItem)));
+          const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbKey === "institute_id" || dbKey === "created_by");
+
+          if (isInvalidValue) {
+            if (key === "_id" || key === "id" || isUuidCol) {
+              // Invalid ID passed (e.g. empty or [object Object]); MUST match 0 rows
+              q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+            }
           } else {
-            q = q.eq(dbKey, cleanItem);
+            const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
+            if (isUuidCol && !isUuid && !isTextIdCol) {
+              // Convert non-UUID string to valid UUID so it queries safely without Postgres 22P02 error.
+              // NEVER skip the filter!
+              q = q.eq(dbKey, toValidUUID(String(cleanItem)));
+            } else {
+              q = q.eq(dbKey, cleanItem);
+            }
           }
         }
       }
