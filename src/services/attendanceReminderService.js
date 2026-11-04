@@ -28,11 +28,15 @@ export const parseTimeToMinutes = (timeStr) => {
     return hours * 60 + minutes;
   }
 
-  // 24-hour format (e.g. "16:00", "06:30", "16:00:00")
+  // 24-hour format or un-suffixed format (e.g. "16:00", "04:00", "05:30")
   const h24Match = clean.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
   if (h24Match) {
-    const hours = parseInt(h24Match[1], 10);
+    let hours = parseInt(h24Match[1], 10);
     const minutes = parseInt(h24Match[2], 10);
+    // Tuition classes between 1:00 and 6:59 without AM/PM are afternoon/evening classes (PM)
+    if (hours >= 1 && hours <= 6) {
+      hours += 12;
+    }
     return hours * 60 + minutes;
   }
 
@@ -223,10 +227,16 @@ export const checkPendingBatchAttendanceReminders = async () => {
       // Calculate class midpoint: e.g. 4:00 PM (960m) - 5:00 PM (1020m) -> midpoint = 4:30 PM (990m)
       const midpointMinutes = startMinutes + Math.floor(duration / 2);
 
-      // Trigger condition: Current IST time is at or past midpoint, and class has not ended yet
-      const isMidClassOrLater = currentMinutes >= midpointMinutes && currentMinutes <= endMinutes;
+      // Never send reminder once class has concluded for the day
+      if (currentMinutes >= endMinutes) {
+        sentRemindersCache.add(reminderKey);
+        continue;
+      }
 
-      if (!isMidClassOrLater) {
+      // Trigger condition: Current IST time is strictly between class midpoint and before class ends (in the middle of class)
+      const isMidClassOngoing = currentMinutes >= midpointMinutes && currentMinutes < endMinutes;
+
+      if (!isMidClassOngoing) {
         continue;
       }
 
