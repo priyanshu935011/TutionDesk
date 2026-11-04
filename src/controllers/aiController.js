@@ -2,6 +2,7 @@ import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import TestResult from "../models/TestResult.js";
+import AiUsageLog from "../models/AiUsageLog.js";
 import {
   getInstituteAiDetails,
   deductAiCredits,
@@ -365,6 +366,12 @@ export const chatWithAi = async (req, res) => {
 
     const lowerMessage = String(message || "").toLowerCase().trim();
 
+    const userInfo = {
+      userId: req.user?._id || req.user?.id,
+      userName: req.user?.name || "",
+      userRole: req.user?.role || (isStudent ? "student" : "teacher"),
+    };
+
     // Determine Task Type
     let taskType = explicitTaskType;
     if (!taskType) {
@@ -459,7 +466,7 @@ export const chatWithAi = async (req, res) => {
           break;
         }
 
-        const billing = await deductAiCredits(instituteId, "vision");
+        const billing = await deductAiCredits(instituteId, "vision", null, userInfo);
         const fullParsedData = {
           ...parsedData,
           availableBatches,
@@ -503,7 +510,7 @@ export const chatWithAi = async (req, res) => {
           break;
         }
 
-        const billing = await deductAiCredits(instituteId, "vision");
+        const billing = await deductAiCredits(instituteId, "vision", null, userInfo);
         const processed = processMarksheetBatchMatching(parsedMarks, allStudents, availableBatches, batchId);
 
         const payloadData = {
@@ -539,7 +546,7 @@ export const chatWithAi = async (req, res) => {
         const admissionAttempt = await parseAdmissionForm(imageBase64, imageMimeType, availableBatches, studentCustomFields);
 
         if (admissionAttempt.isValidDocument === true && (admissionAttempt.name || admissionAttempt.phone)) {
-          const billing = await deductAiCredits(instituteId, "vision");
+          const billing = await deductAiCredits(instituteId, "vision", null, userInfo);
           const fullParsedData = {
             ...admissionAttempt,
             availableBatches,
@@ -566,7 +573,7 @@ export const chatWithAi = async (req, res) => {
         });
 
         if (marksAttempt.isValidDocument === true && (marksAttempt.entries?.length || marksAttempt.unmatchedEntries?.length)) {
-          const billing = await deductAiCredits(instituteId, "vision");
+          const billing = await deductAiCredits(instituteId, "vision", null, userInfo);
           const processed = processMarksheetBatchMatching(marksAttempt, allStudents, availableBatches, batchId);
 
           const payloadData = {
@@ -608,7 +615,7 @@ export const chatWithAi = async (req, res) => {
       }
 
       case "GENERATE_NOTES": {
-        const billing = await deductAiCredits(instituteId, "query");
+        const billing = await deductAiCredits(instituteId, "query", null, userInfo);
         const availableBatches = await getInstituteBatches(req, instituteId);
         const targetClass = req.body.targetClass || req.body.classLevel || "Class 10";
 
@@ -655,7 +662,7 @@ export const chatWithAi = async (req, res) => {
       }
 
       case "GENERATE_TEST_SERIES": {
-        const billing = await deductAiCredits(instituteId, "quiz");
+        const billing = await deductAiCredits(instituteId, "quiz", null, userInfo);
         const topic = req.body.topic || message.replace(/generate|create|test series|mock test/gi, "").trim() || "Unit Test Series";
         const targetExam = req.body.targetExam || req.body.classLevel || "Class 10";
         const numQuestions = req.body.numQuestions || 10;
@@ -687,7 +694,7 @@ export const chatWithAi = async (req, res) => {
       }
 
       case "GENERATE_ASSIGNMENT": {
-        const billing = await deductAiCredits(instituteId, imageBase64 ? "vision" : "query");
+        const billing = await deductAiCredits(instituteId, imageBase64 ? "vision" : "query", null, userInfo);
         const availableBatches = await getInstituteBatches(req, instituteId);
         let selectedBatchName = "Selected Batch";
         if (batchId) {
@@ -730,7 +737,7 @@ export const chatWithAi = async (req, res) => {
       }
 
       case "GENERATE_NOTICE": {
-        const billing = await deductAiCredits(instituteId, "query");
+        const billing = await deductAiCredits(instituteId, "query", null, userInfo);
         const noticeData = await generateNoticeAnnouncement(
           instituteId,
           message || "General Holiday",
@@ -748,7 +755,7 @@ export const chatWithAi = async (req, res) => {
       }
 
       case "GENERATE_QUIZ": {
-        const billing = await deductAiCredits(instituteId, "quiz");
+        const billing = await deductAiCredits(instituteId, "quiz", null, userInfo);
         const lower = message.toLowerCase();
         const numMatch = lower.match(/(\d+)\s*(?:questions|question|mcq|mcqs)/);
         const numQuestions = numMatch
@@ -776,7 +783,7 @@ export const chatWithAi = async (req, res) => {
       }
 
       case "STUDENT_DOUBT": {
-        const billing = await deductAiCredits(instituteId, "doubt");
+        const billing = await deductAiCredits(instituteId, "doubt", null, userInfo);
         const answer = await solveStudentDoubt(
           message,
           imageBase64,
@@ -796,7 +803,7 @@ export const chatWithAi = async (req, res) => {
 
       case "QUERY":
       default: {
-        const billing = await deductAiCredits(instituteId, "query");
+        const billing = await deductAiCredits(instituteId, "query", null, userInfo);
         const answer = await answerInstituteIntelligence(
           instituteId,
           req.user,
@@ -1043,5 +1050,82 @@ export const parsePrompt = async (req, res) => {
   } catch (error) {
     console.error("parsePrompt error:", error);
     return res.status(500).json({ success: false, message: error.message || "Failed to parse prompt." });
+  }
+};
+
+// Fetch AI credit usage history for the active institute
+export const getAiUsageHistory = async (req, res) => {
+  try {
+    const instituteId = getInstituteIdFromReq(req) || req.user?._id || req.user?.id;
+    if (!instituteId) {
+      return res.status(400).json({ message: "Institute context missing" });
+    }
+
+    const details = await getInstituteAiDetails(instituteId);
+    const creditsPerRupee = Number(details?.aiCreditsPerRupee || 10);
+    const currentCredits = details?.aiWalletCredits || 0;
+    const currentBalance = details?.aiWalletBalance || 0;
+
+    let logs = [];
+
+    // First try Supabase table ai_usage_logs
+    try {
+      const { data: sbLogs, error: sbErr } = await supabase
+        .from("ai_usage_logs")
+        .select("*")
+        .eq("institute_id", String(instituteId))
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (!sbErr && Array.isArray(sbLogs) && sbLogs.length > 0) {
+        logs = sbLogs.map((l) => ({
+          id: l.id,
+          taskType: l.task_type || "query",
+          creditsDeducted: Number(l.credits_deducted || 0),
+          cost: Number(l.cost || 0),
+          userName: (l.user_name || "").trim(),
+          userRole: (l.user_role || "").trim(),
+          createdAt: l.created_at,
+        }));
+      }
+    } catch (_) {}
+
+    // Fallback to AiUsageLog Mongo model if Supabase returned empty
+    if (logs.length === 0) {
+      try {
+        const mongoLogs = await AiUsageLog.find({
+          $or: [
+            { institute: instituteId },
+            { institute: String(instituteId) },
+          ],
+        })
+          .sort({ createdAt: -1 })
+          .limit(100);
+
+        if (Array.isArray(mongoLogs)) {
+          logs = mongoLogs.map((l) => ({
+            id: l._id || l.id,
+            taskType: l.taskType || "query",
+            creditsDeducted: Number(l.creditsDeducted || 0),
+            cost: Number(l.cost || 0),
+            userName: (l.userName || "").trim(),
+            userRole: (l.userRole || "").trim(),
+            createdAt: l.createdAt,
+          }));
+        }
+      } catch (_) {}
+    }
+
+    return res.json({
+      success: true,
+      aiCredits: currentCredits,
+      aiWalletBalance: currentBalance,
+      aiCreditsPerRupee: creditsPerRupee,
+      pricePerCredit: Number((1 / creditsPerRupee).toFixed(2)),
+      logs,
+    });
+  } catch (error) {
+    console.error("getAiUsageHistory error:", error);
+    return res.status(500).json({ message: "Could not fetch AI usage history" });
   }
 };

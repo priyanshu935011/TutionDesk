@@ -10,6 +10,7 @@ import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import { resolveSubscriptionEnd } from "../utils/subscription.js";
 import WhatsappLog from "../models/WhatsappLog.js";
+import { getInstituteAiDetails } from "../services/aiService.js";
 import axios from "axios";
 import crypto from "crypto";
 
@@ -2151,6 +2152,163 @@ export const verifyWalletRecharge = async (req, res) => {
   } catch (error) {
     console.error("verifyWalletRecharge error:", error);
     return res.status(500).json({ message: error.response?.data?.message || error.message || "Could not verify wallet recharge." });
+  }
+};
+
+export const createAiCreditRechargeSession = async (req, res) => {
+  try {
+    const { credits, amount } = req.body;
+    const instituteId = req.user?.institute?._id || req.user?.institute || req.user?._id || req.user?.id;
+    if (!instituteId) {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+
+    const institute = await Institute.findById(instituteId) || { name: "Tuition" };
+    const details = await getInstituteAiDetails(instituteId);
+    const creditsPerRupee = Number(details?.aiCreditsPerRupee || 10);
+
+    let finalAmount = 0;
+    let finalCredits = 0;
+
+    if (amount !== undefined && Number(amount) > 0) {
+      finalAmount = Number(amount);
+      finalCredits = Math.round(finalAmount * creditsPerRupee);
+    } else if (credits !== undefined && Number(credits) > 0) {
+      finalCredits = Number(credits);
+      finalAmount = Math.max(1, Math.round(finalCredits / creditsPerRupee));
+    } else {
+      return res.status(400).json({ message: "Please enter valid credits or amount." });
+    }
+
+    const config = await getCashfreeConfig();
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const cfOrderId = "aicredit_" + crypto.randomUUID().replace(/-/g, "");
+    const clientBaseUrl = getClientBaseUrl(req);
+    const returnUrl = (req.headers.origin || "").includes("8080")
+      ? `${clientBaseUrl}/#/dashboard?verify_ai_credit_id=${cfOrderId}`
+      : `${clientBaseUrl}/pay/${cfOrderId}?verify=true`;
+
+    const orderPayload = {
+      order_id: cfOrderId,
+      order_amount: finalAmount,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: String(instituteId).slice(0, 45),
+        customer_name: institute.name || req.user?.name || "Tuition Admin",
+        customer_email: req.user?.email || "support@classtech.in",
+        customer_phone: req.user?.phone || "9999999999",
+      },
+      order_meta: {
+        return_url: returnUrl,
+      },
+      order_note: `Top up ${finalCredits} AI Credits for ${institute.name || "Tuition"}`,
+    };
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const response = await axios.post(`${baseUrl}/orders`, orderPayload, { headers });
+
+    await CashfreePayment.create({
+      institute: instituteId,
+      instituteName: institute.name || "Tuition",
+      plan: "ai_wallet_recharge",
+      amount: finalAmount,
+      type: "ai_wallet_recharge",
+      status: "pending",
+      cfOrderId,
+      paymentSessionId: response.data.payment_session_id,
+      autoRenew: false,
+      notes: { credits: finalCredits },
+    });
+
+    return res.json({
+      success: true,
+      type: "ai_wallet_recharge",
+      cfOrderId,
+      paymentSessionId: response.data.payment_session_id,
+      paymentLink: `${clientBaseUrl}/pay/${cfOrderId}`,
+      environment,
+      amount: finalAmount,
+      creditsPurchased: finalCredits,
+    });
+  } catch (error) {
+    console.error("createAiCreditRechargeSession error:", error.response?.data || error);
+    return res.status(500).json({
+      message: error.response?.data?.message || error.message || "Could not create AI credit recharge session.",
+    });
+  }
+};
+
+export const verifyAiCreditRecharge = async (req, res) => {
+  try {
+    const { cfOrderId } = req.body;
+    if (!cfOrderId) {
+      return res.status(400).json({ message: "cfOrderId is required." });
+    }
+    const cleanOrderId = String(cfOrderId).trim();
+
+    let payment = await CashfreePayment.findOne({
+      $or: [
+        { cfOrderId: cleanOrderId },
+        { paymentSessionId: cleanOrderId },
+        { _id: cleanOrderId }
+      ],
+      type: "ai_wallet_recharge"
+    });
+
+    if (!payment) {
+      payment = await CashfreePayment.findOne({
+        $or: [
+          { cfOrderId: cleanOrderId },
+          { paymentSessionId: cleanOrderId },
+          { _id: cleanOrderId }
+        ]
+      });
+    }
+
+    if (!payment) {
+      return res.status(404).json({ message: "AI Credit transaction record not found." });
+    }
+
+    if (payment.status === "success" || payment.status === "paid") {
+      const details = await getInstituteAiDetails(payment.institute);
+      return res.json({
+        status: "success",
+        aiWalletBalance: details.aiWalletBalance,
+        aiWalletCredits: details.aiWalletCredits,
+      });
+    }
+
+    const config = await getCashfreeConfig();
+    const result = await checkCashfreeOrderStatus(payment.cfOrderId || cleanOrderId, config);
+
+    payment.status = result.status;
+    if (result.rawData && Object.keys(result.rawData).length > 0) {
+      payment.cfPaymentDetails = result.rawData;
+    }
+    await payment.save();
+
+    if (result.status === "success" || result.status === "paid") {
+      await creditInstituteAiWallet(payment.institute, payment.amount);
+      const details = await getInstituteAiDetails(payment.institute);
+      return res.json({
+        status: "success",
+        aiWalletBalance: details.aiWalletBalance,
+        aiWalletCredits: details.aiWalletCredits,
+      });
+    }
+
+    return res.json({ status: result.status });
+  } catch (error) {
+    console.error("verifyAiCreditRecharge error:", error);
+    return res.status(500).json({ message: error.response?.data?.message || error.message || "Could not verify AI credit recharge." });
   }
 };
 

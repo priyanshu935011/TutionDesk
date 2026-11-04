@@ -5,6 +5,7 @@ import {
   chatWithAi,
   confirmAiAction,
   parsePrompt,
+  getAiUsageHistory,
 } from "../controllers/aiController.js";
 
 const router = express.Router();
@@ -12,6 +13,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get("/status", getAiStatus);
+router.get("/usage-history", getAiUsageHistory);
 router.post("/chat", chatWithAi);
 router.post("/confirm-action", confirmAiAction);
 router.post("/parse-prompt", parsePrompt);

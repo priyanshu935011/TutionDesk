@@ -2422,6 +2422,7 @@ export const getAdminAiSettings = async (req, res) => {
     const vRate = Number(val.aiVisionRate ?? val.rates?.vision ?? 0.50);
     const qzRate = Number(val.aiQuizRate ?? val.rates?.quiz ?? 0.40);
     const dRate = Number(val.aiDoubtRate ?? val.rates?.doubt ?? 0.25);
+    const creditsPerRupee = Number(val.aiCreditsPerRupee ?? val.creditsPerRupee ?? 10);
     const chosenModel = val.defaultModel || val.model || "gemini-3.5-flash";
     const isGloballyEnabled = val.aiEnabledGlobally !== undefined ? Boolean(val.aiEnabledGlobally) : (val.defaultEnabled !== undefined ? Boolean(val.defaultEnabled) : true);
 
@@ -2441,6 +2442,8 @@ export const getAdminAiSettings = async (req, res) => {
       aiVisionRate: vRate,
       aiQuizRate: qzRate,
       aiDoubtRate: dRate,
+      aiCreditsPerRupee: creditsPerRupee,
+      pricePerCredit: Number((1 / creditsPerRupee).toFixed(2)),
       defaultEnabled: isGloballyEnabled,
       aiEnabledGlobally: isGloballyEnabled,
     };
@@ -2464,6 +2467,8 @@ export const updateAdminAiSettings = async (req, res) => {
       aiVisionRate,
       aiQuizRate,
       aiDoubtRate,
+      aiCreditsPerRupee,
+      creditsPerRupee,
       defaultEnabled,
       aiEnabledGlobally,
     } = req.body;
@@ -2473,6 +2478,7 @@ export const updateAdminAiSettings = async (req, res) => {
     const vRate = Number(aiVisionRate ?? rates?.vision ?? setting?.value?.rates?.vision ?? 0.50);
     const qzRate = Number(aiQuizRate ?? rates?.quiz ?? setting?.value?.rates?.quiz ?? 0.40);
     const dRate = Number(aiDoubtRate ?? rates?.doubt ?? setting?.value?.rates?.doubt ?? 0.25);
+    const finalCreditsPerRupee = Number(aiCreditsPerRupee ?? creditsPerRupee ?? setting?.value?.aiCreditsPerRupee ?? 10);
     const chosenModel = defaultModel || model || setting?.value?.model || "gemini-3.5-flash";
     const isGloballyEnabled = aiEnabledGlobally !== undefined
       ? Boolean(aiEnabledGlobally)
@@ -2494,6 +2500,8 @@ export const updateAdminAiSettings = async (req, res) => {
       aiVisionRate: vRate,
       aiQuizRate: qzRate,
       aiDoubtRate: dRate,
+      aiCreditsPerRupee: finalCreditsPerRupee,
+      pricePerCredit: Number((1 / finalCreditsPerRupee).toFixed(2)),
       defaultEnabled: isGloballyEnabled,
       aiEnabledGlobally: isGloballyEnabled,
     };

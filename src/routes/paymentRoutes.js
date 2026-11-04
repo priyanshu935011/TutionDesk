@@ -35,6 +35,8 @@ import {
   getWhatsappLogs,
   createWalletRechargeSession,
   verifyWalletRecharge,
+  createAiCreditRechargeSession,
+  verifyAiCreditRecharge,
   proxyImage,
   getPublicPaymentOrder,
   verifyPublicPaymentOrder,
@@ -59,6 +61,8 @@ router.get("/wallet-info", protect, getWalletInfo);
 router.get("/whatsapp-logs", protect, getWhatsappLogs);
 router.post("/wallet-recharge/session", protect, createWalletRechargeSession);
 router.post("/wallet-recharge/verify", protect, verifyWalletRecharge);
+router.post("/ai-credits/session", protect, createAiCreditRechargeSession);
+router.post("/ai-credits/verify", protect, verifyAiCreditRecharge);
 
 // Protected staff routes (Super Admin / Tech Admin)
 router.get("/list", protect, staffOnly, getAllPayments);

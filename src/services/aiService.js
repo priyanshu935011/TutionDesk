@@ -7,6 +7,7 @@ import Note from "../models/Note.js";
 import Notice from "../models/Notice.js";
 import TestResult from "../models/TestResult.js";
 import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
+import AiUsageLog from "../models/AiUsageLog.js";
 import { getISTDateStr } from "../utils/feeHelper.js";
 import { supabase } from "../utils/supabase.js";
 import {
@@ -186,6 +187,7 @@ export async function deductAiCredits(
   instituteId,
   taskType,
   customCost = null,
+  userInfo = {},
 ) {
   const details = await getInstituteAiDetails(instituteId);
   if (!details) {
@@ -222,6 +224,9 @@ export async function deductAiCredits(
     Number((details.aiWalletBalance - cost).toFixed(2)),
   );
 
+  const creditsPerRupee = Number(details.aiCreditsPerRupee || 10);
+  const creditsDeducted = Math.round(cost * creditsPerRupee);
+
   // Update Supabase
   try {
     if (details.sbRow?.id) {
@@ -247,18 +252,40 @@ export async function deductAiCredits(
     updateInstituteAiWalletBalanceMetadata(details.mongoInst._id, newBalance);
   }
 
-  // Attempt to log usage into ai_usage_logs
+  // Attempt to log usage into ai_usage_logs (Supabase & Mongo)
+  const userName = (userInfo?.userName || userInfo?.name || "").trim();
+  const userRole = (userInfo?.userRole || userInfo?.role || "").trim();
+  const userId = userInfo?.userId || userInfo?._id || userInfo?.id || null;
+
   try {
     await supabase.from("ai_usage_logs").insert({
       institute_id: String(instituteId),
       task_type: taskType,
-      credits_deducted: cost,
+      credits_deducted: creditsDeducted,
+      cost: cost,
+      user_id: userId ? String(userId) : null,
+      user_name: userName || null,
+      user_role: userRole || null,
+    });
+  } catch (_) {}
+
+  try {
+    await AiUsageLog.create({
+      institute: instituteId,
+      taskType,
+      creditsDeducted,
+      cost,
+      userId,
+      userName,
+      userRole,
     });
   } catch (_) {}
 
   return {
     deducted: cost,
+    creditsDeducted,
     newBalance,
+    remainingCredits: Math.round(newBalance * creditsPerRupee),
   };
 }
 
