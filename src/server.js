@@ -136,7 +136,7 @@ app.use(["/admin", "/api/admin"], adminRoutes);
 app.use(["/batches", "/api/batches"], batchRoutes);
 app.use(["/students", "/api/students"], studentRoutes);
 app.use(["/dashboard", "/api/dashboard"], dashboardRoutes);
-app.use(["/teacher", "/api/teacher"], teacherRoutes);
+app.use(["/teacher", "/teachers", "/api/teacher", "/api/teachers"], teacherRoutes);
 app.use(["/student/auth", "/student-auth", "/api/student/auth", "/api/student-auth"], authLimiter, studentAuthRoutes);
 app.use(["/student-portal", "/api/student-portal"], studentPortalRoutes);
 app.use("/student", (req, res, next) => {

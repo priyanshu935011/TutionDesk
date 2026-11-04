@@ -119,6 +119,8 @@ router.route("/hired-teachers/:id")
   .delete(deleteHiredTeacher);
 
 router.get("/hired-teachers/:id/activity", getHiredTeacherActivity);
+router.get("/teachers/:id/activity", getHiredTeacherActivity);
+router.get("/:id/activity", getHiredTeacherActivity);
 router.patch("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
 router.put("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
 
