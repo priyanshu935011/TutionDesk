@@ -184,7 +184,7 @@ export const checkPendingBatchAttendanceReminders = async () => {
 
     // 1. Fetch active batches
     const batches = await Batch.find({ status: { $ne: "archived" } })
-      .select("_id id name scheduleDays startTime endTime teacher user");
+      .select("_id id name scheduleDays startTime endTime teacher user lastAttendanceReminderDate");
 
     if (!batches || batches.length === 0) {
       return { totalBatches: 0, remindersSent: 0 };
@@ -201,8 +201,13 @@ export const checkPendingBatchAttendanceReminders = async () => {
       const bId = String(batch._id || batch.id);
       const reminderKey = `${bId}:${todayIST}`;
 
-      // Skip if already sent today
-      if (sentRemindersCache.has(reminderKey)) {
+      // Skip if already sent today (check in-memory cache OR DB field)
+      if (
+        sentRemindersCache.has(reminderKey) ||
+        batch.lastAttendanceReminderDate === todayIST ||
+        batch.last_attendance_reminder_date === todayIST
+      ) {
+        sentRemindersCache.add(reminderKey);
         continue;
       }
 
@@ -256,6 +261,20 @@ export const checkPendingBatchAttendanceReminders = async () => {
 
       const timingLabel = `${batch.startTime || ""} - ${batch.endTime || ""}`.trim();
 
+      // Mark as sent immediately in memory and DB to prevent duplicate sends across workers/restarts
+      sentRemindersCache.add(reminderKey);
+      await Batch.updateOne(
+        { _id: batch._id || batch.id },
+        { $set: { lastAttendanceReminderDate: todayIST } }
+      ).catch(() => {});
+      if (supabase) {
+        await supabase
+          .from("batches")
+          .update({ last_attendance_reminder_date: todayIST })
+          .eq("id", bId)
+          .catch(() => {});
+      }
+
       // Dispatch push notification to all assigned teachers AND the institute
       await sendUserNotification({
         userIds: recipientIds,
@@ -263,15 +282,16 @@ export const checkPendingBatchAttendanceReminders = async () => {
         message: `Attendance for ${batch.name} (${timingLabel}) has not been marked yet. Please take attendance now.`,
         type: "attendance_reminder",
         actionUrl: `/attendance?batchId=${bId}`,
+        tag: `att_rem_${bId}`,
         data: {
           type: "attendance_reminder",
           batchId: bId,
           batchName: batch.name,
           timing: timingLabel,
+          tag: `att_rem_${bId}`,
         },
       });
 
-      sentRemindersCache.add(reminderKey);
       remindersSentCount++;
       console.log(`[AttendanceReminder] Sent mid-class attendance reminder for "${batch.name}" to ${recipientIds.length} recipient(s).`);
     }

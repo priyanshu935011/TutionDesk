@@ -41,6 +41,10 @@ const batchSchema = new mongoose.Schema(
       enum: ["active", "archived"],
       default: "active",
     },
+    lastAttendanceReminderDate: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,

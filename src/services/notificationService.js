@@ -170,6 +170,7 @@ export const sendUserNotification = async ({
   type = "general",
   imageUrl = "",
   actionUrl = "",
+  tag = "",
   data = {},
 }) => {
   try {
@@ -200,8 +201,13 @@ export const sendUserNotification = async ({
         .lean();
 
       for (const u of mongoUsers) {
-        parseFcmTokens(u.fcmTokens).forEach((t) => tokenSet.add(t));
-        parseFcmTokens(u.fcmToken).forEach((t) => tokenSet.add(t));
+        const uTokens = [
+          ...parseFcmTokens(u.fcmTokens),
+          ...parseFcmTokens(u.fcmToken),
+        ];
+        // Only keep the most recent active device tokens (max 2) per user to avoid duplicates on the same device
+        const uniqueUserTokens = Array.from(new Set(uTokens)).slice(0, 2);
+        uniqueUserTokens.forEach((t) => tokenSet.add(t));
       }
     } catch (uErr) {
       console.warn("MongoDB user FCM token fetch warning:", uErr.message);
@@ -219,7 +225,9 @@ export const sendUserNotification = async ({
             .in("id", validUuids);
           if (Array.isArray(sbRows)) {
             for (const r of sbRows) {
-              parseFcmTokens(r.fcm_token).forEach((t) => tokenSet.add(t));
+              const uTokens = parseFcmTokens(r.fcm_token);
+              const uniqueUserTokens = Array.from(new Set(uTokens)).slice(0, 2);
+              uniqueUserTokens.forEach((t) => tokenSet.add(t));
             }
           }
         }
@@ -234,8 +242,10 @@ export const sendUserNotification = async ({
         body: cleanMessage,
         imageUrl: imageUrl ? String(imageUrl).trim() : "",
         actionUrl: actionUrl ? String(actionUrl).trim() : "",
+        tag: tag || data?.tag || "",
         data: {
           type,
+          tag: tag || data?.tag || "",
           ...data,
         },
         priority: "high",

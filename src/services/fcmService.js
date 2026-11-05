@@ -178,6 +178,7 @@ export const sendFcmPushNotification = async ({
   body,
   imageUrl = "",
   actionUrl = "",
+  tag = "",
   data = {},
   priority = "high",
 }) => {
@@ -191,6 +192,8 @@ export const sendFcmPushNotification = async ({
     if (uniqueTokens.length === 0) {
       return { targetCount: 0, successCount: 0, failureCount: 0 };
     }
+
+    const resolvedTag = tag || data?.tag || "";
 
     const fcmConfig = await getFcmSettingsHelper();
     if (!fcmConfig.enabled) {
@@ -232,10 +235,14 @@ export const sendFcmPushNotification = async ({
               data: mergedData,
               android: {
                 priority: priority === "high" ? "HIGH" : "NORMAL",
+                ...(resolvedTag ? { collapse_key: String(resolvedTag) } : {}),
                 notification: {
                   sound: "default",
                   channel_id: "high_importance_channel",
                   notification_priority: priority === "high" ? "PRIORITY_HIGH" : "PRIORITY_DEFAULT",
+                  color: "#FFFFFF",
+                  icon: "ic_notification",
+                  ...(resolvedTag ? { tag: String(resolvedTag) } : {}),
                   ...(imageUrl ? { image: String(imageUrl).trim() } : {}),
                 },
               },
@@ -303,16 +310,21 @@ export const sendFcmPushNotification = async ({
         const chunk = uniqueTokens.slice(i, i + chunkSize);
         const payload = JSON.stringify({
           registration_ids: chunk,
+          ...(resolvedTag ? { collapse_key: String(resolvedTag) } : {}),
           notification: {
             title: String(title || "").trim(),
             body: String(body || "").trim(),
             sound: "default",
+            color: "#FFFFFF",
+            icon: "ic_notification",
+            ...(resolvedTag ? { tag: String(resolvedTag) } : {}),
             ...(imageUrl ? { image: String(imageUrl).trim() } : {}),
           },
           data: {
             title: String(title || "").trim(),
             body: String(body || "").trim(),
             ...(actionUrl ? { actionUrl: String(actionUrl).trim() } : {}),
+            ...(resolvedTag ? { tag: String(resolvedTag) } : {}),
             ...data,
           },
           priority: priority === "high" ? "high" : "normal",
