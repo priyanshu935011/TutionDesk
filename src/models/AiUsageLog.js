@@ -30,6 +30,14 @@ const aiUsageLogSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    actionType: {
+      type: String,
+      default: "DEBIT",
+    },
+    remarks: {
+      type: String,
+      default: "",
+    },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {},

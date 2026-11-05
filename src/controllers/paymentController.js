@@ -10,6 +10,7 @@ import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import { resolveSubscriptionEnd } from "../utils/subscription.js";
 import WhatsappLog from "../models/WhatsappLog.js";
+import AiUsageLog from "../models/AiUsageLog.js";
 import { getInstituteAiDetails } from "../services/aiService.js";
 import axios from "axios";
 import crypto from "crypto";
@@ -19,10 +20,18 @@ export const getClientBaseUrl = (req) => {
   if (origin && !origin.includes("railway.app")) {
     try {
       const u = new URL(origin);
-      return `${u.protocol}//${u.host}`;
+      let proto = u.protocol;
+      if (!u.hostname.includes("localhost") && !u.hostname.includes("127.0.0.1") && proto === "http:") {
+        proto = "https:";
+      }
+      return `${proto}//${u.host}`;
     } catch (_) {}
   }
-  return process.env.CLIENT_URL || "https://classtech.in";
+  let base = process.env.CLIENT_URL || "https://classtech.in";
+  if (!base.includes("localhost") && !base.includes("127.0.0.1") && base.startsWith("http://")) {
+    base = base.replace(/^http:\/\//i, "https://");
+  }
+  return base;
 };
 
 export const getCashfreeConfig = async () => {
@@ -2185,10 +2194,16 @@ export const createAiCreditRechargeSession = async (req, res) => {
     const baseUrl = getBaseUrl(environment);
 
     const cfOrderId = "aicredit_" + crypto.randomUUID().replace(/-/g, "");
-    const clientBaseUrl = getClientBaseUrl(req);
-    const returnUrl = (req.headers.origin || "").includes("8080")
+    let clientBaseUrl = getClientBaseUrl(req);
+    if (!clientBaseUrl.includes("localhost") && !clientBaseUrl.includes("127.0.0.1") && clientBaseUrl.startsWith("http://")) {
+      clientBaseUrl = clientBaseUrl.replace(/^http:\/\//i, "https://");
+    }
+    let returnUrl = (req.headers.origin || "").includes("8080")
       ? `${clientBaseUrl}/#/dashboard?verify_ai_credit_id=${cfOrderId}`
       : `${clientBaseUrl}/pay/${cfOrderId}?verify=true`;
+    if (!returnUrl.includes("localhost") && !returnUrl.includes("127.0.0.1") && returnUrl.startsWith("http://")) {
+      returnUrl = returnUrl.replace(/^http:\/\//i, "https://");
+    }
 
     const orderPayload = {
       order_id: cfOrderId,
@@ -2298,10 +2313,35 @@ export const verifyAiCreditRecharge = async (req, res) => {
     if (result.status === "success" || result.status === "paid") {
       await creditInstituteAiWallet(payment.institute, payment.amount);
       const details = await getInstituteAiDetails(payment.institute);
+
+      // Log top-up in AiUsageLog
+      try {
+        const creditsAdded = Math.round(Number(payment.amount || 0) * Number(details.aiCreditsPerRupee || 10));
+        await AiUsageLog.create({
+          institute: payment.institute,
+          taskType: "TOP_UP",
+          actionType: "TOP_UP",
+          creditsDeducted: -creditsAdded,
+          cost: Number(payment.amount || 0),
+          userName: payment.instituteName || "Tuition Admin",
+          userRole: "admin",
+          remarks: "Self Top-Up",
+          metadata: {
+            cfOrderId: cleanOrderId,
+            amount: payment.amount,
+            creditsAdded,
+            source: "cashfree",
+          },
+        });
+      } catch (logErr) {
+        console.warn("[verifyAiCreditRecharge] AiUsageLog creation warning:", logErr.message);
+      }
+
       return res.json({
         status: "success",
         aiWalletBalance: details.aiWalletBalance,
         aiWalletCredits: details.aiWalletCredits,
+        message: "AI Credits recharge successful!",
       });
     }
 
@@ -2344,6 +2384,26 @@ export const cronVerifyPendingRecharges = async (req, res) => {
           if (result.status === "success") {
             if (payment.type === "ai_wallet_recharge") {
               await creditInstituteAiWallet(payment.institute, payment.amount);
+              try {
+                const details = await getInstituteAiDetails(payment.institute);
+                const creditsAdded = Math.round(Number(payment.amount || 0) * Number(details.aiCreditsPerRupee || 10));
+                await AiUsageLog.create({
+                  institute: payment.institute,
+                  taskType: "TOP_UP",
+                  actionType: "TOP_UP",
+                  creditsDeducted: -creditsAdded,
+                  cost: Number(payment.amount || 0),
+                  userName: payment.instituteName || "Tuition Admin",
+                  userRole: "admin",
+                  remarks: "Self Top-Up",
+                  metadata: {
+                    cfOrderId: payment.cfOrderId,
+                    amount: payment.amount,
+                    creditsAdded,
+                    source: "cashfree_cron",
+                  },
+                });
+              } catch (_) {}
             } else if (payment.type === "subscription") {
               const inst = await Institute.findById(payment.institute);
               if (inst) {

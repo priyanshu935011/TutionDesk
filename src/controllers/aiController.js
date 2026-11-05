@@ -1081,10 +1081,12 @@ export const getAiUsageHistory = async (req, res) => {
         logs = sbLogs.map((l) => ({
           id: l.id,
           taskType: l.task_type || "query",
+          actionType: l.action_type || (Number(l.credits_deducted) < 0 ? "TOP_UP" : "DEBIT"),
           creditsDeducted: Number(l.credits_deducted || 0),
           cost: Number(l.cost || 0),
           userName: (l.user_name || "").trim(),
           userRole: (l.user_role || "").trim(),
+          remarks: (l.remarks || "").trim(),
           createdAt: l.created_at,
         }));
       }
@@ -1106,10 +1108,12 @@ export const getAiUsageHistory = async (req, res) => {
           logs = mongoLogs.map((l) => ({
             id: l._id || l.id,
             taskType: l.taskType || "query",
+            actionType: l.actionType || (Number(l.creditsDeducted) < 0 ? "TOP_UP" : "DEBIT"),
             creditsDeducted: Number(l.creditsDeducted || 0),
             cost: Number(l.cost || 0),
             userName: (l.userName || "").trim(),
             userRole: (l.userRole || "").trim(),
+            remarks: (l.remarks || "").trim(),
             createdAt: l.createdAt,
           }));
         }

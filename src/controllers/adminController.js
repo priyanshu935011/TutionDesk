@@ -32,6 +32,8 @@ import AiHarvestLog from "../models/AiHarvestLog.js";
 import SystemLog from "../models/SystemLog.js";
 import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
+import AiUsageLog from "../models/AiUsageLog.js";
+import { getInstituteAiDetails } from "../services/aiService.js";
 
 const getAdminEmails = async () => {
   try {
@@ -2586,6 +2588,31 @@ export const topupInstituteAiWallet = async (req, res) => {
     try {
       await logActivity(req.user._id, "AI Wallet Topup", `Updated AI wallet balance for institute ${instIdStr} to INR ${updatedBalance}`, req.ip);
     } catch (_) {}
+
+    // 3. Record in AI Usage / Credit History if credits were added
+    const creditDelta = updatedBalance - currentBalance;
+    if (creditDelta > 0) {
+      try {
+        const details = await getInstituteAiDetails(institute?._id || instIdStr).catch(() => ({ aiCreditsPerRupee: 10 }));
+        const creditsAdded = Math.round(Number(creditDelta) * Number(details?.aiCreditsPerRupee || 10));
+        const adminEmail = req.user?.email || "Super Admin";
+        const remarkText = req.body?.remarks || `Top up from ClassTech Admin (${adminEmail})`;
+        await AiUsageLog.create({
+          institute: institute?._id || instIdStr,
+          userId: req.user?._id || null,
+          userName: req.user?.name || "Super Admin",
+          userRole: "admin",
+          taskType: "TOP_UP",
+          actionType: "TOP_UP",
+          creditsDeducted: -creditsAdded,
+          cost: creditDelta,
+          status: "SUCCESS",
+          remarks: remarkText,
+        });
+      } catch (logErr) {
+        console.warn("[topupInstituteAiWallet] Failed to log AiUsageLog:", logErr.message);
+      }
+    }
 
     return res.json({
       message: "Institute AI Wallet balance updated successfully!",
