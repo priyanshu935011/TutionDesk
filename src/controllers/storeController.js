@@ -133,6 +133,8 @@ export const createAdminProduct = async (req, res) => {
       stockQuantity,
       weightKg,
       sku,
+      rating,
+      studentsEnrolled,
     } = req.body;
 
     if (!title || !title.trim()) {
@@ -180,6 +182,15 @@ export const createAdminProduct = async (req, res) => {
     const parsedTestSeriesIds = extractCleanIds(testSeriesIds);
     const parsedBundleItems = extractCleanIds(bundleItems);
 
+    const parsedRating =
+      rating !== undefined && rating !== null && String(rating).trim() !== "" && !isNaN(Number(rating))
+        ? Math.max(0, Math.min(5, parseFloat(Number(rating).toFixed(1))))
+        : null;
+    const parsedStudentsEnrolled =
+      studentsEnrolled !== undefined && studentsEnrolled !== null && String(studentsEnrolled).trim() !== "" && !isNaN(Number(studentsEnrolled))
+        ? Math.max(0, parseInt(studentsEnrolled, 10))
+        : null;
+
     const product = await Product.create({
       title: title.trim(),
       description: description || "",
@@ -201,6 +212,8 @@ export const createAdminProduct = async (req, res) => {
       stockQuantity: Number(stockQuantity || 100),
       weightKg: Number(weightKg || 0.5),
       sku: sku || `SKU-${Date.now().toString().slice(-6)}`,
+      rating: parsedRating,
+      studentsEnrolled: parsedStudentsEnrolled,
       createdBy: req.user?._id || null,
     });
 
@@ -268,6 +281,19 @@ export const updateAdminProduct = async (req, res) => {
     if (updateData.mrp !== undefined) updateData.mrp = Number(updateData.mrp);
     if (updateData.stockQuantity !== undefined) updateData.stockQuantity = Number(updateData.stockQuantity);
     if (updateData.weightKg !== undefined) updateData.weightKg = Number(updateData.weightKg);
+
+    if (updateData.rating !== undefined) {
+      updateData.rating =
+        updateData.rating !== null && String(updateData.rating).trim() !== "" && !isNaN(Number(updateData.rating))
+          ? Math.max(0, Math.min(5, parseFloat(Number(updateData.rating).toFixed(1))))
+          : null;
+    }
+    if (updateData.studentsEnrolled !== undefined) {
+      updateData.studentsEnrolled =
+        updateData.studentsEnrolled !== null && String(updateData.studentsEnrolled).trim() !== "" && !isNaN(Number(updateData.studentsEnrolled))
+          ? Math.max(0, parseInt(updateData.studentsEnrolled, 10))
+          : null;
+    }
 
     const product = await Product.findByIdAndUpdate(id, updateData, { new: true });
     if (!product) {
@@ -940,6 +966,13 @@ export const storeCheckout = async (req, res) => {
     const studentEmail = student.email || "student@classtech.in";
     const studentName = student.name || "Student";
 
+    const rawFrontendUrl = process.env.FRONTEND_URL || "https://app.classtech.in";
+    const secureFrontendUrl = rawFrontendUrl.startsWith("http://")
+      ? rawFrontendUrl.replace(/^http:\/\//, "https://")
+      : rawFrontendUrl.startsWith("https://")
+      ? rawFrontendUrl
+      : `https://${rawFrontendUrl}`;
+
     const payload = {
       order_id: cfOrderId,
       order_amount: totalAmount,
@@ -951,7 +984,7 @@ export const storeCheckout = async (req, res) => {
         customer_phone: studentPhone.length === 10 ? studentPhone : "9999999999",
       },
       order_meta: {
-        return_url: `${process.env.FRONTEND_URL || "https://app.classtech.in"}/store/order-status?order_id=${cfOrderId}`,
+        return_url: `${secureFrontendUrl}/store/order-status?order_id=${cfOrderId}`,
       },
       order_note: `ClassTech Store Order #${orderNumber}`,
     };
@@ -993,6 +1026,7 @@ export const storeCheckout = async (req, res) => {
       cfOrderId,
       paymentSessionId,
       totalAmount,
+      environment: (environment || "SANDBOX").toUpperCase(),
     });
   } catch (err) {
     console.error("storeCheckout error:", err);

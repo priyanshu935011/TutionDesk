@@ -93,6 +93,18 @@ const productSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Mock rating and students enrolled metrics
+    rating: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 5,
+    },
+    studentsEnrolled: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
