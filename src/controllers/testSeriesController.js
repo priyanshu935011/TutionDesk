@@ -901,6 +901,7 @@ export const getStudentTests = async (req, res) => {
       .map((acc) => acc.testSeries);
 
     // Also include test series directly purchased by this student from the store
+    const purchasedTestIds = new Set();
     try {
       const studentOrders = await Order.find({
         studentId: student._id || student.id,
@@ -910,8 +911,11 @@ export const getStudentTests = async (req, res) => {
         (ord.items || []).forEach((item) => {
           if (Array.isArray(item.testSeriesIds)) {
             item.testSeriesIds.forEach((tId) => {
-              if (tId && !matchingTestIds.some((existing) => String(existing) === String(tId))) {
-                matchingTestIds.push(tId);
+              if (tId) {
+                purchasedTestIds.add(String(tId));
+                if (!matchingTestIds.some((existing) => String(existing) === String(tId))) {
+                  matchingTestIds.push(tId);
+                }
               }
             });
           }
@@ -953,6 +957,7 @@ export const getStudentTests = async (req, res) => {
         passingMarks: t.passingMarks,
         questionsCount: t.questions?.length || 0,
         instructions: t.instructions,
+        isPurchased: Boolean(purchasedTestIds.has(String(t._id))),
         hasAttempted: Boolean(att),
         latestAttempt: att
           ? {

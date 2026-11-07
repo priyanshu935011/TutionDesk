@@ -1121,6 +1121,7 @@ export const verifyStorePayment = async (req, res) => {
               students: [order.studentId],
               category: "Store Notes",
               type: "Chapter Notes",
+              isPurchased: true,
             });
           } catch (nErr) {
             console.warn("Failed to create note record for purchased item:", nErr.message);
@@ -1142,6 +1143,7 @@ export const verifyStorePayment = async (req, res) => {
                   students: [order.studentId],
                   category: "Store Notes",
                   type: "Chapter Notes",
+                  isPurchased: true,
                 });
               } catch (_) {}
             }

@@ -2719,6 +2719,8 @@ class SupabaseModel {
       delete payload.createdBy;
       delete payload.category;
       delete payload.type;
+      delete payload.isPurchased;
+      delete payload.is_purchased;
     }
 
     if (this.tableName === "test_series") {

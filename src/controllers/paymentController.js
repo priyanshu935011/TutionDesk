@@ -748,6 +748,7 @@ export const handleCashfreeWebhook = async (req, res) => {
                     students: [order.studentId],
                     category: "Store Notes",
                     type: "Chapter Notes",
+                    isPurchased: true,
                   });
                 } catch (_) {}
               }
