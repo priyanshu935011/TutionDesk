@@ -19,7 +19,7 @@ import Note from "../models/Note.js";
 import Notice from "../models/Notice.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import SystemSetting from "../models/SystemSetting.js";
-import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
+import { getCredentialsTemplate, DEFAULT_CREDENTIALS_TEMPLATE, getGlobalTemplates, getGlobalTemplateNames, DEFAULT_TEMPLATE_NAMES, formatCredentialsMessage, formatAbsentMessage, formatFeeReminderMessage, formatTestMarksMessage } from "../utils/whatsappTemplateHelper.js";
 import { sendMessage, sendTemplateMessage, getInstituteWalletBalance, getInstituteMessageCharge, getSupabaseInstituteRow } from "../services/whatsappService.js";
 import { supabase } from "../utils/supabase.js";
 import { inMemoryLogs } from "../utils/systemLogger.js";
@@ -440,6 +440,7 @@ export const createInstitute = async (req, res) => {
       ownerName,
       adminEmail: normalizedEmail,
       adminPhone: adminPhone || "",
+      absentContactPhone: req.body.absentContactPhone || req.body.absent_contact_phone || "",
       subscriptionPlan,
       subscriptionAmount: Number(subscriptionAmount),
       trialDays: Number(trialDays || 14),
@@ -566,6 +567,8 @@ export const updateInstitute = async (req, res) => {
     if (name !== undefined) institute.name = name;
     if (ownerName !== undefined) institute.ownerName = ownerName;
     if (adminPhone !== undefined) institute.adminPhone = adminPhone;
+    if (req.body.absentContactPhone !== undefined) institute.absentContactPhone = req.body.absentContactPhone;
+    else if (req.body.absent_contact_phone !== undefined) institute.absentContactPhone = req.body.absent_contact_phone;
     if (normalizedEmail !== undefined) institute.adminEmail = normalizedEmail;
     if (subscriptionPlan !== undefined) institute.subscriptionPlan = subscriptionPlan;
     if (subscriptionAmount !== undefined) institute.subscriptionAmount = Number(subscriptionAmount);
@@ -2014,7 +2017,12 @@ export const getActivityLogs = async (req, res) => {
 export const getWhatsAppGlobalTemplates = async (req, res) => {
   try {
     const templates = await getGlobalTemplates();
-    return res.json(templates);
+    const templateNames = await getGlobalTemplateNames();
+    return res.json({
+      ...templates,
+      templates,
+      templateNames,
+    });
   } catch (error) {
     console.error("getWhatsAppGlobalTemplates error:", error);
     return res.status(500).json({ message: "Could not fetch WhatsApp templates" });
@@ -2023,13 +2031,14 @@ export const getWhatsAppGlobalTemplates = async (req, res) => {
 
 export const updateWhatsAppGlobalTemplates = async (req, res) => {
   try {
-    const { credentials, absent, feeReminder, testMarks } = req.body;
+    const { credentials, absent, feeReminder, testMarks, notice, templateNames } = req.body;
     
     const updatedValue = {
-      credentials: credentials || "",
-      absent: absent || "",
-      feeReminder: feeReminder || "",
-      testMarks: testMarks || "",
+      credentials: credentials !== undefined ? credentials : "",
+      absent: absent !== undefined ? absent : "",
+      feeReminder: feeReminder !== undefined ? feeReminder : "",
+      testMarks: testMarks !== undefined ? testMarks : "",
+      notice: notice !== undefined ? notice : "",
     };
 
     let setting = await SystemSetting.findOne({ key: "whatsapp_global_templates" });
@@ -2047,9 +2056,36 @@ export const updateWhatsAppGlobalTemplates = async (req, res) => {
       });
     }
 
+    if (templateNames && typeof templateNames === "object") {
+      const updatedNames = {
+        credentials: templateNames.credentials || DEFAULT_TEMPLATE_NAMES.credentials,
+        absent: templateNames.absent || DEFAULT_TEMPLATE_NAMES.absent,
+        feeReminder: templateNames.feeReminder || DEFAULT_TEMPLATE_NAMES.feeReminder,
+        testMarks: templateNames.testMarks || DEFAULT_TEMPLATE_NAMES.testMarks,
+        notice: templateNames.notice || DEFAULT_TEMPLATE_NAMES.notice,
+      };
+      let nameSetting = await SystemSetting.findOne({ key: "whatsapp_template_names" });
+      if (nameSetting) {
+        nameSetting.value = updatedNames;
+        if (typeof nameSetting.markModified === "function") {
+          nameSetting.markModified("value");
+        }
+        await nameSetting.save();
+      } else {
+        await SystemSetting.create({
+          key: "whatsapp_template_names",
+          value: updatedNames,
+          description: "Configured Meta Cloud API template names for WhatsApp notifications",
+        });
+      }
+    }
+
+    const savedNames = await getGlobalTemplateNames();
+
     return res.json({
       message: "WhatsApp global templates updated successfully!",
       templates: updatedValue,
+      templateNames: savedNames,
     });
   } catch (error) {
     console.error("updateWhatsAppGlobalTemplates error:", error);
@@ -2068,6 +2104,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
     }
 
     const templates = await getGlobalTemplates();
+    const configuredTemplateNames = await getGlobalTemplateNames();
     const targetTemplate = templates[templateType];
     if (!targetTemplate) {
       return res.status(400).json({ message: "Invalid template type" });
@@ -2079,7 +2116,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
     let parameters = [];
 
     if (templateType === "credentials") {
-      templateName = "student_credentials";
+      templateName = configuredTemplateNames?.credentials || "student_credentials";
       const studentName = customValues?.studentName || "John Doe";
       const enrollmentNumber = customValues?.enrollmentNumber || "CT-2026-101";
       const password = customValues?.password || "123456";
@@ -2096,19 +2133,22 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         loginUrl,
       });
     } else if (templateType === "absent") {
-      templateName = "absent_alert";
+      templateName = configuredTemplateNames?.absent || "absent_alert";
       const studentName = customValues?.studentName || "John Doe";
       const date = new Date().toLocaleDateString("en-IN");
-      parameters = [studentName, date, instituteName];
+      const absentPhone = customValues?.absentContactPhone || "9876543210";
+      const isLegacy3Param = templateName === "absent_alert";
+      parameters = isLegacy3Param ? [studentName, date, instituteName] : [studentName, date, instituteName, absentPhone];
 
       text = formatAbsentMessage({
         template: targetTemplate,
         studentName,
         date,
         instituteName,
+        absentContactPhone: absentPhone,
       });
     } else if (templateType === "feeReminder") {
-      templateName = "fee_reminder";
+      templateName = configuredTemplateNames?.feeReminder || "fee_reminder";
       const parentName = customValues?.parentName || "Jane Doe";
       const pendingAmount = customValues?.pendingAmount || "1500";
       const studentName = customValues?.studentName || "John Doe";
@@ -2124,7 +2164,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
         instituteName,
       });
     } else if (templateType === "notice" || templateType === "general_announcement") {
-      templateName = "general_announcement";
+      templateName = configuredTemplateNames?.notice || "general_announcement";
       const title = customValues?.title || "Special Announcement";
       const content = customValues?.content || "Classes will remain closed tomorrow. Online sessions will continue as scheduled.";
       const recipientName = customValues?.parentName || customValues?.studentName || "Parent / Student";
@@ -2132,7 +2172,7 @@ export const sendWhatsAppTestMessage = async (req, res) => {
 
       text = `📢 *Notice & Announcement - ${instituteName}*\n\nDear ${recipientName},\n*${title}*\n\n${content}\n\nThank you!\n-${instituteName}`;
     } else if (templateType === "testMarks") {
-      templateName = "test_marks";
+      templateName = configuredTemplateNames?.testMarks || "test_marks";
       const studentName = customValues?.studentName || "John Doe";
       const testName = customValues?.testName || "Math Term Test";
       const marksObtained = customValues?.marksObtained || "92";

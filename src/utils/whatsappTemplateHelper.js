@@ -30,6 +30,14 @@ export const DEFAULT_TEST_MARKS_TEMPLATE = `Dear Parent, test results for {stude
 Score: {marksObtained} / {totalMarks} ({percentage}%).
 Status/Remarks: {remarks}`;
 
+export const DEFAULT_TEMPLATE_NAMES = {
+  credentials: "student_credentials",
+  absent: "absent_alert",
+  feeReminder: "fee_reminder",
+  testMarks: "test_marks",
+  notice: "general_announcement",
+};
+
 export const getCredentialsTemplate = async () => {
   try {
     const setting = await SystemSetting.findOne({ key: "whatsapp_credentials_template" });
@@ -65,6 +73,23 @@ export const getGlobalTemplates = async () => {
   }
 };
 
+export const getGlobalTemplateNames = async () => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "whatsapp_template_names" });
+    const stored = setting?.value || {};
+    return {
+      credentials: stored.credentials || DEFAULT_TEMPLATE_NAMES.credentials,
+      absent: stored.absent || DEFAULT_TEMPLATE_NAMES.absent,
+      feeReminder: stored.feeReminder || DEFAULT_TEMPLATE_NAMES.feeReminder,
+      testMarks: stored.testMarks || DEFAULT_TEMPLATE_NAMES.testMarks,
+      notice: stored.notice || DEFAULT_TEMPLATE_NAMES.notice,
+    };
+  } catch (err) {
+    console.error("Error fetching whatsapp_template_names from DB:", err.message);
+    return DEFAULT_TEMPLATE_NAMES;
+  }
+};
+
 export const formatCredentialsMessage = ({
   template,
   studentName = "",
@@ -91,12 +116,15 @@ export const formatAbsentMessage = ({
   studentName = "",
   date = "",
   instituteName = "Classtech",
+  absentContactPhone = "",
 }) => {
   const tpl = template || DEFAULT_ABSENT_TEMPLATE;
   return tpl
     .replace(/\{studentName\}/gi, studentName)
     .replace(/\{date\}/gi, date)
-    .replace(/\{instituteName\}/gi, instituteName);
+    .replace(/\{instituteName\}/gi, instituteName)
+    .replace(/\{absentContactPhone\}/gi, absentContactPhone)
+    .replace(/\{absent_contact_phone\}/gi, absentContactPhone);
 };
 
 export const formatFeeReminderMessage = ({

@@ -195,7 +195,17 @@ const instituteSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    absentContactPhone: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     whatsappSettings: {
+      absentContactPhone: {
+        type: String,
+        default: "",
+        trim: true,
+      },
       absentAlertsEnabled: {
         type: Boolean,
         default: false,

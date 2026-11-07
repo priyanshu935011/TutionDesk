@@ -17,7 +17,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendMessage, sendDocument, sendTemplateMessage, getSessionStatus } from "../services/whatsappService.js";
-import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
+import { getCredentialsTemplate, formatCredentialsMessage, getGlobalTemplates, getGlobalTemplateNames, formatAbsentMessage } from "../utils/whatsappTemplateHelper.js";
 import cloudinary from "../utils/cloudinary.js";
 import Notification from "../models/Notification.js";
 import { sendStudentNotification } from "../services/notificationService.js";
@@ -1620,22 +1620,28 @@ export const markAttendance = async (req, res) => {
             year: "numeric",
           });
           const globalTemplates = await getGlobalTemplates();
+          const configuredTemplateNames = await getGlobalTemplateNames();
+          const absentTemplateName = configuredTemplateNames?.absent || "absent_alert";
           const inst = await Institute.findById(actualInstId);
+          const absentContact = inst?.absentContactPhone || inst?.whatsappSettings?.absentContactPhone || inst?.phone || inst?.adminPhone || "";
+
           const messageText = formatAbsentMessage({
             template: globalTemplates.absent,
             studentName: student.name,
             date: formattedDate,
             instituteName: inst?.name || "Classtech",
+            absentContactPhone: absentContact,
           });
           const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
           if (recipientPhone) {
+            const isLegacy3Param = absentTemplateName === "absent_alert";
+            const metaParams = isLegacy3Param
+              ? [student.name, formattedDate, inst?.name || "Classtech"]
+              : [student.name, formattedDate, inst?.name || "Classtech", absentContact];
+
             const result = await sendMessage(actualInstId, recipientPhone, messageText, "absent_alert", {
-              templateName: "absent_alert",
-              parameters: [
-                student.name,
-                formattedDate,
-                inst?.name || "Classtech"
-              ]
+              templateName: absentTemplateName,
+              parameters: metaParams,
             });
             if (result && result.success) {
               whatsappStatus = { sent: true, reason: "WhatsApp message sent successfully." };
@@ -1927,7 +1933,10 @@ export const markBatchAttendance = async (req, res) => {
             year: "numeric",
           });
           const globalTemplates = await getGlobalTemplates();
+          const configuredTemplateNames = await getGlobalTemplateNames();
+          const absentTemplateName = configuredTemplateNames?.absent || "absent_alert";
           const inst = await Institute.findById(actualInstId);
+          const absentContact = inst?.absentContactPhone || inst?.whatsappSettings?.absentContactPhone || inst?.phone || inst?.adminPhone || "";
 
           for (const student of absentStudents) {
             const recipientPhone = student.parentPhone?.trim() || student.phone?.trim();
@@ -1938,17 +1947,19 @@ export const markBatchAttendance = async (req, res) => {
               studentName: student.name,
               date: formattedDate,
               instituteName: inst?.name || "Classtech",
+              absentContactPhone: absentContact,
             });
 
             try {
               console.log(`[Background WhatsApp] Sending absent alert to ${student.name} at ${recipientPhone}...`);
+              const isLegacy3Param = absentTemplateName === "absent_alert";
+              const metaParams = isLegacy3Param
+                ? [student.name, formattedDate, inst?.name || "Classtech"]
+                : [student.name, formattedDate, inst?.name || "Classtech", absentContact];
+
               await sendMessage(actualInstId, recipientPhone, messageText, "absent_alert", {
-                templateName: "absent_alert",
-                parameters: [
-                  student.name,
-                  formattedDate,
-                  inst?.name || "Classtech"
-                ]
+                templateName: absentTemplateName,
+                parameters: metaParams,
               });
               await new Promise((r) => setTimeout(r, 150));
             } catch (wErr) {

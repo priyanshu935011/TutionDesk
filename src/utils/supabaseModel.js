@@ -781,6 +781,8 @@ class SupabaseDocument {
 
       this.upiId = data.upi_id ?? data.upiId ?? meta.upiId ?? this.upiId ?? "";
       this.upi_id = this.upiId;
+      this.absentContactPhone = data.absent_contact_phone ?? data.absentContactPhone ?? meta.absentContactPhone ?? this.absentContactPhone ?? "";
+      this.absent_contact_phone = this.absentContactPhone;
       this.whatsappSettings = meta.whatsappSettings ?? this.whatsappSettings ?? {
         absentAlertsEnabled: false,
         feeRemindersEnabled: false,
@@ -1310,6 +1312,7 @@ class SupabaseDocument {
           payoutApprovalStatus: this.payoutApprovalStatus ?? metadata[this._id]?.payoutApprovalStatus ?? "pending",
           payoutApprovedAt: this.payoutApprovedAt ?? metadata[this._id]?.payoutApprovedAt ?? null,
           payoutApprovedBy: this.payoutApprovedBy ?? metadata[this._id]?.payoutApprovedBy ?? null,
+          absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1462,6 +1465,7 @@ class SupabaseDocument {
           payoutApprovalStatus: this.payoutApprovalStatus ?? metadata[this._id]?.payoutApprovalStatus ?? "pending",
           payoutApprovedAt: this.payoutApprovedAt ?? metadata[this._id]?.payoutApprovedAt ?? null,
           payoutApprovedBy: this.payoutApprovedBy ?? metadata[this._id]?.payoutApprovedBy ?? null,
+          absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
         };
         writeInstitutesMetadata(metadata);
       }
@@ -2652,6 +2656,8 @@ class SupabaseModel {
       delete payload.student_portal_enabled;
       delete payload.whatsapp_settings;
       delete payload.whatsappSettings;
+      delete payload.absent_contact_phone;
+      delete payload.absentContactPhone;
     }
 
     if (this.tableName === "students") {
