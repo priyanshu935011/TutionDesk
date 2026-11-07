@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import axios from "axios";
+import mongoose from "mongoose";
 import Product from "../models/Product.js";
 import Order from "../models/Order.js";
 import StudentAddress from "../models/StudentAddress.js";
@@ -1040,9 +1041,8 @@ export const verifyStorePayment = async (req, res) => {
     const { orderId, cfOrderId } = req.body;
 
     const queryConditions = [];
-    if (orderId && mongoose.isValidObjectId(orderId)) {
+    if (orderId) {
       queryConditions.push({ _id: orderId });
-    } else if (orderId) {
       queryConditions.push({ orderNumber: orderId });
     }
     if (cfOrderId) {

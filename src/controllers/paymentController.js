@@ -2280,6 +2280,7 @@ export const createAiCreditRechargeSession = async (req, res) => {
       paymentSessionId: response.data.payment_session_id,
       autoRenew: false,
       notes: { credits: finalCredits },
+      cfPaymentDetails: { notes: { credits: finalCredits } },
     });
 
     return res.json({

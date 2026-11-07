@@ -268,11 +268,12 @@ export const checkPendingBatchAttendanceReminders = async () => {
         { $set: { lastAttendanceReminderDate: todayIST } }
       ).catch(() => {});
       if (supabase) {
-        await supabase
-          .from("batches")
-          .update({ last_attendance_reminder_date: todayIST })
-          .eq("id", bId)
-          .catch(() => {});
+        try {
+          await supabase
+            .from("batches")
+            .update({ last_attendance_reminder_date: todayIST })
+            .eq("id", bId);
+        } catch (_) {}
       }
 
       // Dispatch push notification to all assigned teachers AND the institute
