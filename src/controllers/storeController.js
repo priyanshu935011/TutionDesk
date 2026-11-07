@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import axios from "axios";
 import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
 import Product from "../models/Product.js";
 import Order from "../models/Order.js";
 import StudentAddress from "../models/StudentAddress.js";
@@ -691,6 +692,42 @@ export const uploadStoreBanner = async (req, res) => {
 // STUDENT & PUBLIC: STORE FRONT
 // -------------------------------------------------------------
 
+export const getStudentPurchasedProductIds = async (req) => {
+  try {
+    let studentId = req.student?._id || req.user?._id;
+    if (!studentId && req.headers?.authorization?.startsWith("Bearer ")) {
+      const token = req.headers.authorization.split(" ")[1];
+      const decoded = jwt.decode(token);
+      if (decoded) {
+        studentId = decoded.studentId || decoded.id || decoded._id;
+      }
+    }
+    if (!studentId && req.headers?.["x-student-id"]) {
+      studentId = req.headers["x-student-id"];
+    }
+    if (!studentId) return new Set();
+
+    const paidOrders = await Order.find({
+      studentId,
+      paymentStatus: "paid",
+    }).select("items");
+
+    const purchasedSet = new Set();
+    (paidOrders || []).forEach((ord) => {
+      if (Array.isArray(ord.items)) {
+        ord.items.forEach((item) => {
+          const pId = String(item.productId || item.id || item._id || "");
+          if (pId) purchasedSet.add(pId);
+        });
+      }
+    });
+    return purchasedSet;
+  } catch (err) {
+    console.warn("getStudentPurchasedProductIds error:", err.message);
+    return new Set();
+  }
+};
+
 export const getStoreProducts = async (req, res) => {
   try {
     const { category, type, search, subject } = req.query;
@@ -722,8 +759,16 @@ export const getStoreProducts = async (req, res) => {
       if (p.category) categoriesSet.add(p.category);
     });
 
+    const purchasedSet = await getStudentPurchasedProductIds(req);
+    const formattedProducts = (products || []).map((p) => {
+      const pObj = typeof p.toObject === "function" ? p.toObject() : { ...p };
+      const pidStr = String(pObj._id || pObj.id || "");
+      pObj.isPurchased = purchasedSet.has(pidStr);
+      return pObj;
+    });
+
     res.json({
-      products: products || [],
+      products: formattedProducts,
       categories: Array.from(categoriesSet),
     });
   } catch (err) {
@@ -749,8 +794,13 @@ export const getStoreProductById = async (req, res) => {
       }).select("title category totalMarks durationMinutes");
     }
 
+    const purchasedSet = await getStudentPurchasedProductIds(req);
+    const pObj = typeof product.toObject === "function" ? product.toObject() : { ...product };
+    const pidStr = String(pObj._id || pObj.id || "");
+    pObj.isPurchased = purchasedSet.has(pidStr);
+
     res.json({
-      product,
+      product: pObj,
       attachedTestSeries,
     });
   } catch (err) {
@@ -901,6 +951,17 @@ export const storeCheckout = async (req, res) => {
     const { items, shippingAddress } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "Cart items cannot be empty" });
+    }
+
+    // Check if student has already purchased any item
+    const purchasedSet = await getStudentPurchasedProductIds(req);
+    for (const cartItem of items) {
+      const prodId = String(cartItem.productId || cartItem.id || "");
+      if (purchasedSet.has(prodId)) {
+        return res.status(400).json({
+          message: `You have already purchased "${cartItem.title || "this product"}". Duplicate purchase is not allowed.`,
+        });
+      }
     }
 
     // Verify products and calculate total
