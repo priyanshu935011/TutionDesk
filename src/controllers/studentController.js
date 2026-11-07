@@ -2081,11 +2081,7 @@ export const getStudentSyncData = async (req, res) => {
         const stIdStr = String(student._id || student.id || "").trim();
 
         const allInstNotes = await Note.find({
-          $or: [
-            { institute: instituteId },
-            { user: instituteId },
-            { createdBy: instituteId }
-          ]
+          institute: instituteId
         }).select("_id targetType target_type batch batch_id batches batch_ids students student_ids title subject createdAt fileUrl");
 
         const siblingNotesList = (allInstNotes || []).filter((n) => {
@@ -2380,11 +2376,7 @@ export const getStudentNotes = async (req, res) => {
       const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
 
       const studentNotes = await Note.find({
-        $or: [
-          { institute: { $in: cleanInstIds } },
-          { user: { $in: cleanInstIds } },
-          { createdBy: { $in: cleanInstIds } }
-        ]
+        institute: { $in: cleanInstIds }
       })
         .sort({ createdAt: -1 })
         .populate("batch", "name");
@@ -2457,8 +2449,7 @@ export const getStudentTestMarks = async (req, res) => {
             { student: student._id },
             { student: stIdStr },
             { student_id: stIdStr },
-            { studentId: stIdStr },
-            { enrollmentNumber: student.enrollmentNumber }
+            { studentId: stIdStr }
           ]
         }).sort({ createdAt: -1 });
       } catch (_) {}

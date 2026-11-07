@@ -1326,7 +1326,7 @@ export const getInstituteFullAnalytics = async (req, res) => {
     let notesCount = 0;
     let latestNoteDate = null;
     try {
-      const notes = await Note.find({ user: institute.adminUser }).sort({ createdAt: -1 });
+      const notes = await Note.find({ institute: institute._id }).sort({ createdAt: -1 });
       notesCount = notes.length;
       if (notes.length > 0) latestNoteDate = notes[0].createdAt;
     } catch (e) {}

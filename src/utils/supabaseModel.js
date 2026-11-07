@@ -22,27 +22,45 @@ const USER_METADATA_FILE = path.join(FALLBACK_DIR, "user_metadata.json");
 const LEADS_METADATA_FILE = path.join(FALLBACK_DIR, "leads_metadata.json");
 const TERRITORY_METADATA_FILE = path.join(FALLBACK_DIR, "territory_metadata.json");
 
+const uploadTimers = new Map();
+const pendingUploads = new Map();
+
 const uploadMetadataFile = (filename, contentString) => {
   if (filename && (filename.toLowerCase().includes("video") || filename.toLowerCase().includes("note"))) {
     return; // Video and notes operations execute strictly from database tables (no bucket storage)
   }
-  const bucketName = process.env.SUPABASE_BUCKET || "notes";
-  supabase.storage
-    .from(bucketName)
-    .upload(`metadata/${filename}`, Buffer.from(contentString), {
-      contentType: "application/json",
-      upsert: true
-    })
-    .then(({ error }) => {
+  pendingUploads.set(filename, contentString);
+
+  if (uploadTimers.has(filename)) {
+    return;
+  }
+
+  const timer = setTimeout(async () => {
+    uploadTimers.delete(filename);
+    const contentToUpload = pendingUploads.get(filename);
+    pendingUploads.delete(filename);
+    if (!contentToUpload) return;
+
+    try {
+      const bucketName = process.env.SUPABASE_BUCKET || "notes";
+      const { error } = await supabase.storage
+        .from(bucketName)
+        .upload(`metadata/${filename}`, Buffer.from(contentToUpload), {
+          contentType: "application/json",
+          upsert: true
+        });
       if (error) {
         console.error(`[Supabase Storage Sync] Error uploading metadata file ${filename}:`, error);
       } else {
-        console.debug(`[Supabase Storage Sync] Successfully backed up ${filename} to Supabase bucket.`);
+        console.debug(`[Supabase Storage Sync] Batched backup completed for ${filename}.`);
       }
-    })
-    .catch(err => {
+    } catch (err) {
       console.error(`[Supabase Storage Sync] Exception during upload of ${filename}:`, err);
-    });
+    }
+  }, 30000);
+
+  if (timer.unref) timer.unref();
+  uploadTimers.set(filename, timer);
 };
 
 function extractStudentIdsFromFilter(filter) {
@@ -632,6 +650,53 @@ const snakeToCamel = (str) => {
   if (str === "video_id") return "video";
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 };
+
+const KNOWN_MISSING_COLUMNS = new Map([
+  ["notes", new Set(["created_by", "user"])],
+  ["test_marks", new Set(["enrollment_number"])]
+]);
+
+export function recordMissingColumn(tableName, badCol) {
+  if (!tableName || !badCol) return;
+  if (!KNOWN_MISSING_COLUMNS.has(tableName)) {
+    KNOWN_MISSING_COLUMNS.set(tableName, new Set());
+  }
+  const set = KNOWN_MISSING_COLUMNS.get(tableName);
+  if (!set.has(badCol)) {
+    set.add(badCol);
+    console.debug(`[SupabaseModel] Cached missing column "${badCol}" on table "${tableName}".`);
+  }
+}
+
+export function stripKnownMissingColumns(tableName, filterOrPayload) {
+  if (!filterOrPayload || typeof filterOrPayload !== "object") return filterOrPayload;
+  const missingCols = KNOWN_MISSING_COLUMNS.get(tableName);
+  if (!missingCols || missingCols.size === 0) return filterOrPayload;
+
+  for (const badCol of missingCols) {
+    const matchKey = Object.keys(filterOrPayload).find(k => k === badCol || camelToSnake(k) === badCol);
+    if (matchKey) {
+      delete filterOrPayload[matchKey];
+    }
+    if (Array.isArray(filterOrPayload.$or)) {
+      filterOrPayload.$or = filterOrPayload.$or.filter(item => {
+        return !Object.keys(item).some(k => k === badCol || camelToSnake(k) === badCol);
+      });
+      if (filterOrPayload.$or.length === 0) {
+        delete filterOrPayload.$or;
+      }
+    }
+    if (Array.isArray(filterOrPayload.$and)) {
+      filterOrPayload.$and = filterOrPayload.$and.filter(item => {
+        return !Object.keys(item).some(k => k === badCol || camelToSnake(k) === badCol);
+      });
+      if (filterOrPayload.$and.length === 0) {
+        delete filterOrPayload.$and;
+      }
+    }
+  }
+  return filterOrPayload;
+}
 
 class SupabaseDocument {
   constructor(tableName, data, modelInstance) {
@@ -1231,6 +1296,7 @@ class SupabaseDocument {
 
     if (payload.id) {
       // Update
+      stripKnownMissingColumns(this._tableName, payload);
       let attempt = 0;
       while (attempt < 5) {
         const { data, error } = await this._model.supabase
@@ -1251,7 +1317,7 @@ class SupabaseDocument {
           }
 
           if (badCol) {
-            console.warn(`Stripping missing column "${badCol}" from ${this._tableName} update payload.`);
+            recordMissingColumn(this._tableName, badCol);
             delete payload[badCol];
             attempt++;
             continue;
@@ -1383,6 +1449,7 @@ class SupabaseDocument {
       return this;
     } else {
       // Insert
+      stripKnownMissingColumns(this._tableName, payload);
       let attempt = 0;
       while (attempt < 5) {
         const { data, error } = await this._model.supabase
@@ -1402,7 +1469,7 @@ class SupabaseDocument {
           }
 
           if (badCol) {
-            console.warn(`Stripping missing column "${badCol}" from ${this._tableName} insert payload.`);
+            recordMissingColumn(this._tableName, badCol);
             delete payload[badCol];
             attempt++;
             continue;
@@ -1728,6 +1795,7 @@ class SupabaseQuery {
         }
       }
     }
+    stripKnownMissingColumns(tableName, currentFilter);
     while (attempt < 5) {
       let query = this.model.supabase.from(tableName).select("*");
       query = this.model.applyFilters(query, currentFilter);
@@ -1773,15 +1841,15 @@ class SupabaseQuery {
           return found ? new SupabaseDocument(tableName, found, this.model) : null;
         }
         if (error && error.message && error.message.includes("does not exist")) {
-          const match = error.message.match(/column "?([^"\s]+)"?/);
+          const match = error.message.match(/column "?([^"\s]+)"?/i);
           if (match && match[1]) {
             let badCol = match[1];
             if (badCol.includes(".")) {
               badCol = badCol.split(".")[1];
             }
+            recordMissingColumn(tableName, badCol);
             let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
-              console.debug(`Stripping missing filter column "${filterKey}" from ${tableName} findOne query.`);
               delete currentFilter[filterKey];
               if (Object.keys(currentFilter).length === 0 && Object.keys(initialFilter).length > 0) {
                 return null;
@@ -1790,7 +1858,6 @@ class SupabaseQuery {
               continue;
             }
             if (currentFilter.$or && Array.isArray(currentFilter.$or)) {
-              console.debug(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
               currentFilter.$or = currentFilter.$or.filter(item => {
                 return !Object.keys(item).some(k => camelToSnake(k) === badCol);
               });
@@ -1878,15 +1945,15 @@ class SupabaseQuery {
           return filtered.map(row => new SupabaseDocument(tableName, row, this.model));
         }
         if (error && error.message && error.message.includes("does not exist")) {
-          const match = error.message.match(/column "?([^"\s]+)"?/);
+          const match = error.message.match(/column "?([^"\s]+)"?/i);
           if (match && match[1]) {
             let badCol = match[1];
             if (badCol.includes(".")) {
               badCol = badCol.split(".")[1];
             }
+            recordMissingColumn(tableName, badCol);
             let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
-              console.debug(`Stripping missing filter column "${filterKey}" from ${tableName} find query.`);
               delete currentFilter[filterKey];
               if (Object.keys(currentFilter).length === 0 && Object.keys(initialFilter).length > 0) {
                 return [];
@@ -1895,7 +1962,6 @@ class SupabaseQuery {
               continue;
             }
             if (currentFilter.$or && Array.isArray(currentFilter.$or)) {
-              console.debug(`Stripping missing column "${badCol}" from ${tableName} $or filter array.`);
               currentFilter.$or = currentFilter.$or.filter(item => {
                 return !Object.keys(item).some(k => camelToSnake(k) === badCol);
               });
@@ -2848,6 +2914,7 @@ class SupabaseModel {
 
     let attempt = 0;
     let data = null;
+    stripKnownMissingColumns(this.tableName, payload);
 
     while (attempt < 5) {
       const { data: insertedData, error } = await this.supabase
@@ -2885,7 +2952,7 @@ class SupabaseModel {
         }
 
         if (badCol) {
-          console.warn(`Stripping missing column "${badCol}" from ${this.tableName} create payload.`);
+          recordMissingColumn(this.tableName, badCol);
           delete payload[badCol];
           attempt++;
           continue;
@@ -3435,6 +3502,7 @@ class SupabaseModel {
         }
       }
     }
+    stripKnownMissingColumns(this.tableName, currentFilter);
     while (attempt < 5) {
       let query = this.supabase.from(this.tableName).select("*", { count: "exact" }).limit(0);
       query = this.applyFilters(query, currentFilter);
@@ -3447,13 +3515,10 @@ class SupabaseModel {
           if (badCol.includes(".")) {
             badCol = badCol.split(".")[1];
           }
-          const filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
-          if (filterKey) {
-            console.warn(`Stripping missing filter column "${filterKey}" from ${this.tableName} countDocuments query.`);
-            delete currentFilter[filterKey];
-            attempt++;
-            continue;
-          }
+          recordMissingColumn(this.tableName, badCol);
+          stripKnownMissingColumns(this.tableName, currentFilter);
+          attempt++;
+          continue;
         }
       }
       if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
