@@ -350,6 +350,14 @@ export const initVideoUpload = async (req, res) => {
     const embedUrl = `https://${bunny.cdnHostname}/embed/${bunny.libraryId}/${bunnyVideoId}`;
     const thumbnailUrl = `https://${bunny.cdnHostname}/${bunnyVideoId}/thumbnail.jpg`;
 
+    const resolvedTargetType = (targetAudienceType || req.body.targetType || "none").toString().toLowerCase().trim();
+    let batchIdsList = [];
+    let studentIdsList = [];
+    if (targetAudienceMetadata && typeof targetAudienceMetadata === "object") {
+      batchIdsList = Array.isArray(targetAudienceMetadata.batchIds) ? targetAudienceMetadata.batchIds : [];
+      studentIdsList = Array.isArray(targetAudienceMetadata.studentIds) ? targetAudienceMetadata.studentIds : [];
+    }
+
     const video = await VideoLecture.create({
       institute: instituteId,
       createdBy: creatorId,
@@ -365,11 +373,32 @@ export const initVideoUpload = async (req, res) => {
       videoUrl: embedUrl,
       hlsUrl,
       thumbnailUrl,
-      targetAudienceType,
+      targetAudienceType: resolvedTargetType,
+      target_audience_type: resolvedTargetType,
+      targetType: resolvedTargetType,
+      target_type: resolvedTargetType,
       targetAudienceMetadata,
+      target_audience_metadata: targetAudienceMetadata,
+      batches: batchIdsList,
+      students: studentIdsList,
       status: "UPLOADING",
       processingProgress: 0,
     });
+
+    try {
+      if (supabase && video && (video.id || video._id)) {
+        const vKey = video.id || video._id;
+        await supabase
+          .from("video_lectures")
+          .update({
+            target_audience_type: resolvedTargetType,
+            target_type: resolvedTargetType,
+            batches: batchIdsList,
+            students: studentIdsList,
+          })
+          .eq("id", vKey);
+      }
+    } catch (_) {}
 
     try {
       syncVideoFallback(video);
@@ -866,7 +895,7 @@ export const getTeacherVideos = async (req, res) => {
         const metaBatchId = meta.batchId || meta.selectedBatchId || item.batchId || item.batch_id || "";
         const metaBatchIds = Array.isArray(meta.batchIds) ? meta.batchIds : [];
         const allTargetBatchIds = [metaBatchId, ...metaBatchIds].map(String).filter(Boolean);
-        const tType = String(item.targetAudienceType || item.target_type || "").toLowerCase().trim();
+        const tType = String(item.targetAudienceType || item.target_audience_type || item.targetType || item.target_type || "").toLowerCase().trim();
 
         if (tType === "batch" || allTargetBatchIds.length > 0) {
           return allTargetBatchIds.some((bId) => myBatchIds.has(bId) || myBatchIds.has(bId.toLowerCase()) || myBatchIds.has(toValidUUID(bId)));
@@ -1276,11 +1305,21 @@ export const updateVideoLecture = async (req, res) => {
       dbPayload.playlist_id = video.playlistId;
     }
     if (resolvedTargetType !== undefined && resolvedTargetType !== null) {
-      video.targetAudienceType = String(resolvedTargetType);
-      dbPayload.target_type = video.targetAudienceType;
+      const cleanType = String(resolvedTargetType).toLowerCase().trim();
+      video.targetAudienceType = cleanType;
+      video.targetType = cleanType;
+      dbPayload.target_type = cleanType;
+      dbPayload.target_audience_type = cleanType;
     }
-    if (resolvedMetadata && typeof resolvedMetadata === "object" && Object.keys(resolvedMetadata).length > 0) {
+    if (resolvedMetadata && typeof resolvedMetadata === "object") {
       video.targetAudienceMetadata = resolvedMetadata;
+      dbPayload.target_audience_metadata = resolvedMetadata;
+      if (Array.isArray(resolvedMetadata.batchIds)) {
+        dbPayload.batches = resolvedMetadata.batchIds;
+      }
+      if (Array.isArray(resolvedMetadata.studentIds)) {
+        dbPayload.students = resolvedMetadata.studentIds;
+      }
     }
     if (thumbnailUrl !== undefined) {
       video.thumbnailUrl = thumbnailUrl !== null ? String(thumbnailUrl).trim() : (video.thumbnailUrl || "");
@@ -2425,7 +2464,7 @@ export const getVideoWatchAnalytics = async (req, res) => {
     }
 
     // 2. Resolve Target Audience for this video
-    let targetAudienceType = (video?.targetAudienceType || video?.targetType || "").toLowerCase().trim();
+    let targetAudienceType = (video?.targetAudienceType || video?.target_audience_type || video?.targetType || video?.target_type || "").toLowerCase().trim();
     let targetAudienceMetadata = video?.targetAudienceMetadata || video?.metadata || {};
     if (typeof targetAudienceMetadata === "string") {
       try { targetAudienceMetadata = JSON.parse(targetAudienceMetadata); } catch (_) { targetAudienceMetadata = {}; }

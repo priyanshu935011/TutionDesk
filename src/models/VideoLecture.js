@@ -91,9 +91,21 @@ const videoLectureSchema = new mongoose.Schema(
       enum: ["none", "all", "batch", "student"],
       default: "none",
     },
+    targetType: {
+      type: String,
+      default: "none",
+    },
     targetAudienceMetadata: {
       type: Object,
       default: {},
+    },
+    batches: {
+      type: Array,
+      default: [],
+    },
+    students: {
+      type: Array,
+      default: [],
     },
     isArchived: {
       type: Boolean,

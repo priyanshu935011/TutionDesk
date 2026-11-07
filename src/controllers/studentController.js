@@ -2807,25 +2807,50 @@ export const getStudentVideos = async (req, res) => {
 
         // Target audience check if not explicitly released
         if (!videoHasValidReleaseMap.has(vIdStr) && !directVideoIds.has(vIdStr)) {
-          const targetType = (
+          // Parse targetAudienceMetadata safely
+          let meta = vObj.targetAudienceMetadata || vObj.target_audience_metadata || vObj.metadata || {};
+          if (typeof meta === "string") {
+            try {
+              meta = JSON.parse(meta);
+            } catch (_) {
+              meta = {};
+            }
+          }
+          if (!meta || typeof meta !== "object") meta = {};
+
+          // Prioritize target_audience_type over legacy target_type column (which has Postgres default 'batch')
+          let targetType = String(
             vObj.targetAudienceType ||
+            vObj.target_audience_type ||
             vObj.targetType ||
             vObj.target_type ||
             ""
           ).toLowerCase().trim();
 
-          const meta = vObj.targetAudienceMetadata && typeof vObj.targetAudienceMetadata === "object" ? vObj.targetAudienceMetadata : {};
+          // CRITICAL: If no target audience was selected (e.g. 'none' or empty string),
+          // the video has no audience and MUST NOT be visible to any student.
+          if (targetType === "none" || !targetType) {
+            continue;
+          }
 
           if (targetType === "student") {
             const stList = [
-              ...(vObj.students || []),
-              ...(vObj.student_ids || []),
+              ...(Array.isArray(vObj.students) ? vObj.students : vObj.students ? [vObj.students] : []),
+              ...(Array.isArray(vObj.student_ids) ? vObj.student_ids : vObj.student_ids ? [vObj.student_ids] : []),
               ...(Array.isArray(meta.studentIds) ? meta.studentIds : []),
               ...(Array.isArray(meta.selectedStudentIds) ? meta.selectedStudentIds : []),
               ...(meta.studentId ? [meta.studentId] : [])
-            ].map((s) => String(s._id || s.id || s));
+            ].map((s) => String(s?._id || s?.id || s).trim()).filter(Boolean);
 
-            if (stList.length > 0 && !stList.includes(stIdStr)) continue;
+            // If target is student, but no students were selected, do not show to any student
+            if (stList.length === 0) {
+              continue;
+            }
+
+            const isTargetStudent = stList.some((sId) => sId === stIdStr || (stUuid && sId === stUuid));
+            if (!isTargetStudent) {
+              continue;
+            }
           } else if (targetType === "batch") {
             const videoBatchIds = [];
             if (vObj.batch_id) videoBatchIds.push(String(vObj.batch_id));
@@ -2837,11 +2862,29 @@ export const getStudentVideos = async (req, res) => {
             if (meta.batchId) videoBatchIds.push(String(meta.batchId));
             if (meta.selectedBatchId) videoBatchIds.push(String(meta.selectedBatchId));
 
-            const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.filter(Boolean)));
-            if (cleanVideoBatchIds.length > 0 && activeBatchIdsSet.size > 0) {
-              const matchesBatch = cleanVideoBatchIds.some((bId) => activeBatchIdsSet.has(bId));
-              if (!matchesBatch) continue;
+            const cleanVideoBatchIds = Array.from(new Set(videoBatchIds.map((b) => String(b).trim()).filter(Boolean)));
+            // If target is batch, but no batches were selected, do not show to any student
+            if (cleanVideoBatchIds.length === 0) {
+              continue;
             }
+
+            // Check if student belongs to ANY of the targeted batches
+            const matchesBatch = cleanVideoBatchIds.some((bId) => {
+              const bUuid = toValidUUID(bId);
+              return (
+                activeBatchIdsSet.has(bId) ||
+                (bUuid && activeBatchIdsSet.has(bUuid)) ||
+                activeStudentBatchIds.some((sBId) => sBId === bId || (bUuid && sBId === bUuid))
+              );
+            });
+            if (!matchesBatch) {
+              continue;
+            }
+          } else if (targetType === "all") {
+            // Accessible to all students in this institute
+          } else {
+            // Unknown target type; hide by default
+            continue;
           }
         }
 
@@ -2858,6 +2901,7 @@ export const getStudentVideos = async (req, res) => {
           fileSizeBytes: vObj.fileSizeBytes || 0,
           createdAt: vObj.createdAt,
           expiryDate: resolvedExpiry,
+          targetAudienceType: targetType,
         };
 
         if (!recordedLecturesMap.has(vIdStr)) {

@@ -2763,6 +2763,18 @@ class SupabaseModel {
       delete payload.video;
     }
 
+    if (this.tableName === "video_lectures") {
+      const audienceType = String(
+        payload.target_audience_type ||
+        payload.targetAudienceType ||
+        payload.target_type ||
+        payload.targetType ||
+        "none"
+      ).toLowerCase().trim();
+      payload.target_audience_type = audienceType;
+      payload.target_type = audienceType;
+    }
+
     if (this.tableName === "notes") {
       if (payload.pdf_url && !payload.file_url) payload.file_url = payload.pdf_url;
       if (payload.pdfUrl && !payload.file_url) payload.file_url = payload.pdfUrl;
