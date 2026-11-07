@@ -1286,6 +1286,8 @@ export const archiveStudent = async (req, res) => {
     const targetArchivedState = req.body.isArchived !== undefined ? Boolean(req.body.isArchived) : !student.isArchived;
     student.isArchived = targetArchivedState;
     student.is_archived = targetArchivedState;
+    student.archivedIndividually = targetArchivedState;
+    student.archivedByBatch = null;
 
     if (!targetArchivedState) {
       if (req.body.batchId) {
@@ -1346,6 +1348,9 @@ export const archiveStudent = async (req, res) => {
       }
       await clearCachePattern("teacher:dashboard:*");
       await clearCachePattern("teacher:students:*");
+      await clearCachePattern("attendance:batch:*");
+      await clearCachePattern("attendance:batch:statusmap:*");
+      await invalidateStudentCache(student._id);
     } catch (_) {}
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
@@ -1715,6 +1720,7 @@ export const markBatchAttendance = async (req, res) => {
       try {
         batchStudents = await Student.find({
           user: { $in: userIds },
+          isArchived: { $ne: true },
           $or: queryOr
         });
       } catch (_) {}
@@ -1731,9 +1737,14 @@ export const markBatchAttendance = async (req, res) => {
 
     if (batchStudents.length === 0 && recordStudentIds.length > 0) {
       batchStudents = await Student.find({
-        _id: { $in: recordStudentIds }
+        _id: { $in: recordStudentIds },
+        isArchived: { $ne: true }
       });
     }
+
+    batchStudents = (batchStudents || []).filter(
+      (s) => s.isArchived !== true && s.is_archived !== true && String(s.isArchived) !== "true" && String(s.is_archived) !== "true"
+    );
 
     if (batchStudents.length === 0) {
       return res.status(400).json({ message: "No students found in this batch." });
@@ -4249,7 +4260,12 @@ export const getBatchAttendanceByDate = async (req, res) => {
       isArchived: { $ne: true }
     });
 
-    const batchStudents = (allStudents || []).filter((s) => isStudentInBatch(s, batchObj, batchId));
+    const batchStudents = (allStudents || []).filter((s) => {
+      if (s.isArchived === true || s.is_archived === true || String(s.isArchived) === "true" || String(s.is_archived) === "true") {
+        return false;
+      }
+      return isStudentInBatch(s, batchObj, batchId);
+    });
 
     const responseStudents = batchStudents.map((s) => {
       const sObj = s.toObject ? s.toObject() : (s.toJSON ? s.toJSON() : s);
@@ -4371,7 +4387,12 @@ export const getBatchAttendanceStatusMap = async (req, res) => {
       }
 
       const allStudents = await Student.find({ user: { $in: userIds }, isArchived: { $ne: true } });
-      const batchStudents = allStudents.filter((s) => isStudentInBatch(s, batchObj, batchId));
+      const batchStudents = allStudents.filter((s) => {
+        if (s.isArchived === true || s.is_archived === true || String(s.isArchived) === "true" || String(s.is_archived) === "true") {
+          return false;
+        }
+        return isStudentInBatch(s, batchObj, batchId);
+      });
 
       let presentCount = 0;
       let absentCount = 0;
@@ -4486,7 +4507,12 @@ export const getBatchMonthlyAttendance = async (req, res) => {
       isArchived: { $ne: true }
     });
 
-    const batchStudents = (allStudents || []).filter((s) => isStudentInBatch(s, batchObj, batchId));
+    const batchStudents = (allStudents || []).filter((s) => {
+      if (s.isArchived === true || s.is_archived === true || String(s.isArchived) === "true" || String(s.is_archived) === "true") {
+        return false;
+      }
+      return isStudentInBatch(s, batchObj, batchId);
+    });
 
     const studentInfoMap = new Map();
     for (const s of batchStudents) {

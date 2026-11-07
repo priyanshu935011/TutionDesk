@@ -11,6 +11,8 @@ import User from "../models/User.js";
 import { resolveSubscriptionEnd } from "../utils/subscription.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import AiUsageLog from "../models/AiUsageLog.js";
+import Order from "../models/Order.js";
+import Note from "../models/Note.js";
 import { getInstituteAiDetails } from "../services/aiService.js";
 import axios from "axios";
 import crypto from "crypto";
@@ -716,6 +718,42 @@ export const handleCashfreeWebhook = async (req, res) => {
                 console.error("Cache clear error in payment webhook:", cacheErr);
               }
             }
+          }
+        }
+      } else if (cleanOrderId.startsWith("store_") || cleanOrderId.startsWith("ORD-")) {
+        const order = await Order.findOne({
+          $or: [{ cfOrderId: cleanOrderId }, { orderNumber: cleanOrderId }],
+        });
+        if (order && order.paymentStatus !== "paid") {
+          const type = rawBody?.type;
+          const orderStatus = rawBody?.data?.order?.order_status;
+          if (type === "ORDER_PAID" || orderStatus === "PAID") {
+            order.paymentStatus = "paid";
+            order.cfPaymentId = rawBody?.data?.payment?.cf_payment_id || cleanOrderId;
+            let hasOffline = false;
+            for (const item of order.items || []) {
+              if (item.isDigital === false || item.productType === "offline") {
+                hasOffline = true;
+                continue;
+              }
+              if (item.notesPdfUrl) {
+                try {
+                  await Note.create({
+                    institute: order.instituteId || null,
+                    createdBy: order.studentId,
+                    title: item.notesTitle || item.title,
+                    pdfUrl: item.notesPdfUrl,
+                    pdfPublicId: `store_purchased_${order.orderNumber}`,
+                    targetType: "student",
+                    students: [order.studentId],
+                    category: "Store Notes",
+                    type: "Chapter Notes",
+                  });
+                } catch (_) {}
+              }
+            }
+            order.fulfillmentStatus = hasOffline ? "processing" : "fulfilled";
+            await order.save();
           }
         }
       }
@@ -2205,6 +2243,7 @@ export const createAiCreditRechargeSession = async (req, res) => {
       returnUrl = returnUrl.replace(/^http:\/\//i, "https://");
     }
 
+    const userPhone = String(req.user?.phone || institute.phone || "9999999999").replace(/\D/g, "").slice(-10);
     const orderPayload = {
       order_id: cfOrderId,
       order_amount: finalAmount,
@@ -2213,7 +2252,7 @@ export const createAiCreditRechargeSession = async (req, res) => {
         customer_id: String(instituteId).slice(0, 45),
         customer_name: institute.name || req.user?.name || "Tuition Admin",
         customer_email: req.user?.email || "support@classtech.in",
-        customer_phone: req.user?.phone || "9999999999",
+        customer_phone: userPhone.length === 10 ? userPhone : "9999999999",
       },
       order_meta: {
         return_url: returnUrl,
@@ -2247,9 +2286,10 @@ export const createAiCreditRechargeSession = async (req, res) => {
       success: true,
       type: "ai_wallet_recharge",
       cfOrderId,
+      orderId: cfOrderId,
       paymentSessionId: response.data.payment_session_id,
       paymentLink: `${clientBaseUrl}/pay/${cfOrderId}`,
-      environment,
+      environment: (environment || "SANDBOX").toUpperCase(),
       amount: finalAmount,
       creditsPurchased: finalCredits,
     });
@@ -2339,8 +2379,9 @@ export const verifyAiCreditRecharge = async (req, res) => {
 
       return res.json({
         status: "success",
-        aiWalletBalance: details.aiWalletBalance,
+        aiCredits: details.aiWalletCredits,
         aiWalletCredits: details.aiWalletCredits,
+        aiWalletBalance: details.aiWalletBalance,
         message: "AI Credits recharge successful!",
       });
     }

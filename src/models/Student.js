@@ -143,6 +143,14 @@ const studentSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    archivedIndividually: {
+      type: Boolean,
+      default: false,
+    },
+    archivedByBatch: {
+      type: String,
+      default: null,
+    },
     lastActiveAt: {
       type: Date,
       default: null,

@@ -497,13 +497,14 @@ export const bulkImportAdminLeads = async (req, res) => {
 
       await SalesLead.create({
         coachingName: item.coachingName.trim(),
-        contactPerson: (item.contactPerson || item.coachingName).trim(),
+        contactPerson: (item.contactPerson || item.coachingName || "Admin").trim(),
         phone: String(item.phone).trim(),
         email: item.email ? String(item.email).trim().toLowerCase() : "",
         state: cleanState || (item.state || "").trim(),
         district: cleanCity || (item.district || item.city || "").trim(),
         city: cleanCity || (item.city || item.district || "").trim(),
         address: (item.address || "").trim(),
+        googleBusinessLink: (item.googleBusinessLink || "").trim(),
         studentCapacity: (item.studentCapacity || "").trim(),
         planInterest: item.planInterest || "Yearly Subscription",
         status: item.status || "new",

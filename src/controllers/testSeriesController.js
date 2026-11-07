@@ -607,6 +607,13 @@ export const updateTestSeries = async (req, res) => {
       return res.status(404).json({ message: "Test series not found" });
     }
 
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if ((test.isGlobal || !test.institute) && !isSuperAdmin) {
+      return res.status(403).json({
+        message: "You cannot edit test series uploaded by the ClassTech team.",
+      });
+    }
+
     const {
       title,
       description,
@@ -682,6 +689,13 @@ export const deleteTestSeries = async (req, res) => {
     const test = await TestSeries.findById(id);
     if (!test) {
       return res.status(404).json({ message: "Test series not found" });
+    }
+
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if ((test.isGlobal || !test.institute) && !isSuperAdmin) {
+      return res.status(403).json({
+        message: "You cannot delete test series uploaded by the ClassTech team.",
+      });
     }
 
     await TestSeries.findByIdAndDelete(id);

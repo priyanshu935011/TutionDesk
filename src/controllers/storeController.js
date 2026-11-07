@@ -1039,20 +1039,65 @@ export const verifyStorePayment = async (req, res) => {
     const studentId = req.student?._id || req.user?._id;
     const { orderId, cfOrderId } = req.body;
 
-    const order = await Order.findOne({
-      $or: [{ _id: orderId }, { cfOrderId }],
-    });
+    const queryConditions = [];
+    if (orderId && mongoose.isValidObjectId(orderId)) {
+      queryConditions.push({ _id: orderId });
+    } else if (orderId) {
+      queryConditions.push({ orderNumber: orderId });
+    }
+    if (cfOrderId) {
+      queryConditions.push({ cfOrderId });
+    }
+
+    if (queryConditions.length === 0) {
+      return res.status(400).json({ message: "orderId or cfOrderId is required." });
+    }
+
+    const order = await Order.findOne({ $or: queryConditions });
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    const config = await getCashfreeConfig();
-    const cfStatus = await checkCashfreeOrderStatus(order.cfOrderId || cfOrderId, config);
+    // Idempotency: If already verified, return success immediately
+    if (order.paymentStatus === "paid") {
+      return res.json({
+        success: true,
+        message: "Payment verified successfully! Your digital items are now unlocked.",
+        order,
+      });
+    }
 
-    if (cfStatus?.status === "PAID" || cfStatus?.order_status === "PAID") {
+    const config = await getCashfreeConfig();
+    let cfStatus = await checkCashfreeOrderStatus(order.cfOrderId || cfOrderId, config);
+
+    // If still pending, wait 1.5s and retry once to give Cashfree time to record the payment
+    if (cfStatus?.status === "pending") {
+      await new Promise((r) => setTimeout(r, 1500));
+      cfStatus = await checkCashfreeOrderStatus(order.cfOrderId || cfOrderId, config);
+    }
+
+    const isPaid =
+      order.paymentStatus === "paid" ||
+      cfStatus?.status === "success" ||
+      cfStatus?.status === "paid" ||
+      cfStatus?.status === "PAID" ||
+      cfStatus?.order_status === "PAID" ||
+      cfStatus?.rawData?.order_status === "PAID" ||
+      (Array.isArray(cfStatus?.rawData?.payments) &&
+        cfStatus.rawData.payments.some(
+          (p) => String(p?.payment_status || "").toUpperCase() === "SUCCESS"
+        ));
+
+    if (isPaid) {
       order.paymentStatus = "paid";
-      order.cfPaymentId = cfStatus?.payment_id || cfStatus?.cf_payment_id || order.cfOrderId;
+      order.cfPaymentId =
+        cfStatus?.payment_id ||
+        cfStatus?.cf_payment_id ||
+        cfStatus?.rawData?.payments?.find(
+          (p) => String(p?.payment_status || "").toUpperCase() === "SUCCESS"
+        )?.cf_payment_id ||
+        order.cfOrderId;
 
       let hasOffline = false;
 

@@ -863,6 +863,12 @@ class SupabaseDocument {
         if (meta.paymentHistory !== undefined) this.paymentHistory = meta.paymentHistory;
       }
       if (meta.profilePicture !== undefined) this.profilePicture = meta.profilePicture;
+      if (meta.archivedIndividually !== undefined) this.archivedIndividually = meta.archivedIndividually;
+      if (meta.archivedByBatch !== undefined) this.archivedByBatch = meta.archivedByBatch;
+      if (meta.isArchived !== undefined && (this.isArchived === undefined || this.isArchived === null)) {
+        this.isArchived = meta.isArchived;
+        this.is_archived = meta.isArchived;
+      }
     }
 
     if (tableName === "batches" && this._id) {
@@ -1096,6 +1102,10 @@ class SupabaseDocument {
     if (this._tableName === "students") {
       delete payload.custom_fields;
       delete payload.customFields;
+      delete payload.archived_individually;
+      delete payload.archivedIndividually;
+      delete payload.archived_by_batch;
+      delete payload.archivedByBatch;
       // batch_ids column does not exist in Supabase; store batches in metadata instead
       delete payload.batch_ids;
       delete payload.batches;
@@ -1315,7 +1325,10 @@ class SupabaseDocument {
           pendingAmount: this.pendingAmount ?? metadata[this._id]?.pendingAmount ?? 0,
           feePlanType: this.feePlanType ?? metadata[this._id]?.feePlanType ?? "monthly",
           dueDate: this.dueDate ?? metadata[this._id]?.dueDate ?? "",
-          paymentHistory: this.paymentHistory ?? metadata[this._id]?.paymentHistory ?? []
+          paymentHistory: this.paymentHistory ?? metadata[this._id]?.paymentHistory ?? [],
+          archivedIndividually: this.archivedIndividually ?? metadata[this._id]?.archivedIndividually ?? false,
+          archivedByBatch: this.archivedByBatch !== undefined ? this.archivedByBatch : (metadata[this._id]?.archivedByBatch ?? null),
+          isArchived: this.isArchived !== undefined ? Boolean(this.isArchived) : (metadata[this._id]?.isArchived ?? false),
         };
         writeStudentMetadata(metadata);
       }

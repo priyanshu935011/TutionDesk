@@ -154,6 +154,12 @@ export const updateBatch = async (req, res) => {
       req.user.institute?.adminUser,
     ].filter(Boolean);
 
+    const existingBatch = await Batch.findById(req.params.id);
+    if (!existingBatch) {
+      return res.status(404).json({ message: "Batch not found" });
+    }
+    const previousStatus = String(existingBatch.status || "active").toLowerCase();
+
     let batch = await Batch.findOneAndUpdate(
       { _id: req.params.id, user: { $in: userIds } },
       updateData,
@@ -161,21 +167,20 @@ export const updateBatch = async (req, res) => {
     );
 
     if (!batch) {
-      const existingBatch = await Batch.findById(req.params.id);
-      if (existingBatch) {
-        batch = await Batch.findOneAndUpdate(
-          { _id: req.params.id },
-          updateData,
-          { new: true, runValidators: true }
-        );
-      }
+      batch = await Batch.findOneAndUpdate(
+        { _id: req.params.id },
+        updateData,
+        { new: true, runValidators: true }
+      );
     }
 
     if (!batch) {
       return res.status(404).json({ message: "Batch not found" });
     }
 
-    if (status === "archived") {
+    const newStatus = status ? String(status).toLowerCase() : previousStatus;
+
+    if (newStatus === "archived" && previousStatus !== "archived") {
       // Find all students enrolled in this batch
       const studentsInBatch = await Student.find({
         user: { $in: userIds },
@@ -202,18 +207,25 @@ export const updateBatch = async (req, res) => {
         if (!hasOtherActiveBatch) {
           student.isArchived = true;
           student.is_archived = true;
+          student.archivedByBatch = String(req.params.id);
           await student.save();
         }
       }
-    } else if (status === "active") {
+    } else if (newStatus === "active" && previousStatus === "archived") {
+      // ONLY unarchive students when an archived batch is explicitly restored to active!
+      // NEVER unarchive students who were individually archived by admin/teacher.
       const studentsInBatch = await Student.find({
         user: { $in: userIds },
         $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
       });
       for (const student of studentsInBatch) {
+        if (student.archivedIndividually === true) {
+          continue; // Keep explicitly archived student archived
+        }
         if (student.isArchived || student.is_archived) {
           student.isArchived = false;
           student.is_archived = false;
+          student.archivedByBatch = null;
           await student.save();
         }
       }
@@ -223,6 +235,8 @@ export const updateBatch = async (req, res) => {
     await clearCachePattern("student:dashboard:*");
     await clearCachePattern("teacher:batches:*");
     await clearCachePattern("teacher:students:*");
+    await clearCachePattern("attendance:batch:*");
+    await clearCachePattern("attendance:batch:statusmap:*");
 
     const populatedBatch = await Batch.findById(batch._id).populate("teacher", "name email");
     return res.json(populatedBatch || batch);

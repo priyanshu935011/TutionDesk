@@ -33,7 +33,7 @@ export const getDashboard = async (req, res) => {
     ]);
 
     const students = rawStudents.filter((student) => {
-      if (student.isArchived) return false;
+      if (student.isArchived === true || student.is_archived === true || String(student.isArchived) === "true" || String(student.is_archived) === "true") return false;
       const studentBatchIds = [];
       if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
       if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
