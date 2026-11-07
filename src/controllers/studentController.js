@@ -2805,28 +2805,28 @@ export const getStudentVideos = async (req, res) => {
           resolvedExpiry = exp ? new Date(exp).toISOString() : null;
         }
 
+        // Parse targetAudienceMetadata safely
+        let meta = vObj.targetAudienceMetadata || vObj.target_audience_metadata || vObj.metadata || {};
+        if (typeof meta === "string") {
+          try {
+            meta = JSON.parse(meta);
+          } catch (_) {
+            meta = {};
+          }
+        }
+        if (!meta || typeof meta !== "object") meta = {};
+
+        // Prioritize target_audience_type over legacy target_type column (which has Postgres default 'batch')
+        const targetType = String(
+          vObj.targetAudienceType ||
+          vObj.target_audience_type ||
+          vObj.targetType ||
+          vObj.target_type ||
+          ""
+        ).toLowerCase().trim();
+
         // Target audience check if not explicitly released
         if (!videoHasValidReleaseMap.has(vIdStr) && !directVideoIds.has(vIdStr)) {
-          // Parse targetAudienceMetadata safely
-          let meta = vObj.targetAudienceMetadata || vObj.target_audience_metadata || vObj.metadata || {};
-          if (typeof meta === "string") {
-            try {
-              meta = JSON.parse(meta);
-            } catch (_) {
-              meta = {};
-            }
-          }
-          if (!meta || typeof meta !== "object") meta = {};
-
-          // Prioritize target_audience_type over legacy target_type column (which has Postgres default 'batch')
-          let targetType = String(
-            vObj.targetAudienceType ||
-            vObj.target_audience_type ||
-            vObj.targetType ||
-            vObj.target_type ||
-            ""
-          ).toLowerCase().trim();
-
           // CRITICAL: If no target audience was selected (e.g. 'none' or empty string),
           // the video has no audience and MUST NOT be visible to any student.
           if (targetType === "none" || !targetType) {
