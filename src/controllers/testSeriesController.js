@@ -841,9 +841,44 @@ export const getTestSeriesAnalytics = async (req, res) => {
 // STUDENT ACTIONS
 // -------------------------------------------------------------
 
+const resolveStudentContext = async (req) => {
+  const requestedStudentId =
+    req.headers["x-student-id"] ||
+    req.query.studentId ||
+    req.body?.studentId;
+
+  let student = null;
+  if (requestedStudentId) {
+    if (Array.isArray(req.students)) {
+      student = req.students.find((s) => String(s._id || s.id) === String(requestedStudentId));
+    }
+    if (!student) {
+      try {
+        student = await Student.findById(requestedStudentId);
+      } catch (_) {}
+    }
+  }
+
+  if (!student) {
+    student = req.student || (Array.isArray(req.students) && req.students[0]) || null;
+    if (!student && req.user?._id) {
+      try {
+        student = await Student.findById(req.user._id);
+      } catch (_) {}
+    }
+  }
+
+  return student;
+};
+
 export const getStudentTests = async (req, res) => {
   try {
-    const studentId = req.student?._id || req.user?._id;
+    const student = await resolveStudentContext(req);
+    if (!student) {
+      return res.status(404).json({ message: "Student record not found" });
+    }
+
+    const studentId = student._id || student.id;
     const isRefresh = req.query.nocache === "true" || req.query.refresh === "true";
     const cacheKey = `student:test_series:${studentId}`;
 
@@ -859,11 +894,6 @@ export const getStudentTests = async (req, res) => {
           return res.json(cached);
         }
       } catch (_) {}
-    }
-
-    const student = await Student.findById(studentId);
-    if (!student) {
-      return res.status(404).json({ message: "Student record not found" });
     }
 
     const instId = student.user || student.institute;
@@ -996,8 +1026,7 @@ export const getStudentTests = async (req, res) => {
 export const startStudentTest = async (req, res) => {
   try {
     const { id } = req.params; // testSeriesId
-    const studentId = req.student?._id || req.user?._id;
-    const student = await Student.findById(studentId);
+    const student = await resolveStudentContext(req);
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
@@ -1035,11 +1064,14 @@ export const submitStudentTest = async (req, res) => {
   try {
     const { id } = req.params; // testSeriesId
     const { timeTakenSeconds, answers = [] } = req.body;
-    const studentId = req.student?._id || req.user?._id;
-
-    const student = await Student.findById(studentId).populate("batch", "name");
+    let student = await resolveStudentContext(req);
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
+    }
+    const studentId = student._id || student.id;
+    if (!student.batch?.name && student.batch) {
+      const bPopulated = await Student.findById(studentId).populate("batch", "name");
+      if (bPopulated) student = bPopulated;
     }
 
     const test = await TestSeries.findById(id);
@@ -1261,7 +1293,8 @@ export const getStudentAttemptResult = async (req, res) => {
 export const analyzeStudentTestAttempt = async (req, res) => {
   try {
     const { attemptId } = req.params;
-    const studentId = req.student?._id || req.user?._id;
+    const student = await resolveStudentContext(req);
+    const studentId = student ? (student._id || student.id) : req.user?._id;
 
     const attempt = await TestSeriesAttempt.findById(attemptId);
     if (!attempt) {
@@ -1269,11 +1302,14 @@ export const analyzeStudentTestAttempt = async (req, res) => {
     }
 
     // Verify student ownership if student role
+    const siblingIds = Array.isArray(req.students) ? req.students.map((s) => String(s._id || s.id)) : [];
+    if (studentId) siblingIds.push(String(studentId));
+    const isOwner = siblingIds.includes(String(attempt.student)) || siblingIds.includes(String(attempt.student_id));
+
     if (
       studentId &&
       attempt.student &&
-      String(attempt.student) !== String(studentId) &&
-      String(attempt.student_id) !== String(studentId) &&
+      !isOwner &&
       req.user?.role !== "superadmin" &&
       req.user?.role !== "admin"
     ) {
