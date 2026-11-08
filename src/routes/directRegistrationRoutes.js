@@ -5,6 +5,7 @@ import {
   getAdminDirectRegistrations,
   updateAdminDirectRegistration,
   convertTrialToInstitute,
+  deleteAdminDirectRegistration,
   getAdminTrialDefaults,
   updateAdminTrialDefaults,
 } from "../controllers/directRegistrationController.js";
@@ -20,6 +21,7 @@ router.get("/defaults", getAdminTrialDefaults);
 // Super Admin management endpoints
 router.get("/admin/registrations", protect, getAdminDirectRegistrations);
 router.put("/admin/registrations/:id", protect, updateAdminDirectRegistration);
+router.delete("/admin/registrations/:id", protect, deleteAdminDirectRegistration);
 router.post("/admin/registrations/:id/convert", protect, convertTrialToInstitute);
 router.get("/admin/defaults", protect, getAdminTrialDefaults);
 router.put("/admin/defaults", protect, updateAdminTrialDefaults);

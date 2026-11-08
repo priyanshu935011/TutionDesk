@@ -3,10 +3,15 @@ import bcrypt from "bcryptjs";
 import DirectRegistration from "../models/DirectRegistration.js";
 import User from "../models/User.js";
 import Institute from "../models/Institute.js";
+import Student from "../models/Student.js";
+import Batch from "../models/Batch.js";
+import Note from "../models/Note.js";
+import Notice from "../models/Notice.js";
 import SystemSetting from "../models/SystemSetting.js";
 import { sendSMSOTP } from "../utils/smsHelper.js";
 import { sendMessage } from "../services/whatsappService.js";
 import redisClient from "../config/redis.js";
+import { clearCachePattern } from "../utils/cache.js";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
@@ -772,13 +777,190 @@ export const convertTrialToInstitute = async (req, res) => {
 
     return res.json({
       success: true,
-      message: `Educator successfully converted to official Institute: "${newInstitute.name}"!`,
-      institute: newInstitute,
+      message: `Educator successfully converted to official Institute: "${targetInstitute.name}"!`,
+      institute: targetInstitute,
       registration,
     });
   } catch (error) {
     console.error("[convertTrialToInstitute] Error:", error);
     return res.status(500).json({ success: false, message: "Could not convert registration: " + error.message });
+  }
+};
+
+/**
+ * Permanently delete an app trial registration and all associated records
+ * (User, Institute, Batches, Students, Notes, Notices, Redis sessions)
+ */
+export const deleteAdminDirectRegistration = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Registration ID is required" });
+    }
+
+    let registration = null;
+    try {
+      registration = await DirectRegistration.findById(id);
+    } catch (_) {}
+
+    if (!registration) {
+      registration = await DirectRegistration.findOne({
+        $or: [{ _id: id }, { id }, { phone: id }],
+      });
+    }
+
+    if (!registration) {
+      return res.status(404).json({ success: false, message: "Trial registration not found" });
+    }
+
+    const regId = String(registration._id || registration.id);
+    const cleanPhone = String(registration.phone || "").trim();
+    const convertedInstId = registration.convertedToInstituteId
+      ? String(registration.convertedToInstituteId)
+      : null;
+
+    // 1. Locate all related user records
+    const userQuery = [];
+    if (cleanPhone) {
+      userQuery.push({ phone: cleanPhone });
+      userQuery.push({ email: `${cleanPhone}@direct.classtech.in` });
+    }
+    if (regId) {
+      userQuery.push({ institute: regId });
+      userQuery.push({ trialRegistrationId: regId });
+    }
+    if (convertedInstId) {
+      userQuery.push({ institute: convertedInstId });
+    }
+
+    let users = [];
+    if (userQuery.length > 0) {
+      users = await User.find({ $or: userQuery }).catch(() => []);
+    }
+    const userIds = users.map((u) => String(u._id || u.id)).filter(Boolean);
+
+    // 2. Locate all related institute records
+    const instituteQuery = [];
+    if (regId) {
+      instituteQuery.push({ _id: regId }, { id: regId });
+    }
+    if (cleanPhone) {
+      instituteQuery.push({ adminPhone: cleanPhone });
+    }
+    if (convertedInstId) {
+      instituteQuery.push({ _id: convertedInstId }, { id: convertedInstId });
+    }
+    if (userIds.length > 0) {
+      instituteQuery.push({ adminUser: { $in: userIds } });
+    }
+
+    let institutes = [];
+    if (instituteQuery.length > 0) {
+      institutes = await Institute.find({ $or: instituteQuery }).catch(() => []);
+    }
+    const instIds = Array.from(
+      new Set([
+        regId,
+        ...(convertedInstId ? [convertedInstId] : []),
+        ...institutes.map((i) => String(i._id || i.id)).filter(Boolean),
+      ])
+    );
+
+    // 3. Delete dependent child records (students, batches, notes, notices)
+    const entityFilter = [];
+    if (userIds.length > 0) {
+      entityFilter.push({ user: { $in: userIds } });
+    }
+    if (instIds.length > 0) {
+      entityFilter.push({ institute: { $in: instIds } });
+      entityFilter.push({ institute_id: { $in: instIds } });
+    }
+
+    if (entityFilter.length > 0) {
+      await Promise.allSettled([
+        Student.deleteMany({ $or: entityFilter }).catch(() => {}),
+        Batch.deleteMany({ $or: entityFilter }).catch(() => {}),
+        Note.deleteMany({ $or: entityFilter }).catch(() => {}),
+        Notice.deleteMany({ $or: entityFilter }).catch(() => {}),
+      ]);
+    }
+
+    // 4. Delete Users
+    if (userIds.length > 0) {
+      for (const uid of userIds) {
+        await User.findByIdAndDelete(uid).catch(() => {});
+      }
+      await User.deleteMany({ _id: { $in: userIds } }).catch(() => {});
+    }
+    if (cleanPhone) {
+      await User.deleteMany({ phone: cleanPhone }).catch(() => {});
+    }
+    if (instIds.length > 0) {
+      await User.deleteMany({
+        $or: [{ institute: { $in: instIds } }, { institute_id: { $in: instIds } }],
+      }).catch(() => {});
+    }
+
+    // 5. Delete Institute(s)
+    if (instIds.length > 0) {
+      for (const iid of instIds) {
+        await Institute.findByIdAndDelete(iid).catch(() => {});
+      }
+      await Institute.deleteMany({
+        $or: [{ _id: { $in: instIds } }, { id: { $in: instIds } }],
+      }).catch(() => {});
+    }
+    if (cleanPhone) {
+      await Institute.deleteMany({ adminPhone: cleanPhone }).catch(() => {});
+    }
+
+    // 6. Delete Direct Registration record
+    await DirectRegistration.deleteOne({
+      $or: [{ _id: regId }, { id: regId }, { phone: cleanPhone }],
+    }).catch(() => {});
+
+    // 7. Invalidate sessions and OTP trackers in Redis and memory
+    try {
+      if (cleanPhone) {
+        memoryOtpStore.delete(cleanPhone);
+        phoneCooldownTracker.delete(cleanPhone);
+      }
+
+      if (redisClient && redisClient.isReady) {
+        for (const uid of userIds) {
+          await redisClient.del(`active_session:user:${uid}`).catch(() => {});
+        }
+        if (cleanPhone) {
+          await redisClient.del(`otp:reg:${cleanPhone}`).catch(() => {});
+          await redisClient.del(`otp_count:reg:${cleanPhone}`).catch(() => {});
+        }
+      }
+    } catch (_) {}
+
+    // 8. Clear Cache Patterns
+    try {
+      await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("student:dashboard:*");
+      await clearCachePattern("institute:*");
+      await clearCachePattern("admin:*");
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      message: `Trial account for ${registration.name || "Educator"} (+91 ${cleanPhone}) deleted successfully.`,
+      deleted: {
+        registrationId: regId,
+        phone: cleanPhone,
+        usersDeleted: userIds.length,
+        institutesDeleted: instIds.length,
+      },
+    });
+  } catch (error) {
+    console.error("[deleteAdminDirectRegistration] Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not delete trial registration: " + error.message,
+    });
   }
 };
 
