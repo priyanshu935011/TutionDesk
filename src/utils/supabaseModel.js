@@ -779,6 +779,17 @@ class SupabaseDocument {
       this.ai_analysis = data.ai_analysis;
     }
 
+    if (tableName === "direct_registrations") {
+      this.aiEnabled = data.ai_enabled !== undefined ? Boolean(data.ai_enabled) : (data.aiEnabled !== undefined ? Boolean(data.aiEnabled) : true);
+      this.aiStudentEnabled = Boolean(data.ai_student_enabled ?? data.aiStudentEnabled);
+      this.recordedLecturesFeatureEnabled = data.recorded_lectures_feature_enabled !== undefined ? Boolean(data.recorded_lectures_feature_enabled) : (data.recordedLecturesFeatureEnabled !== undefined ? Boolean(data.recordedLecturesFeatureEnabled) : true);
+      this.releaseVideosFeatureEnabled = data.release_videos_feature_enabled !== undefined ? Boolean(data.release_videos_feature_enabled) : (data.releaseVideosFeatureEnabled !== undefined ? Boolean(data.releaseVideosFeatureEnabled) : true);
+      this.quizFeatureEnabled = data.quiz_feature_enabled !== undefined ? Boolean(data.quiz_feature_enabled) : (data.quizFeatureEnabled !== undefined ? Boolean(data.quizFeatureEnabled) : true);
+      this.testSeriesFeatureEnabled = Boolean(data.test_series_feature_enabled ?? data.testSeriesFeatureEnabled);
+      this.brandingEnabled = data.branding_enabled !== undefined ? Boolean(data.branding_enabled) : (data.brandingEnabled !== undefined ? Boolean(data.brandingEnabled) : true);
+      this.maxVideoStorageGb = Number(data.max_video_storage_gb ?? data.maxVideoStorageGb ?? 5);
+    }
+
     if (tableName === "whatsapp_logs") {
       this.recipient = data.recipient || data.to || this.to || "";
       this.to = this.recipient;
@@ -1301,6 +1312,17 @@ class SupabaseDocument {
       } else {
         payload.user_id = toValidUUID(payload.user_id);
       }
+    }
+
+    if (this._tableName === "direct_registrations") {
+      if (this.aiEnabled !== undefined) payload.ai_enabled = Boolean(this.aiEnabled);
+      if (this.aiStudentEnabled !== undefined) payload.ai_student_enabled = Boolean(this.aiStudentEnabled);
+      if (this.recordedLecturesFeatureEnabled !== undefined) payload.recorded_lectures_feature_enabled = Boolean(this.recordedLecturesFeatureEnabled);
+      if (this.releaseVideosFeatureEnabled !== undefined) payload.release_videos_feature_enabled = Boolean(this.releaseVideosFeatureEnabled);
+      if (this.quizFeatureEnabled !== undefined) payload.quiz_feature_enabled = Boolean(this.quizFeatureEnabled);
+      if (this.testSeriesFeatureEnabled !== undefined) payload.test_series_feature_enabled = Boolean(this.testSeriesFeatureEnabled);
+      if (this.brandingEnabled !== undefined) payload.branding_enabled = Boolean(this.brandingEnabled);
+      if (this.maxVideoStorageGb !== undefined) payload.max_video_storage_gb = Number(this.maxVideoStorageGb);
     }
 
     if (this._id) {
@@ -2942,6 +2964,17 @@ class SupabaseModel {
       delete payload.id;
     }
 
+    if (this.tableName === "direct_registrations") {
+      if (payload.ai_enabled === undefined && doc.aiEnabled !== undefined) payload.ai_enabled = Boolean(doc.aiEnabled);
+      if (payload.ai_student_enabled === undefined && doc.aiStudentEnabled !== undefined) payload.ai_student_enabled = Boolean(doc.aiStudentEnabled);
+      if (payload.recorded_lectures_feature_enabled === undefined && doc.recordedLecturesFeatureEnabled !== undefined) payload.recorded_lectures_feature_enabled = Boolean(doc.recordedLecturesFeatureEnabled);
+      if (payload.release_videos_feature_enabled === undefined && doc.releaseVideosFeatureEnabled !== undefined) payload.release_videos_feature_enabled = Boolean(doc.releaseVideosFeatureEnabled);
+      if (payload.quiz_feature_enabled === undefined && doc.quizFeatureEnabled !== undefined) payload.quiz_feature_enabled = Boolean(doc.quizFeatureEnabled);
+      if (payload.test_series_feature_enabled === undefined && doc.testSeriesFeatureEnabled !== undefined) payload.test_series_feature_enabled = Boolean(doc.testSeriesFeatureEnabled);
+      if (payload.branding_enabled === undefined && doc.brandingEnabled !== undefined) payload.branding_enabled = Boolean(doc.brandingEnabled);
+      if (payload.max_video_storage_gb === undefined && doc.maxVideoStorageGb !== undefined) payload.max_video_storage_gb = Number(doc.maxVideoStorageGb);
+    }
+
     const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
     for (const key of uuidPayloadKeys) {
       if (key in payload) {
@@ -3132,7 +3165,7 @@ class SupabaseModel {
       } catch (_) {}
     }
 
-    return new SupabaseDocument(this.tableName, data, this);
+    return new SupabaseDocument(this.tableName, data || payload, this);
   }
 
   async insertMany(docs) {

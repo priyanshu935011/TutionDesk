@@ -31,7 +31,7 @@ const buildInstituteState = async (user) => {
   if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
     try {
       institute = await Institute.findById(instIdStr).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb"
       );
     } catch (_) {}
   }
@@ -40,7 +40,7 @@ const buildInstituteState = async (user) => {
       institute = await Institute.findOne({
         $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
       }).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb"
       );
     } catch (_) {}
   }
@@ -74,11 +74,15 @@ const buildInstituteState = async (user) => {
           subscriptionEnd: reg.trialEndsAt,
           status: reg.status || "trial_active",
           tuitionType: "solo",
-          quizFeatureEnabled: true,
-          testSeriesFeatureEnabled: true,
-          recordedLecturesFeatureEnabled: true,
-          releaseVideosFeatureEnabled: true,
-          brandingEnabled: true,
+          quizFeatureEnabled: reg.quizFeatureEnabled !== false && reg.quiz_feature_enabled !== false,
+          testSeriesFeatureEnabled: Boolean(reg.testSeriesFeatureEnabled || reg.test_series_feature_enabled),
+          recordedLecturesFeatureEnabled: reg.recordedLecturesFeatureEnabled !== false && reg.recorded_lectures_feature_enabled !== false,
+          releaseVideosFeatureEnabled: reg.releaseVideosFeatureEnabled !== false && reg.release_videos_feature_enabled !== false,
+          aiEnabled: reg.aiEnabled !== false && reg.ai_enabled !== false,
+          aiStudentEnabled: Boolean(reg.aiStudentEnabled || reg.ai_student_enabled),
+          brandingEnabled: reg.brandingEnabled !== false && reg.branding_enabled !== false,
+          maxVideoStorageGb: Number(reg.maxVideoStorageGb ?? reg.max_video_storage_gb ?? 5),
+          aiWalletBalance: Number(reg.aiBalance ?? reg.ai_balance ?? 50),
           logoUrl: null,
           themeColor: "#4C3FBE",
           allowedFeatures: reg.features || [
@@ -154,6 +158,11 @@ const buildInstituteState = async (user) => {
     studentCustomFields: institute.studentCustomFields || [],
     walletBalance: Number(liveBalance || 0),
     perMessageCharge: Number(liveRate ?? 0.10),
+    aiEnabled: Boolean(institute.aiEnabled ?? institute.ai_enabled ?? false),
+    aiStudentEnabled: Boolean(institute.aiStudentEnabled ?? institute.ai_student_enabled ?? false),
+    aiWalletBalance: Number(institute.aiWalletBalance ?? institute.ai_wallet_balance ?? 0),
+    aiCreditsPerRupee: Number(institute.aiCreditsPerRupee ?? institute.ai_credits_per_rupee ?? 10),
+    maxVideoStorageGb: Number(institute.maxVideoStorageGb ?? institute.max_video_storage_gb ?? 50),
   };
 };
 

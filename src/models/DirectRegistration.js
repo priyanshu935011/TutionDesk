@@ -57,6 +57,38 @@ const directRegistrationSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    aiEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    aiStudentEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    recordedLecturesFeatureEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    releaseVideosFeatureEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    quizFeatureEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    testSeriesFeatureEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    brandingEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    maxVideoStorageGb: {
+      type: Number,
+      default: 5,
+    },
     ipAddress: {
       type: String,
       default: "",

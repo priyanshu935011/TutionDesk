@@ -76,6 +76,14 @@ export const getGlobalTrialDefaults = async () => {
         wpBalance: Number(val.wpBalance ?? 10.0),
         aiBalance: Number(val.aiBalance ?? 50.0),
         storageLimitMb: Number(val.storageLimitMb ?? 500),
+        aiEnabled: val.aiEnabled !== undefined ? Boolean(val.aiEnabled) : true,
+        aiStudentEnabled: val.aiStudentEnabled !== undefined ? Boolean(val.aiStudentEnabled) : false,
+        recordedLecturesFeatureEnabled: val.recordedLecturesFeatureEnabled !== undefined ? Boolean(val.recordedLecturesFeatureEnabled) : true,
+        releaseVideosFeatureEnabled: val.releaseVideosFeatureEnabled !== undefined ? Boolean(val.releaseVideosFeatureEnabled) : true,
+        quizFeatureEnabled: val.quizFeatureEnabled !== undefined ? Boolean(val.quizFeatureEnabled) : true,
+        testSeriesFeatureEnabled: val.testSeriesFeatureEnabled !== undefined ? Boolean(val.testSeriesFeatureEnabled) : false,
+        brandingEnabled: val.brandingEnabled !== undefined ? Boolean(val.brandingEnabled) : true,
+        maxVideoStorageGb: Number(val.maxVideoStorageGb ?? 5),
         features: Array.isArray(val.features)
           ? val.features
           : [
@@ -85,9 +93,7 @@ export const getGlobalTrialDefaults = async () => {
               "tests",
               "whatsapp",
               "finances",
-              "ai",
               "homework",
-              "quizzes",
             ],
       };
     }
@@ -98,6 +104,14 @@ export const getGlobalTrialDefaults = async () => {
     wpBalance: 10.0,
     aiBalance: 50.0,
     storageLimitMb: 500,
+    aiEnabled: true,
+    aiStudentEnabled: false,
+    recordedLecturesFeatureEnabled: true,
+    releaseVideosFeatureEnabled: true,
+    quizFeatureEnabled: true,
+    testSeriesFeatureEnabled: false,
+    brandingEnabled: true,
+    maxVideoStorageGb: 5,
     features: [
       "attendance",
       "notes",
@@ -105,9 +119,7 @@ export const getGlobalTrialDefaults = async () => {
       "tests",
       "whatsapp",
       "finances",
-      "ai",
       "homework",
-      "quizzes",
     ],
   };
 };
@@ -331,6 +343,14 @@ export const verifyOtpAndRegister = async (req, res) => {
         aiBalance: defaults.aiBalance,
         storageLimitMb: defaults.storageLimitMb,
         storageUsedBytes: 0,
+        aiEnabled: defaults.aiEnabled !== false,
+        aiStudentEnabled: Boolean(defaults.aiStudentEnabled),
+        recordedLecturesFeatureEnabled: defaults.recordedLecturesFeatureEnabled !== false,
+        releaseVideosFeatureEnabled: defaults.releaseVideosFeatureEnabled !== false,
+        quizFeatureEnabled: defaults.quizFeatureEnabled !== false,
+        testSeriesFeatureEnabled: Boolean(defaults.testSeriesFeatureEnabled),
+        brandingEnabled: defaults.brandingEnabled !== false,
+        maxVideoStorageGb: Number(defaults.maxVideoStorageGb || 5),
         ipAddress: clientIp,
         fcmToken: JSON.stringify(fcmList),
         lastActiveAt: new Date(),
@@ -340,6 +360,9 @@ export const verifyOtpAndRegister = async (req, res) => {
       registration.instituteName = regInstName;
       registration.trialEndsAt = trialEnds;
       registration.status = "trial_active";
+      if (registration.aiEnabled === undefined) registration.aiEnabled = defaults.aiEnabled;
+      if (registration.recordedLecturesFeatureEnabled === undefined) registration.recordedLecturesFeatureEnabled = defaults.recordedLecturesFeatureEnabled;
+      if (registration.quizFeatureEnabled === undefined) registration.quizFeatureEnabled = defaults.quizFeatureEnabled;
       await registration.save().catch(() => {});
     }
 
@@ -411,7 +434,14 @@ export const verifyOtpAndRegister = async (req, res) => {
         walletBalance: Number(defaults.wpBalance || 10.0),
         aiWalletBalance: Number(defaults.aiBalance || 50.0),
         storageLimitMb: Number(defaults.storageLimitMb || 500),
-        brandingEnabled: true,
+        quizFeatureEnabled: registration.quizFeatureEnabled !== false,
+        aiEnabled: registration.aiEnabled !== false,
+        aiStudentEnabled: Boolean(registration.aiStudentEnabled),
+        recordedLecturesFeatureEnabled: registration.recordedLecturesFeatureEnabled !== false,
+        releaseVideosFeatureEnabled: registration.releaseVideosFeatureEnabled !== false,
+        testSeriesFeatureEnabled: Boolean(registration.testSeriesFeatureEnabled),
+        maxVideoStorageGb: Number(registration.maxVideoStorageGb || 5),
+        brandingEnabled: registration.brandingEnabled !== false,
       });
     }
 
@@ -535,9 +565,16 @@ export const verifyOtpAndRegister = async (req, res) => {
       walletBalance: Number(registration.wpBalance || 0),
       aiBalance: Number(registration.aiBalance || 0),
       storageLimitMb: Number(registration.storageLimitMb || 500),
+      quizFeatureEnabled: registration.quizFeatureEnabled !== false,
+      recordedLecturesFeatureEnabled: registration.recordedLecturesFeatureEnabled !== false,
+      releaseVideosFeatureEnabled: registration.releaseVideosFeatureEnabled !== false,
+      aiEnabled: registration.aiEnabled !== false,
+      aiStudentEnabled: Boolean(registration.aiStudentEnabled),
+      testSeriesFeatureEnabled: Boolean(registration.testSeriesFeatureEnabled),
+      maxVideoStorageGb: Number(registration.maxVideoStorageGb || 5),
       isDirectTrial: true,
       trialDaysLeft: daysLeft,
-      brandingEnabled: true,
+      brandingEnabled: registration.brandingEnabled !== false,
       logoUrl: null,
       themeColor: "#4C3FBE",
     };
@@ -608,6 +645,14 @@ export const syncFallbackRecordsToSupabase = async () => {
             ai_balance: Number(item.aiBalance ?? item.ai_balance ?? 50.0),
             storage_limit_mb: Number(item.storageLimitMb ?? item.storage_limit_mb ?? 500),
             storage_used_bytes: Number(item.storageUsedBytes ?? item.storage_used_bytes ?? 0),
+            ai_enabled: item.aiEnabled !== undefined ? Boolean(item.aiEnabled) : (item.ai_enabled !== undefined ? Boolean(item.ai_enabled) : true),
+            ai_student_enabled: Boolean(item.aiStudentEnabled ?? item.ai_student_enabled),
+            recorded_lectures_feature_enabled: item.recordedLecturesFeatureEnabled !== undefined ? Boolean(item.recordedLecturesFeatureEnabled) : (item.recorded_lectures_feature_enabled !== undefined ? Boolean(item.recorded_lectures_feature_enabled) : true),
+            release_videos_feature_enabled: item.releaseVideosFeatureEnabled !== undefined ? Boolean(item.releaseVideosFeatureEnabled) : (item.release_videos_feature_enabled !== undefined ? Boolean(item.release_videos_feature_enabled) : true),
+            quiz_feature_enabled: item.quizFeatureEnabled !== undefined ? Boolean(item.quizFeatureEnabled) : (item.quiz_feature_enabled !== undefined ? Boolean(item.quiz_feature_enabled) : true),
+            test_series_feature_enabled: Boolean(item.testSeriesFeatureEnabled ?? item.test_series_feature_enabled),
+            branding_enabled: item.brandingEnabled !== undefined ? Boolean(item.brandingEnabled) : (item.branding_enabled !== undefined ? Boolean(item.branding_enabled) : true),
+            max_video_storage_gb: Number(item.maxVideoStorageGb ?? item.max_video_storage_gb ?? 5),
             ip_address: item.ipAddress || item.ip_address || null,
             fcm_token: Array.isArray(item.fcmToken) ? item.fcmToken : [],
             last_active_at: item.lastActiveAt || item.last_active_at || new Date(),
@@ -684,6 +729,14 @@ export const getAdminDirectRegistrations = async (req, res) => {
       return {
         ...doc,
         id: doc._id || doc.id,
+        aiEnabled: doc.aiEnabled !== undefined ? Boolean(doc.aiEnabled) : (doc.ai_enabled !== undefined ? Boolean(doc.ai_enabled) : true),
+        aiStudentEnabled: Boolean(doc.aiStudentEnabled ?? doc.ai_student_enabled),
+        recordedLecturesFeatureEnabled: doc.recordedLecturesFeatureEnabled !== undefined ? Boolean(doc.recordedLecturesFeatureEnabled) : (doc.recorded_lectures_feature_enabled !== undefined ? Boolean(doc.recorded_lectures_feature_enabled) : true),
+        releaseVideosFeatureEnabled: doc.releaseVideosFeatureEnabled !== undefined ? Boolean(doc.releaseVideosFeatureEnabled) : (doc.release_videos_feature_enabled !== undefined ? Boolean(doc.release_videos_feature_enabled) : true),
+        quizFeatureEnabled: doc.quizFeatureEnabled !== undefined ? Boolean(doc.quizFeatureEnabled) : (doc.quiz_feature_enabled !== undefined ? Boolean(doc.quiz_feature_enabled) : true),
+        testSeriesFeatureEnabled: Boolean(doc.testSeriesFeatureEnabled ?? doc.test_series_feature_enabled),
+        brandingEnabled: doc.brandingEnabled !== undefined ? Boolean(doc.brandingEnabled) : (doc.branding_enabled !== undefined ? Boolean(doc.branding_enabled) : true),
+        maxVideoStorageGb: Number(doc.maxVideoStorageGb ?? doc.max_video_storage_gb ?? 5),
         daysLeft,
         isExpired,
       };
@@ -735,6 +788,15 @@ export const updateAdminDirectRegistration = async (req, res) => {
       extendDays,
       notes,
       instituteName,
+      name,
+      aiEnabled,
+      aiStudentEnabled,
+      recordedLecturesFeatureEnabled,
+      releaseVideosFeatureEnabled,
+      quizFeatureEnabled,
+      testSeriesFeatureEnabled,
+      brandingEnabled,
+      maxVideoStorageGb,
     } = req.body;
 
     const registration = await DirectRegistration.findById(id);
@@ -742,6 +804,12 @@ export const updateAdminDirectRegistration = async (req, res) => {
       return res.status(404).json({ success: false, message: "Registration not found" });
     }
 
+    if (name !== undefined && String(name).trim()) {
+      registration.name = String(name).trim();
+    }
+    if (instituteName !== undefined && String(instituteName).trim()) {
+      registration.instituteName = String(instituteName).trim();
+    }
     if (features !== undefined && Array.isArray(features)) {
       registration.features = features;
     }
@@ -754,14 +822,35 @@ export const updateAdminDirectRegistration = async (req, res) => {
     if (storageLimitMb !== undefined) {
       registration.storageLimitMb = Math.max(0, Number(storageLimitMb || 500));
     }
+    if (aiEnabled !== undefined) {
+      registration.aiEnabled = Boolean(aiEnabled);
+    }
+    if (aiStudentEnabled !== undefined) {
+      registration.aiStudentEnabled = Boolean(aiStudentEnabled);
+    }
+    if (recordedLecturesFeatureEnabled !== undefined) {
+      registration.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+    }
+    if (releaseVideosFeatureEnabled !== undefined) {
+      registration.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
+    }
+    if (quizFeatureEnabled !== undefined) {
+      registration.quizFeatureEnabled = Boolean(quizFeatureEnabled);
+    }
+    if (testSeriesFeatureEnabled !== undefined) {
+      registration.testSeriesFeatureEnabled = Boolean(testSeriesFeatureEnabled);
+    }
+    if (brandingEnabled !== undefined) {
+      registration.brandingEnabled = Boolean(brandingEnabled);
+    }
+    if (maxVideoStorageGb !== undefined) {
+      registration.maxVideoStorageGb = Math.max(1, Number(maxVideoStorageGb || 5));
+    }
     if (status && ["trial_active", "expired", "converted", "suspended"].includes(status)) {
       registration.status = status;
     }
     if (notes !== undefined) {
       registration.notes = String(notes || "").trim();
-    }
-    if (instituteName !== undefined && instituteName.trim()) {
-      registration.instituteName = instituteName.trim();
     }
 
     // Extend trial by X days if requested
@@ -776,12 +865,51 @@ export const updateAdminDirectRegistration = async (req, res) => {
 
     await registration.save();
 
+    const regId = String(registration._id || registration.id);
+    const cleanPhone = String(registration.phone || "").trim();
+
+    // Sync matching Institute in institutes table
+    try {
+      const institute = await Institute.findOne({
+        $or: [{ _id: regId }, { id: regId }, { adminPhone: cleanPhone }]
+      });
+      if (institute) {
+        if (registration.name) institute.ownerName = registration.name;
+        if (registration.instituteName) institute.name = registration.instituteName;
+        if (registration.trialEndsAt) institute.subscriptionEnd = registration.trialEndsAt;
+        if (registration.status === "suspended") institute.status = "suspended";
+        else if (registration.status === "trial_active") institute.status = "active";
+
+        institute.aiEnabled = registration.aiEnabled !== false;
+        institute.ai_enabled = registration.aiEnabled !== false;
+        institute.aiStudentEnabled = Boolean(registration.aiStudentEnabled);
+        institute.ai_student_enabled = Boolean(registration.aiStudentEnabled);
+        institute.recordedLecturesFeatureEnabled = registration.recordedLecturesFeatureEnabled !== false;
+        institute.recorded_lectures_feature_enabled = registration.recordedLecturesFeatureEnabled !== false;
+        institute.releaseVideosFeatureEnabled = registration.releaseVideosFeatureEnabled !== false;
+        institute.release_videos_feature_enabled = registration.releaseVideosFeatureEnabled !== false;
+        institute.quizFeatureEnabled = registration.quizFeatureEnabled !== false;
+        institute.quiz_feature_enabled = registration.quizFeatureEnabled !== false;
+        institute.testSeriesFeatureEnabled = Boolean(registration.testSeriesFeatureEnabled);
+        institute.test_series_feature_enabled = Boolean(registration.testSeriesFeatureEnabled);
+        institute.brandingEnabled = registration.brandingEnabled !== false;
+        institute.branding_enabled = registration.brandingEnabled !== false;
+        institute.maxVideoStorageGb = Number(registration.maxVideoStorageGb || 5);
+        institute.max_video_storage_gb = Number(registration.maxVideoStorageGb || 5);
+        institute.walletBalance = Number(registration.wpBalance || 0);
+        institute.aiWalletBalance = Number(registration.aiBalance || 0);
+        institute.allowedFeatures = registration.features;
+        await institute.save().catch(() => {});
+      }
+    } catch (instSyncErr) {
+      console.warn("[updateAdminDirectRegistration] Institute sync warning:", instSyncErr.message);
+    }
+
     // Also sync User if AI access toggled
     try {
-      const regId = String(registration._id || registration.id);
       await User.updateMany(
-        { $or: [{ institute: regId }, { trialRegistrationId: regId }] },
-        { aiAccessEnabled: (registration.features || []).includes("ai") }
+        { $or: [{ institute: regId }, { trialRegistrationId: regId }, { phone: cleanPhone }] },
+        { aiAccessEnabled: registration.aiEnabled !== false }
       );
     } catch (_) {}
 
@@ -825,6 +953,14 @@ export const convertTrialToInstitute = async (req, res) => {
       targetInstitute.subscriptionStart = new Date();
       targetInstitute.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days active
       targetInstitute.status = "active";
+      targetInstitute.aiEnabled = registration.aiEnabled !== false;
+      targetInstitute.aiStudentEnabled = Boolean(registration.aiStudentEnabled);
+      targetInstitute.recordedLecturesFeatureEnabled = registration.recordedLecturesFeatureEnabled !== false;
+      targetInstitute.releaseVideosFeatureEnabled = registration.releaseVideosFeatureEnabled !== false;
+      targetInstitute.quizFeatureEnabled = registration.quizFeatureEnabled !== false;
+      targetInstitute.testSeriesFeatureEnabled = Boolean(registration.testSeriesFeatureEnabled);
+      targetInstitute.brandingEnabled = registration.brandingEnabled !== false;
+      targetInstitute.maxVideoStorageGb = Number(registration.maxVideoStorageGb || 50);
       if (user) targetInstitute.adminUser = user._id;
       await targetInstitute.save();
     } else {
@@ -853,6 +989,14 @@ export const convertTrialToInstitute = async (req, res) => {
         walletBalance: registration.wpBalance || 10.0,
         aiWalletBalance: registration.aiBalance || 50.0,
         storageLimitMb: registration.storageLimitMb || 500,
+        aiEnabled: registration.aiEnabled !== false,
+        aiStudentEnabled: Boolean(registration.aiStudentEnabled),
+        recordedLecturesFeatureEnabled: registration.recordedLecturesFeatureEnabled !== false,
+        releaseVideosFeatureEnabled: registration.releaseVideosFeatureEnabled !== false,
+        quizFeatureEnabled: registration.quizFeatureEnabled !== false,
+        testSeriesFeatureEnabled: Boolean(registration.testSeriesFeatureEnabled),
+        brandingEnabled: registration.brandingEnabled !== false,
+        maxVideoStorageGb: Number(registration.maxVideoStorageGb || 50),
         tuitionType: "solo",
       });
     }
@@ -1157,13 +1301,35 @@ export const getAdminTrialDefaults = async (req, res) => {
 
 export const updateAdminTrialDefaults = async (req, res) => {
   try {
-    const { trialDays, wpBalance, aiBalance, storageLimitMb, features } = req.body;
+    const {
+      trialDays,
+      wpBalance,
+      aiBalance,
+      storageLimitMb,
+      features,
+      aiEnabled,
+      aiStudentEnabled,
+      recordedLecturesFeatureEnabled,
+      releaseVideosFeatureEnabled,
+      quizFeatureEnabled,
+      testSeriesFeatureEnabled,
+      brandingEnabled,
+      maxVideoStorageGb,
+    } = req.body;
 
     const payload = {
       trialDays: Number(trialDays || 7),
       wpBalance: Number(wpBalance ?? 10.0),
       aiBalance: Number(aiBalance ?? 50.0),
       storageLimitMb: Number(storageLimitMb ?? 500),
+      aiEnabled: aiEnabled !== undefined ? Boolean(aiEnabled) : true,
+      aiStudentEnabled: aiStudentEnabled !== undefined ? Boolean(aiStudentEnabled) : false,
+      recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== undefined ? Boolean(recordedLecturesFeatureEnabled) : true,
+      releaseVideosFeatureEnabled: releaseVideosFeatureEnabled !== undefined ? Boolean(releaseVideosFeatureEnabled) : true,
+      quizFeatureEnabled: quizFeatureEnabled !== undefined ? Boolean(quizFeatureEnabled) : true,
+      testSeriesFeatureEnabled: testSeriesFeatureEnabled !== undefined ? Boolean(testSeriesFeatureEnabled) : false,
+      brandingEnabled: brandingEnabled !== undefined ? Boolean(brandingEnabled) : true,
+      maxVideoStorageGb: Number(maxVideoStorageGb ?? 5),
       features: Array.isArray(features)
         ? features
         : [
@@ -1173,9 +1339,7 @@ export const updateAdminTrialDefaults = async (req, res) => {
             "tests",
             "whatsapp",
             "finances",
-            "ai",
             "homework",
-            "quizzes",
           ],
     };
 
