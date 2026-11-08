@@ -7,11 +7,15 @@ import {
   bookDemo,
   appForgotUserPassword,
   appResetUserPassword,
+  sendLoginOtp,
+  verifyLoginOtp,
 } from "../controllers/authController.js";
 import protect from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 router.post("/login", loginUser);
+router.post("/send-login-otp", sendLoginOtp);
+router.post("/verify-login-otp", verifyLoginOtp);
 router.post("/change-password", protect, changeUserPassword);
 router.post("/forgot-password", appForgotUserPassword);
 router.post("/reset-password", appResetUserPassword);

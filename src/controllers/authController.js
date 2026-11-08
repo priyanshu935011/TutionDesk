@@ -612,3 +612,235 @@ export const appResetUserPassword = async (req, res) => {
     return res.status(500).json({ message: error.message || "Could not reset password. Please try again." });
   }
 };
+
+export const sendLoginOtp = async (req, res) => {
+  try {
+    const rawIdentifier = (req.body.identifier || req.body.email || req.body.phone || "").toString().trim();
+    if (!rawIdentifier) {
+      return res.status(400).json({ success: false, message: "Email or Mobile Number is required." });
+    }
+
+    const isEmail = rawIdentifier.includes("@");
+    const cleanPhone = rawIdentifier.replace(/\D/g, "");
+    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+
+    let user = null;
+    if (isEmail) {
+      user = await User.findOne({ email: rawIdentifier.toLowerCase() });
+    } else if (cleanPhone.length >= 7) {
+      user = await User.findOne({
+        $or: [
+          { phone: cleanPhone },
+          { phone: last10 },
+          { phone: `+91${last10}` },
+          { phone: `91${last10}` },
+          { email: `teacher_${last10}@classtech.local` },
+          { email: `${last10}@direct.classtech.in` },
+        ],
+      });
+    }
+
+    // Fallback search Institute adminPhone
+    if (!user && cleanPhone.length >= 7) {
+      try {
+        const inst = await Institute.findOne({
+          $or: [
+            { adminPhone: cleanPhone },
+            { adminPhone: last10 },
+            { adminPhone: `+91${last10}` },
+            { adminPhone: `91${last10}` },
+          ],
+        });
+        if (inst && inst.adminUser) {
+          user = await User.findById(inst.adminUser);
+        }
+      } catch (_) {}
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Educator account not found for this mobile number or email. Please check or register a new trial.",
+      });
+    }
+
+    const allowedAppRoles = [
+      "institute_admin",
+      "admin",
+      "teacher",
+      "super_admin",
+      "tech_admin",
+      "sales_admin",
+      "sales_person",
+      "marketing_admin",
+      "marketing_person",
+      "owner",
+    ];
+    if (!allowedAppRoles.includes(user.role?.toLowerCase())) {
+      return res.status(403).json({
+        success: false,
+        message: "This account is registered as a student. Please log in using the Student Portal.",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    const otpToken = jwt.sign(
+      { userId: user._id, email: user.email, phone: user.phone, otpHash, purpose: "educator_otp_login" },
+      process.env.JWT_SECRET,
+      { expiresIn: "10m" }
+    );
+
+    const recipientPhone = cleanPhone || user.phone?.trim();
+
+    // 1. If mobile number entered or present, send SMS OTP via Hanu SMS
+    if (!isEmail && recipientPhone) {
+      try {
+        await sendSMSOTP(recipientPhone, otp);
+        return res.json({
+          success: true,
+          message: `A 6-digit verification code has been sent via SMS to ${recipientPhone}.`,
+          otpToken,
+          method: "phone",
+          phone: recipientPhone,
+        });
+      } catch (smsErr) {
+        console.error("SMS OTP login dispatch error:", smsErr.message);
+        if (user.email && !user.email.endsWith("@classtech.local")) {
+          await sendOTPEmail(user.email, user.name || "Educator", otp);
+          return res.json({
+            success: true,
+            message: `SMS failed. A 6-digit verification code was sent to your email (${user.email}).`,
+            otpToken,
+            method: "email",
+            email: user.email,
+          });
+        }
+        throw smsErr;
+      }
+    }
+
+    // 2. If email entered, send email OTP
+    if (user.email && !user.email.endsWith("@classtech.local")) {
+      await sendOTPEmail(user.email, user.name || "Educator", otp);
+      return res.json({
+        success: true,
+        message: `A 6-digit verification code has been sent to your email (${user.email}).`,
+        otpToken,
+        method: "email",
+        email: user.email,
+      });
+    }
+
+    // Fallback if recipientPhone is available
+    if (recipientPhone) {
+      await sendSMSOTP(recipientPhone, otp);
+      return res.json({
+        success: true,
+        message: `A 6-digit verification code has been sent via SMS to ${recipientPhone}.`,
+        otpToken,
+        method: "phone",
+        phone: recipientPhone,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: "No valid mobile number or email address found for this educator account.",
+    });
+  } catch (error) {
+    console.error("sendLoginOtp error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not send verification code. Please try again.",
+    });
+  }
+};
+
+export const verifyLoginOtp = async (req, res) => {
+  try {
+    const { otp, otpToken, fcmToken } = req.body;
+    if (!otp || !otpToken) {
+      return res.status(400).json({ success: false, message: "Verification code and session token are required." });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(otpToken, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification session has expired or is invalid. Please request a new code.",
+      });
+    }
+
+    if (decoded.purpose !== "educator_otp_login") {
+      return res.status(400).json({ success: false, message: "Invalid verification purpose." });
+    }
+
+    const inputHash = crypto.createHash("sha256").update(String(otp).trim()).digest("hex");
+    if (decoded.otpHash !== inputHash) {
+      return res.status(400).json({ success: false, message: "Incorrect verification code. Please check and try again." });
+    }
+
+    const user = await User.findById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Educator account not found." });
+    }
+
+    if (fcmToken) {
+      try {
+        const tokens = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
+        if (!tokens.includes(fcmToken)) {
+          tokens.push(fcmToken);
+          user.fcmTokens = tokens;
+          user.fcmToken = fcmToken;
+        }
+      } catch (_) {}
+    }
+
+    const institute = await buildInstituteState(user);
+
+    const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+    user.currentSessionId = sessionId;
+    user.lastActiveAt = new Date();
+    await user.save().catch(() => {});
+
+    if (redisClient && redisClient.isReady) {
+      try {
+        await redisClient.set(`active_session:user:${user._id}`, sessionId);
+      } catch (redisError) {
+        console.error("Redis set active session error:", redisError);
+      }
+    }
+
+    const token = generateToken({
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      sessionId,
+    });
+
+    return res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        institute,
+      },
+    });
+  } catch (error) {
+    console.error("verifyLoginOtp error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to complete login. Please try again.",
+    });
+  }
+};
