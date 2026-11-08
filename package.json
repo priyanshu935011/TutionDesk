@@ -17,6 +17,9 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@sentry/node": "^11.6.0",
     "@supabase/supabase-js": "^2.107.0",
