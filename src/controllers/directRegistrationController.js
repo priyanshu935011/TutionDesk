@@ -297,7 +297,7 @@ export const verifyOtpAndRegister = async (req, res) => {
     const existingInst = await Institute.findOne({ adminPhone: cleanPhone });
     let registration = await DirectRegistration.findOne({ phone: cleanPhone });
 
-    if (existingUser || existingInst || registration) {
+    if (existingUser && existingInst) {
       return res.status(400).json({
         success: false,
         isExistingUser: true,
@@ -313,21 +313,29 @@ export const verifyOtpAndRegister = async (req, res) => {
 
     const fcmList = fcmToken ? [fcmToken] : [];
 
-    registration = await DirectRegistration.create({
-      phone: cleanPhone,
-      name: regName,
-      instituteName: regInstName,
-      trialEndsAt: trialEnds,
-      status: "trial_active",
-      features: defaults.features,
-      wpBalance: defaults.wpBalance,
-      aiBalance: defaults.aiBalance,
-      storageLimitMb: defaults.storageLimitMb,
-      storageUsedBytes: 0,
-      ipAddress: clientIp,
-      fcmToken: JSON.stringify(fcmList),
-      lastActiveAt: new Date(),
-    });
+    if (!registration) {
+      registration = await DirectRegistration.create({
+        phone: cleanPhone,
+        name: regName,
+        instituteName: regInstName,
+        trialEndsAt: trialEnds,
+        status: "trial_active",
+        features: defaults.features,
+        wpBalance: defaults.wpBalance,
+        aiBalance: defaults.aiBalance,
+        storageLimitMb: defaults.storageLimitMb,
+        storageUsedBytes: 0,
+        ipAddress: clientIp,
+        fcmToken: JSON.stringify(fcmList),
+        lastActiveAt: new Date(),
+      });
+    } else {
+      registration.name = regName;
+      registration.instituteName = regInstName;
+      registration.trialEndsAt = trialEnds;
+      registration.status = "trial_active";
+      await registration.save().catch(() => {});
+    }
 
     // 3. Dispatch WhatsApp Notification to 9934597030 on every new registration
     try {
@@ -363,12 +371,54 @@ export const verifyOtpAndRegister = async (req, res) => {
 
     const regId = String(registration._id || registration.id);
 
-    // 4. Ensure matching User exists in User model (Without adding to institutes table)
+    // 4. Ensure matching Institute exists in institutes table with regId to satisfy foreign key constraints across users, batches, students, notes
+    let institute = await Institute.findOne({
+      $or: [{ _id: regId }, { id: regId }, { adminPhone: cleanPhone }]
+    });
+
+    if (!institute) {
+      institute = await Institute.create({
+        _id: regId,
+        id: regId,
+        name: regInstName,
+        ownerName: regName,
+        adminEmail: `${cleanPhone}@direct.classtech.in`,
+        adminPhone: cleanPhone,
+        subscriptionPlan: "trial",
+        subscriptionAmount: 0,
+        trialDays: defaults.trialDays || 7,
+        subscriptionStart: new Date(),
+        subscriptionEnd: trialEnds,
+        status: "active",
+        tuitionType: "solo",
+        allowedFeatures: defaults.features || [
+          "attendance",
+          "notes",
+          "marks",
+          "tests",
+          "whatsapp",
+          "finances",
+          "ai",
+          "homework",
+          "quizzes",
+        ],
+        walletBalance: Number(defaults.wpBalance || 10.0),
+        aiWalletBalance: Number(defaults.aiBalance || 50.0),
+        storageLimitMb: Number(defaults.storageLimitMb || 500),
+        brandingEnabled: true,
+      });
+    }
+
+    const instId = String(institute._id || institute.id);
+
+    // 5. Ensure matching User exists in User model pointing to the valid institute ID
+    let isNewRegistration = false;
     let user = await User.findOne({
       $or: [{ phone: cleanPhone }, { email: `${cleanPhone}@direct.classtech.in` }],
     });
 
     if (!user) {
+      isNewRegistration = true;
       const dummyPassword = crypto.randomBytes(16).toString("hex");
       const hashedPassword = await bcrypt.hash(dummyPassword, 10);
       user = await User.create({
@@ -377,21 +427,26 @@ export const verifyOtpAndRegister = async (req, res) => {
         email: `${cleanPhone}@direct.classtech.in`,
         password: hashedPassword,
         role: "institute_admin",
-        institute: regId,
+        institute: instId,
         isTrialRegistration: true,
         trialRegistrationId: regId,
         aiAccessEnabled: (registration.features || []).includes("ai"),
       });
     } else {
       user.name = registration.name;
-      user.institute = regId;
+      user.institute = instId;
       user.isTrialRegistration = true;
       user.trialRegistrationId = regId;
       user.aiAccessEnabled = (registration.features || []).includes("ai");
       await user.save().catch(() => {});
     }
 
-    // 5. Generate Session and JWT Token
+    if (institute && (!institute.adminUser || String(institute.adminUser) !== String(user._id))) {
+      institute.adminUser = user._id;
+      await institute.save().catch(() => {});
+    }
+
+    // 6. Generate Session and JWT Token
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
     user.currentSessionId = sessionId;
     user.lastActiveAt = new Date();
@@ -409,7 +464,7 @@ export const verifyOtpAndRegister = async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        institute: regId,
+        institute: instId,
         isDirectTrial: true,
         sessionId,
       },
@@ -424,11 +479,11 @@ export const verifyOtpAndRegister = async (req, res) => {
     const isExpired = registration.status === "expired" || trialEndMs < now;
 
     const institutePayload = {
-      id: regId,
-      _id: regId,
+      id: instId,
+      _id: instId,
       name: registration.instituteName,
-      subscriptionPlan: "7-day-trial",
-      trialDays: 7,
+      subscriptionPlan: "trial",
+      trialDays: defaults.trialDays || 7,
       subscriptionStart: registration.createdAt,
       subscriptionEnd: registration.trialEndsAt,
       status: registration.status,
@@ -658,33 +713,50 @@ export const convertTrialToInstitute = async (req, res) => {
       $or: [{ phone: cleanPhone }, { email: `${cleanPhone}@direct.classtech.in` }],
     });
 
-    // Create Institute in institutes table
-    const newInstitute = await Institute.create({
-      name: registration.instituteName || "My Academy",
-      adminUser: user ? user._id : null,
-      adminEmail: user?.email || `${cleanPhone}@classtech.in`,
-      adminPhone: cleanPhone,
-      subscriptionPlan,
-      subscriptionAmount: Number(subscriptionAmount || 0),
-      subscriptionStart: new Date(),
-      subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days active
-      status: "active",
-      allowedFeatures: registration.features || [
-        "attendance",
-        "notes",
-        "marks",
-        "tests",
-        "whatsapp",
-        "finances",
-        "ai",
-      ],
-      walletBalance: registration.wpBalance || 10.0,
-      aiWalletBalance: registration.aiBalance || 50.0,
-      storageLimitMb: registration.storageLimitMb || 500,
-      tuitionType: "solo",
+    // Update or create Institute in institutes table
+    let targetInstitute = await Institute.findOne({
+      $or: [{ _id: id }, { id }, { adminPhone: cleanPhone }],
     });
 
-    const newInstId = String(newInstitute._id || newInstitute.id);
+    if (targetInstitute) {
+      targetInstitute.subscriptionPlan = subscriptionPlan;
+      targetInstitute.subscriptionAmount = Number(subscriptionAmount || 0);
+      targetInstitute.subscriptionStart = new Date();
+      targetInstitute.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days active
+      targetInstitute.status = "active";
+      if (user) targetInstitute.adminUser = user._id;
+      await targetInstitute.save();
+    } else {
+      targetInstitute = await Institute.create({
+        _id: id,
+        id: id,
+        name: registration.instituteName || "My Academy",
+        ownerName: registration.name || "Educator",
+        adminUser: user ? user._id : null,
+        adminEmail: user?.email || `${cleanPhone}@classtech.in`,
+        adminPhone: cleanPhone,
+        subscriptionPlan,
+        subscriptionAmount: Number(subscriptionAmount || 0),
+        subscriptionStart: new Date(),
+        subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days active
+        status: "active",
+        allowedFeatures: registration.features || [
+          "attendance",
+          "notes",
+          "marks",
+          "tests",
+          "whatsapp",
+          "finances",
+          "ai",
+        ],
+        walletBalance: registration.wpBalance || 10.0,
+        aiWalletBalance: registration.aiBalance || 50.0,
+        storageLimitMb: registration.storageLimitMb || 500,
+        tuitionType: "solo",
+      });
+    }
+
+    const newInstId = String(targetInstitute._id || targetInstitute.id);
 
     // Update DirectRegistration status
     registration.status = "converted";

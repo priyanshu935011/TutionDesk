@@ -12,7 +12,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
   "activity_logs", "activitylogs",
-  "staff_attendances", "institute_expenses", "institute_incomes", "staff_salaries"
+  "staff_attendances", "institute_expenses", "institute_incomes", "staff_salaries",
+  "direct_registrations"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -1164,6 +1165,15 @@ class SupabaseDocument {
       delete payload.whatsappSettings;
       delete payload.staff_name;
       delete payload.staffName;
+      delete payload.storage_limit_mb;
+      delete payload.storageLimitMb;
+    }
+
+    if (this._tableName === "users") {
+      delete payload.is_trial_registration;
+      delete payload.isTrialRegistration;
+      delete payload.trial_registration_id;
+      delete payload.trialRegistrationId;
     }
 
     if (this._tableName === "students") {
@@ -1322,6 +1332,13 @@ class SupabaseDocument {
             attempt++;
             continue;
           }
+
+          if (this._tableName === "users" && error.message && error.message.includes("users_institute_id_fkey")) {
+            console.warn("[SupabaseModel] users_institute_id_fkey on update. Setting institute_id to null and retrying...");
+            payload.institute_id = null;
+            attempt++;
+            continue;
+          }
         }
 
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
@@ -1471,6 +1488,13 @@ class SupabaseDocument {
           if (badCol) {
             recordMissingColumn(this._tableName, badCol);
             delete payload[badCol];
+            attempt++;
+            continue;
+          }
+
+          if (this._tableName === "users" && error.message && error.message.includes("users_institute_id_fkey")) {
+            console.warn("[SupabaseModel] users_institute_id_fkey on update. Setting institute_id to null and retrying...");
+            payload.institute_id = null;
             attempt++;
             continue;
           }
@@ -2724,6 +2748,15 @@ class SupabaseModel {
       delete payload.whatsappSettings;
       delete payload.absent_contact_phone;
       delete payload.absentContactPhone;
+      delete payload.storage_limit_mb;
+      delete payload.storageLimitMb;
+    }
+
+    if (this.tableName === "users") {
+      delete payload.is_trial_registration;
+      delete payload.isTrialRegistration;
+      delete payload.trial_registration_id;
+      delete payload.trialRegistrationId;
     }
 
     if (this.tableName === "students") {
@@ -2966,6 +2999,13 @@ class SupabaseModel {
         if (badCol) {
           recordMissingColumn(this.tableName, badCol);
           delete payload[badCol];
+          attempt++;
+          continue;
+        }
+
+        if (this.tableName === "users" && error.message && error.message.includes("users_institute_id_fkey")) {
+          console.warn("[SupabaseModel] users_institute_id_fkey on insert. Setting institute_id to null and retrying...");
+          payload.institute_id = null;
           attempt++;
           continue;
         }
