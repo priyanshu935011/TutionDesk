@@ -427,24 +427,51 @@ export const verifyOtpAndRegister = async (req, res) => {
       isNewRegistration = true;
       const dummyPassword = crypto.randomBytes(16).toString("hex");
       const hashedPassword = await bcrypt.hash(dummyPassword, 10);
-      user = await User.create({
-        name: registration.name,
-        phone: cleanPhone,
-        email: `${cleanPhone}@direct.classtech.in`,
-        password: hashedPassword,
-        role: "institute_admin",
-        institute: instId,
-        isTrialRegistration: true,
-        trialRegistrationId: regId,
-        aiAccessEnabled: (registration.features || []).includes("ai"),
-      });
+      try {
+        user = await User.create({
+          name: registration.name,
+          phone: cleanPhone,
+          email: `${cleanPhone}@direct.classtech.in`,
+          password: hashedPassword,
+          role: "institute_admin",
+          institute: instId,
+          isTrialRegistration: true,
+          trialRegistrationId: regId,
+          aiAccessEnabled: (registration.features || []).includes("ai"),
+        });
+      } catch (userCreateErr) {
+        if (userCreateErr.message && userCreateErr.message.includes("users_institute_id_fkey")) {
+          console.warn("[DirectRegistration] FK constraint caught on User.create. Creating user with institute: null");
+          user = await User.create({
+            name: registration.name,
+            phone: cleanPhone,
+            email: `${cleanPhone}@direct.classtech.in`,
+            password: hashedPassword,
+            role: "institute_admin",
+            institute: null,
+            isTrialRegistration: true,
+            trialRegistrationId: regId,
+            aiAccessEnabled: (registration.features || []).includes("ai"),
+          });
+        } else {
+          throw userCreateErr;
+        }
+      }
     } else {
       user.name = registration.name;
       user.institute = instId;
       user.isTrialRegistration = true;
       user.trialRegistrationId = regId;
       user.aiAccessEnabled = (registration.features || []).includes("ai");
-      await user.save().catch(() => {});
+      try {
+        await user.save();
+      } catch (userSaveErr) {
+        if (userSaveErr.message && userSaveErr.message.includes("users_institute_id_fkey")) {
+          console.warn("[DirectRegistration] FK constraint caught on user.save. Saving user with institute: null");
+          user.institute = null;
+          await user.save().catch(() => {});
+        }
+      }
     }
 
     if (institute && (!institute.adminUser || String(institute.adminUser) !== String(user._id))) {
