@@ -12,6 +12,7 @@ import { sendSMSOTP } from "../utils/smsHelper.js";
 import { sendMessage } from "../services/whatsappService.js";
 import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
+import { supabase, readFallbackData, writeFallbackData } from "../utils/supabaseModel.js";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
@@ -549,10 +550,78 @@ export const verifyOtpAndRegister = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Sync earlier local fallback registrations to Supabase PostgreSQL table
+ */
+export const syncFallbackRecordsToSupabase = async () => {
+  let synced = 0;
+  try {
+    const fallbackList = readFallbackData("direct_registrations") || [];
+    if (Array.isArray(fallbackList) && fallbackList.length > 0) {
+      for (const item of fallbackList) {
+        if (!item || !item.phone) continue;
+        const cleanPhone = String(item.phone).trim();
+        const { data: existing } = await supabase
+          .from("direct_registrations")
+          .select("id")
+          .eq("phone", cleanPhone)
+          .maybeSingle();
+
+        if (!existing) {
+          const payload = {
+            id: item.id || item._id || crypto.randomUUID(),
+            phone: cleanPhone,
+            name: item.name || "Educator",
+            institute_name: item.instituteName || item.institute_name || "My Academy",
+            trial_ends_at: item.trialEndsAt || item.trial_ends_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            status: item.status || "trial_active",
+            features: Array.isArray(item.features)
+              ? item.features
+              : ["attendance", "notes", "marks", "tests", "whatsapp", "finances", "ai", "homework", "quizzes"],
+            wp_balance: Number(item.wpBalance ?? item.wp_balance ?? 10.0),
+            ai_balance: Number(item.aiBalance ?? item.ai_balance ?? 50.0),
+            storage_limit_mb: Number(item.storageLimitMb ?? item.storage_limit_mb ?? 500),
+            storage_used_bytes: Number(item.storageUsedBytes ?? item.storage_used_bytes ?? 0),
+            ip_address: item.ipAddress || item.ip_address || null,
+            fcm_token: Array.isArray(item.fcmToken) ? item.fcmToken : [],
+            last_active_at: item.lastActiveAt || item.last_active_at || new Date(),
+            created_at: item.createdAt || item.created_at || new Date(),
+            updated_at: new Date(),
+          };
+          const { error: insErr } = await supabase.from("direct_registrations").insert(payload);
+          if (!insErr) synced++;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[DirectRegistration] syncFallbackRecordsToSupabase warning:", err.message);
+  }
+  return synced;
+};
+
+/**
+ * Super Admin manual trigger to sync fallback registrations into Supabase
+ */
+export const syncAdminDirectRegistrations = async (req, res) => {
+  try {
+    const syncedCount = await syncFallbackRecordsToSupabase();
+    return res.json({
+      success: true,
+      message: `Database synchronization complete. ${syncedCount} record(s) synced to Supabase.`,
+      syncedCount,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * Get all direct registrations with pagination, search, status filter
  */
 export const getAdminDirectRegistrations = async (req, res) => {
   try {
+    // Attempt auto-sync of any earlier fallback records on load
+    await syncFallbackRecordsToSupabase().catch(() => {});
+
     const { search = "", status = "", page = 1, limit = 50 } = req.query;
 
     const query = {};
@@ -789,37 +858,81 @@ export const convertTrialToInstitute = async (req, res) => {
 
 /**
  * Permanently delete an app trial registration and all associated records
- * (User, Institute, Batches, Students, Notes, Notices, Redis sessions)
+ * (User, Institute, Batches, Students, Notes, Notices, Redis sessions, Fallback JSON)
  */
 export const deleteAdminDirectRegistration = async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) {
-      return res.status(400).json({ success: false, message: "Registration ID is required" });
+      return res.status(400).json({ success: false, message: "Registration ID or phone is required" });
     }
 
+    const targetParam = String(id).trim();
+
+    // 1. Try finding in DirectRegistration model
     let registration = null;
     try {
-      registration = await DirectRegistration.findById(id);
+      registration = await DirectRegistration.findById(targetParam);
     } catch (_) {}
 
     if (!registration) {
-      registration = await DirectRegistration.findOne({
-        $or: [{ _id: id }, { id }, { phone: id }],
-      });
+      try {
+        registration = await DirectRegistration.findOne({
+          $or: [{ _id: targetParam }, { id: targetParam }, { phone: targetParam }],
+        });
+      } catch (_) {}
     }
 
-    if (!registration) {
-      return res.status(404).json({ success: false, message: "Trial registration not found" });
-    }
-
-    const regId = String(registration._id || registration.id);
-    const cleanPhone = String(registration.phone || "").trim();
-    const convertedInstId = registration.convertedToInstituteId
-      ? String(registration.convertedToInstituteId)
+    // 2. Also check raw fallback array
+    const fallbackList = readFallbackData("direct_registrations") || [];
+    const fallbackItem = Array.isArray(fallbackList)
+      ? fallbackList.find(
+          (item) =>
+            item &&
+            (String(item.id || item._id) === targetParam ||
+              String(item.phone) === targetParam)
+        )
       : null;
 
-    // 1. Locate all related user records
+    // 3. Check directly in Supabase table direct_registrations
+    let sbItem = null;
+    try {
+      const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(targetParam);
+      let sbQuery = supabase.from("direct_registrations").select("*");
+      if (isUuid) {
+        sbQuery = sbQuery.or(`id.eq.${targetParam},phone.eq.${targetParam}`);
+      } else {
+        sbQuery = sbQuery.eq("phone", targetParam);
+      }
+      const { data: sbRows } = await sbQuery.limit(1);
+      if (sbRows && sbRows.length > 0) {
+        sbItem = sbRows[0];
+      }
+    } catch (_) {}
+
+    // Extract identifiers
+    const regId = String(
+      registration?._id || registration?.id || sbItem?.id || fallbackItem?._id || fallbackItem?.id || targetParam
+    );
+    const cleanPhone = String(
+      registration?.phone ||
+      sbItem?.phone ||
+      fallbackItem?.phone ||
+      (targetParam.match(/^\d{10}$/) ? targetParam : "")
+    ).trim();
+    const educatorName = registration?.name || sbItem?.name || fallbackItem?.name || "Educator";
+    const convertedInstId =
+      registration?.convertedToInstituteId ||
+      fallbackItem?.convertedToInstituteId ||
+      sbItem?.converted_to_institute_id
+        ? String(
+            registration?.convertedToInstituteId ||
+            fallbackItem?.convertedToInstituteId ||
+            sbItem?.converted_to_institute_id
+          )
+        : null;
+
+    // 4. Locate all related user records
     const userQuery = [];
     if (cleanPhone) {
       userQuery.push({ phone: cleanPhone });
@@ -827,7 +940,6 @@ export const deleteAdminDirectRegistration = async (req, res) => {
     }
     if (regId) {
       userQuery.push({ institute: regId });
-      userQuery.push({ trialRegistrationId: regId });
     }
     if (convertedInstId) {
       userQuery.push({ institute: convertedInstId });
@@ -835,11 +947,13 @@ export const deleteAdminDirectRegistration = async (req, res) => {
 
     let users = [];
     if (userQuery.length > 0) {
-      users = await User.find({ $or: userQuery }).catch(() => []);
+      try {
+        users = await User.find({ $or: userQuery });
+      } catch (_) {}
     }
     const userIds = users.map((u) => String(u._id || u.id)).filter(Boolean);
 
-    // 2. Locate all related institute records
+    // 5. Locate all related institute records
     const instituteQuery = [];
     if (regId) {
       instituteQuery.push({ _id: regId }, { id: regId });
@@ -856,7 +970,9 @@ export const deleteAdminDirectRegistration = async (req, res) => {
 
     let institutes = [];
     if (instituteQuery.length > 0) {
-      institutes = await Institute.find({ $or: instituteQuery }).catch(() => []);
+      try {
+        institutes = await Institute.find({ $or: instituteQuery });
+      } catch (_) {}
     }
     const instIds = Array.from(
       new Set([
@@ -866,7 +982,7 @@ export const deleteAdminDirectRegistration = async (req, res) => {
       ])
     );
 
-    // 3. Delete dependent child records (students, batches, notes, notices)
+    // 6. Delete dependent child records (students, batches, notes, notices)
     const entityFilter = [];
     if (userIds.length > 0) {
       entityFilter.push({ user: { $in: userIds } });
@@ -885,7 +1001,7 @@ export const deleteAdminDirectRegistration = async (req, res) => {
       ]);
     }
 
-    // 4. Delete Users
+    // 7. Delete Users
     if (userIds.length > 0) {
       for (const uid of userIds) {
         await User.findByIdAndDelete(uid).catch(() => {});
@@ -894,6 +1010,9 @@ export const deleteAdminDirectRegistration = async (req, res) => {
     }
     if (cleanPhone) {
       await User.deleteMany({ phone: cleanPhone }).catch(() => {});
+      try {
+        await supabase.from("users").delete().eq("phone", cleanPhone);
+      } catch (_) {}
     }
     if (instIds.length > 0) {
       await User.deleteMany({
@@ -901,7 +1020,7 @@ export const deleteAdminDirectRegistration = async (req, res) => {
       }).catch(() => {});
     }
 
-    // 5. Delete Institute(s)
+    // 8. Delete Institute(s)
     if (instIds.length > 0) {
       for (const iid of instIds) {
         await Institute.findByIdAndDelete(iid).catch(() => {});
@@ -912,14 +1031,47 @@ export const deleteAdminDirectRegistration = async (req, res) => {
     }
     if (cleanPhone) {
       await Institute.deleteMany({ adminPhone: cleanPhone }).catch(() => {});
+      try {
+        await supabase.from("institutes").delete().eq("admin_phone", cleanPhone);
+      } catch (_) {}
     }
 
-    // 6. Delete Direct Registration record
+    // 9. Delete Direct Registration from Supabase database table directly
+    try {
+      if (regId && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(regId)) {
+        await supabase.from("direct_registrations").delete().eq("id", regId);
+      }
+      if (cleanPhone) {
+        await supabase.from("direct_registrations").delete().eq("phone", cleanPhone);
+      }
+      if (targetParam && targetParam !== regId) {
+        await supabase.from("direct_registrations").delete().eq("phone", targetParam);
+      }
+    } catch (_) {}
+
+    // Model deleteOne
     await DirectRegistration.deleteOne({
-      $or: [{ _id: regId }, { id: regId }, { phone: cleanPhone }],
+      $or: [{ _id: regId }, { id: regId }, ...(cleanPhone ? [{ phone: cleanPhone }] : [])],
     }).catch(() => {});
 
-    // 7. Invalidate sessions and OTP trackers in Redis and memory
+    // 10. Remove from local fallback array if present (handles earlier accounts stored in JSON)
+    try {
+      const currentFallback = readFallbackData("direct_registrations") || [];
+      if (Array.isArray(currentFallback)) {
+        const updatedFallback = currentFallback.filter((item) => {
+          if (!item) return false;
+          const iId = String(item.id || item._id);
+          const iPhone = String(item.phone || "");
+          if (iId === regId || iId === targetParam) return false;
+          if (cleanPhone && iPhone === cleanPhone) return false;
+          if (iPhone === targetParam) return false;
+          return true;
+        });
+        writeFallbackData("direct_registrations", updatedFallback);
+      }
+    } catch (_) {}
+
+    // 11. Invalidate sessions and OTP trackers in Redis and memory
     try {
       if (cleanPhone) {
         memoryOtpStore.delete(cleanPhone);
@@ -937,7 +1089,7 @@ export const deleteAdminDirectRegistration = async (req, res) => {
       }
     } catch (_) {}
 
-    // 8. Clear Cache Patterns
+    // 12. Clear Cache Patterns
     try {
       await clearCachePattern("teacher:dashboard:*");
       await clearCachePattern("student:dashboard:*");
@@ -947,10 +1099,10 @@ export const deleteAdminDirectRegistration = async (req, res) => {
 
     return res.json({
       success: true,
-      message: `Trial account for ${registration.name || "Educator"} (+91 ${cleanPhone}) deleted successfully.`,
+      message: `Account ${cleanPhone ? `for +91 ${cleanPhone}` : `(${targetParam})`} deleted successfully.`,
       deleted: {
         registrationId: regId,
-        phone: cleanPhone,
+        phone: cleanPhone || targetParam,
         usersDeleted: userIds.length,
         institutesDeleted: instIds.length,
       },
