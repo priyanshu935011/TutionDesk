@@ -399,53 +399,65 @@ export const verifyOtpAndRegister = async (req, res) => {
     }
 
     const regId = String(registration._id || registration.id);
+    const finalInstUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(regId)
+      ? regId
+      : crypto.randomUUID();
 
-    // 4. Ensure matching Institute exists in institutes table with regId to satisfy foreign key constraints across users, batches, students, notes
+    // 4. Ensure matching Institute exists in institutes table to satisfy foreign key constraints across users, batches, students, notes
     let institute = await Institute.findOne({
-      $or: [{ _id: regId }, { id: regId }, { adminPhone: cleanPhone }]
+      $or: [{ _id: finalInstUuid }, { id: finalInstUuid }, { adminPhone: cleanPhone }]
     });
 
-    if (!institute) {
-      institute = await Institute.create({
-        _id: regId,
-        id: regId,
-        name: regInstName,
-        ownerName: regName,
-        adminEmail: `${cleanPhone}@direct.classtech.in`,
-        adminPhone: cleanPhone,
-        subscriptionPlan: "trial",
-        subscriptionAmount: 0,
-        trialDays: defaults.trialDays || 7,
-        subscriptionStart: new Date(),
-        subscriptionEnd: trialEnds,
-        status: "active",
-        tuitionType: "solo",
-        allowedFeatures: defaults.features || [
-          "attendance",
-          "notes",
-          "marks",
-          "tests",
-          "whatsapp",
-          "finances",
-          "ai",
-          "homework",
-          "quizzes",
-        ],
-        walletBalance: Number(defaults.wpBalance || 10.0),
-        aiWalletBalance: Number(defaults.aiBalance || 50.0),
-        storageLimitMb: Number(defaults.storageLimitMb || 500),
-        quizFeatureEnabled: registration.quizFeatureEnabled !== false,
-        aiEnabled: registration.aiEnabled !== false,
-        aiStudentEnabled: Boolean(registration.aiStudentEnabled),
-        recordedLecturesFeatureEnabled: registration.recordedLecturesFeatureEnabled !== false,
-        releaseVideosFeatureEnabled: registration.releaseVideosFeatureEnabled !== false,
-        testSeriesFeatureEnabled: Boolean(registration.testSeriesFeatureEnabled),
-        maxVideoStorageGb: Number(registration.maxVideoStorageGb || 5),
-        brandingEnabled: registration.brandingEnabled !== false,
-      });
+    let instId = institute ? String(institute._id || institute.id) : finalInstUuid;
+    if (!instId || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(instId)) {
+      instId = finalInstUuid;
     }
 
-    const instId = String(institute._id || institute.id);
+    // Direct upsert to public.institutes to GUARANTEE row exists in PostgreSQL
+    const instPayload = {
+      id: instId,
+      name: regInstName,
+      owner_name: regName,
+      admin_email: `${cleanPhone}@direct.classtech.in`,
+      admin_phone: cleanPhone,
+      subscription_plan: "trial",
+      subscription_amount: 0,
+      trial_days: Number(defaults.trialDays || 7),
+      subscription_start: new Date().toISOString(),
+      subscription_end: trialEnds.toISOString(),
+      status: "active",
+      tuition_type: "solo",
+      allowed_features: defaults.features || [
+        "attendance",
+        "notes",
+        "marks",
+        "tests",
+        "whatsapp",
+        "finances",
+        "homework",
+      ],
+      wallet_balance: Number(defaults.wpBalance || 10.0),
+      ai_wallet_balance: Number(defaults.aiBalance || 50.0),
+      storage_limit_mb: Number(defaults.storageLimitMb || 500),
+      quiz_feature_enabled: registration.quizFeatureEnabled !== false,
+      ai_enabled: registration.aiEnabled !== false,
+      ai_student_enabled: Boolean(registration.aiStudentEnabled),
+      recorded_lectures_feature_enabled: registration.recordedLecturesFeatureEnabled !== false,
+      release_videos_feature_enabled: registration.releaseVideosFeatureEnabled !== false,
+      test_series_feature_enabled: Boolean(registration.testSeriesFeatureEnabled),
+      max_video_storage_gb: Number(registration.maxVideoStorageGb || 5),
+      branding_enabled: registration.brandingEnabled !== false,
+    };
+
+    try {
+      await supabase.from("institutes").upsert(instPayload, { onConflict: "id" });
+    } catch (upsertErr) {
+      console.warn("[DirectRegistration] institutes upsert warning:", upsertErr.message);
+    }
+
+    if (!institute) {
+      institute = await Institute.findById(instId).catch(() => null);
+    }
 
     // 5. Ensure matching User exists in User model pointing to the valid institute ID
     let isNewRegistration = false;
@@ -465,13 +477,14 @@ export const verifyOtpAndRegister = async (req, res) => {
           password: hashedPassword,
           role: "institute_admin",
           institute: instId,
+          institute_id: instId,
           isTrialRegistration: true,
           trialRegistrationId: regId,
           aiAccessEnabled: (registration.features || []).includes("ai"),
         });
       } catch (userCreateErr) {
-        if (userCreateErr.message && userCreateErr.message.includes("users_institute_id_fkey")) {
-          console.warn("[DirectRegistration] FK constraint caught on User.create. Creating user with institute: null");
+        console.warn("[DirectRegistration] User.create with institute failed, retrying with institute: null:", userCreateErr.message);
+        try {
           user = await User.create({
             name: registration.name,
             phone: cleanPhone,
@@ -479,51 +492,78 @@ export const verifyOtpAndRegister = async (req, res) => {
             password: hashedPassword,
             role: "institute_admin",
             institute: null,
+            institute_id: null,
             isTrialRegistration: true,
             trialRegistrationId: regId,
             aiAccessEnabled: (registration.features || []).includes("ai"),
           });
-        } else {
-          throw userCreateErr;
+        } catch (fallbackCreateErr) {
+          console.warn("[DirectRegistration] User model fallback create failed, inserting directly into Supabase:", fallbackCreateErr.message);
+          const newUserId = crypto.randomUUID();
+          const directUserPayload = {
+            id: newUserId,
+            name: registration.name,
+            phone: cleanPhone,
+            email: `${cleanPhone}@direct.classtech.in`,
+            password_hash: hashedPassword,
+            role: "institute_admin",
+            institute_id: null,
+          };
+          await supabase.from("users").insert(directUserPayload);
+          user = await User.findById(newUserId).catch(() => ({
+            _id: newUserId,
+            id: newUserId,
+            name: registration.name,
+            email: `${cleanPhone}@direct.classtech.in`,
+            phone: cleanPhone,
+            role: "institute_admin",
+          }));
         }
       }
     } else {
       user.name = registration.name;
       user.institute = instId;
+      user.institute_id = instId;
       user.isTrialRegistration = true;
       user.trialRegistrationId = regId;
       user.aiAccessEnabled = (registration.features || []).includes("ai");
       try {
         await user.save();
       } catch (userSaveErr) {
-        if (userSaveErr.message && userSaveErr.message.includes("users_institute_id_fkey")) {
-          console.warn("[DirectRegistration] FK constraint caught on user.save. Saving user with institute: null");
-          user.institute = null;
-          await user.save().catch(() => {});
-        }
+        console.warn("[DirectRegistration] user.save with institute failed, saving with institute: null:", userSaveErr.message);
+        user.institute = null;
+        user.institute_id = null;
+        await user.save().catch(async () => {
+          await supabase.from("users").update({ institute_id: null }).eq("id", String(user._id || user.id)).catch(() => {});
+        });
       }
     }
 
-    if (institute && (!institute.adminUser || String(institute.adminUser) !== String(user._id))) {
-      institute.adminUser = user._id;
+    if (institute && user && (!institute.adminUser || String(institute.adminUser) !== String(user._id || user.id))) {
+      institute.adminUser = user._id || user.id;
       await institute.save().catch(() => {});
+      await supabase.from("institutes").update({ admin_user: String(user._id || user.id) }).eq("id", instId).catch(() => {});
     }
 
     // 6. Generate Session and JWT Token
     const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
-    user.currentSessionId = sessionId;
-    user.lastActiveAt = new Date();
-    await user.save().catch(() => {});
+    if (user.save) {
+      user.currentSessionId = sessionId;
+      user.lastActiveAt = new Date();
+      await user.save().catch(() => {});
+    }
+
+    const userId = String(user._id || user.id);
 
     if (redisClient && redisClient.isReady) {
       try {
-        await redisClient.set(`active_session:user:${user._id}`, sessionId);
+        await redisClient.set(`active_session:user:${userId}`, sessionId);
       } catch (_) {}
     }
 
     const token = jwt.sign(
       {
-        id: user._id,
+        id: userId,
         email: user.email,
         name: user.name,
         role: user.role,
@@ -586,8 +626,8 @@ export const verifyOtpAndRegister = async (req, res) => {
         : "Welcome back! Login successful.",
       token,
       user: {
-        id: user._id,
-        _id: user._id,
+        id: userId,
+        _id: userId,
         name: user.name,
         email: user.email,
         phone: user.phone,

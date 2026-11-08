@@ -1188,6 +1188,11 @@ class SupabaseDocument {
       delete payload.isTrialRegistration;
       delete payload.trial_registration_id;
       delete payload.trialRegistrationId;
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        const rawInst = payload.institute_id || payload.institute;
+        payload.institute_id = rawInst ? toValidUUID(rawInst) : null;
+        delete payload.institute;
+      }
     }
 
     if (this._tableName === "students") {
@@ -1358,9 +1363,10 @@ class SupabaseDocument {
             continue;
           }
 
-          if (this._tableName === "users" && error.message && error.message.includes("users_institute_id_fkey")) {
+          if (this._tableName === "users" && (error.code === "23503" || (error.message && error.message.includes("users_institute_id_fkey")))) {
             console.warn("[SupabaseModel] users_institute_id_fkey on update. Setting institute_id to null and retrying...");
             payload.institute_id = null;
+            delete payload.institute;
             attempt++;
             continue;
           }
@@ -1517,9 +1523,10 @@ class SupabaseDocument {
             continue;
           }
 
-          if (this._tableName === "users" && error.message && error.message.includes("users_institute_id_fkey")) {
+          if (this._tableName === "users" && (error.code === "23503" || (error.message && error.message.includes("users_institute_id_fkey")))) {
             console.warn("[SupabaseModel] users_institute_id_fkey on update. Setting institute_id to null and retrying...");
             payload.institute_id = null;
+            delete payload.institute;
             attempt++;
             continue;
           }
@@ -2782,6 +2789,11 @@ class SupabaseModel {
       delete payload.isTrialRegistration;
       delete payload.trial_registration_id;
       delete payload.trialRegistrationId;
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        const rawInst = payload.institute_id || payload.institute;
+        payload.institute_id = rawInst ? toValidUUID(rawInst) : null;
+        delete payload.institute;
+      }
     }
 
     if (this.tableName === "students") {
@@ -3039,9 +3051,10 @@ class SupabaseModel {
           continue;
         }
 
-        if (this.tableName === "users" && error.message && error.message.includes("users_institute_id_fkey")) {
+        if (this.tableName === "users" && (error.code === "23503" || (error.message && error.message.includes("users_institute_id_fkey")))) {
           console.warn("[SupabaseModel] users_institute_id_fkey on insert. Setting institute_id to null and retrying...");
           payload.institute_id = null;
+          delete payload.institute;
           attempt++;
           continue;
         }
