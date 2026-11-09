@@ -26,6 +26,7 @@ import {
   getVideoWatchAnalytics,
   uploadThumbnail,
   extendVideoValidity,
+  getSuperAdminVideoStats,
 } from "../controllers/videoController.js";
 import protect from "../middleware/authMiddleware.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
@@ -59,6 +60,7 @@ router.use(protect);
 // Super Admin Settings
 router.get("/super-admin/bunny-settings", getBunnySettings);
 router.put("/super-admin/bunny-settings", updateBunnySettings);
+router.get("/super-admin/stats", getSuperAdminVideoStats);
 router.put("/super-admin/institute-settings/:instituteId", updateInstituteVideoSettings);
 
 // Direct Upload Flow

@@ -2787,3 +2787,92 @@ export const extendVideoValidity = async (req, res) => {
   }
 };
 
+/**
+ * Super Admin: Video Analytics & Storage Overview across all institutes
+ */
+export const getSuperAdminVideoStats = async (req, res) => {
+  try {
+    if (req.user?.role !== "super_admin" && req.user?.role !== "tech_admin") {
+      return res.status(403).json({ message: "Only super admin can view video analytics" });
+    }
+
+    const institutes = await Institute.find({}).lean();
+    const allVideos = await VideoLecture.find({ isArchived: { $ne: true } }).lean();
+    const allStorages = await InstituteVideoStorage.find({}).lean();
+
+    const totalVideos = allVideos.length;
+    let totalStorageBytes = 0;
+    let totalViews = 0;
+
+    const instituteVideoMap = {};
+    for (const v of allVideos) {
+      const instId = String(v.institute || "");
+      if (!instituteVideoMap[instId]) {
+        instituteVideoMap[instId] = { count: 0, views: 0, bytes: 0 };
+      }
+      instituteVideoMap[instId].count += 1;
+      const vViews = Number(v.viewCount) || 0;
+      instituteVideoMap[instId].views += vViews;
+      totalViews += vViews;
+
+      const vBytes = Number(v.storageSizeBytes || v.fileSizeBytes || v.uploadFileSizeBytes) || 0;
+      instituteVideoMap[instId].bytes += vBytes;
+    }
+
+    const storageMap = {};
+    for (const s of allStorages) {
+      const instId = String(s.institute || "");
+      storageMap[instId] = s;
+      totalStorageBytes += Number(s.usedStorageBytes) || 0;
+    }
+
+    if (totalStorageBytes === 0) {
+      for (const instId in instituteVideoMap) {
+        totalStorageBytes += instituteVideoMap[instId].bytes;
+      }
+    }
+
+    const totalStorageGb = Number((totalStorageBytes / (1024 * 1024 * 1024)).toFixed(2));
+    const estUsd = Number(((totalStorageGb * 0.01) + (totalViews * 0.002)).toFixed(2));
+    const estInr = Math.round(estUsd * 86);
+
+    const instituteStats = institutes.map((inst) => {
+      const instId = String(inst._id);
+      const vInfo = instituteVideoMap[instId] || { count: 0, views: 0, bytes: 0 };
+      const sDoc = storageMap[instId];
+      const maxGb = inst.maxVideoStorageGb || 50;
+      const usedBytes = sDoc?.usedStorageBytes || vInfo.bytes || 0;
+      const usedGb = Number((usedBytes / (1024 * 1024 * 1024)).toFixed(2));
+      const usagePercentage = Math.min(100, Math.round((usedGb / maxGb) * 100));
+
+      return {
+        instituteId: instId,
+        name: inst.name || "Tuition Center",
+        tuitionType: inst.tuitionType || "Coaching",
+        featureEnabled: inst.recordedLecturesFeatureEnabled !== false,
+        usedVideoStorageGb: usedGb,
+        maxVideoStorageGb: maxGb,
+        usagePercentage,
+        videoCount: vInfo.count,
+        totalViews: vInfo.views,
+      };
+    });
+
+    return res.json({
+      summary: {
+        totalVideos,
+        totalStorageGb,
+        totalViews,
+        estimatedMonthlyCost: {
+          inr: estInr,
+          usd: estUsd,
+        },
+      },
+      instituteStats,
+    });
+  } catch (error) {
+    console.error("getSuperAdminVideoStats error:", error);
+    return res.status(500).json({ message: "Could not fetch video stats" });
+  }
+};
+
