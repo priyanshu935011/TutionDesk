@@ -151,15 +151,15 @@ export const getAdminOverview = async (req, res) => {
     const adminEmails = await getAdminEmails();
 
     const [institutes, totalStudentsResult, totalTeachers, totalSolo, totalInstitutions] = await Promise.all([
-      Institute.find().sort({ createdAt: -1 }),
+      Institute.find({ registrationSource: { $ne: "direct" }, isDirectRegistration: { $ne: true } }).sort({ createdAt: -1 }),
       Student.aggregate([
         { $match: { email: { $nin: adminEmails }, isDemoAccount: { $ne: true } } },
         { $group: { _id: "$enrollmentNumber" } },
         { $count: "count" }
       ]),
       User.countDocuments({ role: "teacher", isDemoAccount: { $ne: true } }),
-      Institute.countDocuments({ tuitionType: "solo", isDemoAccount: { $ne: true } }),
-      Institute.countDocuments({ tuitionType: "institution", isDemoAccount: { $ne: true } }),
+      Institute.countDocuments({ tuitionType: "solo", isDemoAccount: { $ne: true }, registrationSource: { $ne: "direct" }, isDirectRegistration: { $ne: true } }),
+      Institute.countDocuments({ tuitionType: "institution", isDemoAccount: { $ne: true }, registrationSource: { $ne: "direct" }, isDirectRegistration: { $ne: true } }),
     ]);
 
     const totalStudents = totalStudentsResult[0]?.count || 0;

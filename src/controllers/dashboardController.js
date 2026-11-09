@@ -15,6 +15,12 @@ export const getDashboard = async (req, res) => {
           "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
         );
     }
+    if (!institute && req.user.phone) {
+      const cleanPhone = String(req.user.phone).replace(/\D/g, "").slice(-10);
+      institute = await Institute.findOne({ adminPhone: cleanPhone }).select(
+        "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+      );
+    }
 
     const adminUserId = rawInst?.adminUser ? String(rawInst.adminUser) : null;
     const ownerId = req.user.role === "teacher" 
@@ -126,6 +132,14 @@ export const getDashboard = async (req, res) => {
             : true);
       instObj.recorded_lectures_feature_enabled = isRecEnabled;
       instObj.recordedLecturesFeatureEnabled = isRecEnabled;
+
+      if (!instObj.allowedFeatures || instObj.allowedFeatures.length === 0) {
+        instObj.allowedFeatures = [
+          "attendance", "notes", "marks", "tests", "whatsapp",
+          "finances", "homework", "quizzes", "leads", "notices",
+          "recorded_lectures", "release_videos", "test_series"
+        ];
+      }
     }
 
     return res.json({

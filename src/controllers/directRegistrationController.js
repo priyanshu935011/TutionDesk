@@ -81,19 +81,25 @@ export const getGlobalTrialDefaults = async () => {
         recordedLecturesFeatureEnabled: val.recordedLecturesFeatureEnabled !== undefined ? Boolean(val.recordedLecturesFeatureEnabled) : true,
         releaseVideosFeatureEnabled: val.releaseVideosFeatureEnabled !== undefined ? Boolean(val.releaseVideosFeatureEnabled) : true,
         quizFeatureEnabled: val.quizFeatureEnabled !== undefined ? Boolean(val.quizFeatureEnabled) : true,
-        testSeriesFeatureEnabled: val.testSeriesFeatureEnabled !== undefined ? Boolean(val.testSeriesFeatureEnabled) : false,
+        testSeriesFeatureEnabled: val.testSeriesFeatureEnabled !== undefined ? Boolean(val.testSeriesFeatureEnabled) : true,
         brandingEnabled: val.brandingEnabled !== undefined ? Boolean(val.brandingEnabled) : true,
         maxVideoStorageGb: Number(val.maxVideoStorageGb ?? 5),
-        features: Array.isArray(val.features)
+        features: Array.isArray(val.features) && val.features.length > 0
           ? val.features
           : [
               "attendance",
               "notes",
               "marks",
               "tests",
+              "notices",
               "whatsapp",
               "finances",
               "homework",
+              "quizzes",
+              "leads",
+              "recorded_lectures",
+              "release_videos",
+              "test_series",
             ],
       };
     }
@@ -109,7 +115,7 @@ export const getGlobalTrialDefaults = async () => {
     recordedLecturesFeatureEnabled: true,
     releaseVideosFeatureEnabled: true,
     quizFeatureEnabled: true,
-    testSeriesFeatureEnabled: false,
+    testSeriesFeatureEnabled: true,
     brandingEnabled: true,
     maxVideoStorageGb: 5,
     features: [
@@ -117,9 +123,15 @@ export const getGlobalTrialDefaults = async () => {
       "notes",
       "marks",
       "tests",
+      "notices",
       "whatsapp",
       "finances",
       "homework",
+      "quizzes",
+      "leads",
+      "recorded_lectures",
+      "release_videos",
+      "test_series",
     ],
   };
 };
@@ -310,12 +322,11 @@ export const verifyOtpAndRegister = async (req, res) => {
     const clientIp = getClientIp(req);
     const defaults = await getGlobalTrialDefaults();
 
-    // 2. Check if user already exists
+    // 2. Check if user or institute already exists
     const existingUser = await User.findOne({ phone: cleanPhone });
-    const existingInst = await Institute.findOne({ adminPhone: cleanPhone });
-    let registration = await DirectRegistration.findOne({ phone: cleanPhone });
+    let institute = await Institute.findOne({ adminPhone: cleanPhone });
 
-    if (existingUser && existingInst) {
+    if (existingUser && institute) {
       return res.status(400).json({
         success: false,
         isExistingUser: true,
@@ -329,44 +340,77 @@ export const verifyOtpAndRegister = async (req, res) => {
       instituteName || (name ? `${name.trim()}'s Classes` : "My Academy")
     ).trim();
 
-    const fcmList = fcmToken ? [fcmToken] : [];
+    const allFeatures = defaults.features && defaults.features.length > 0
+      ? defaults.features
+      : [
+          "attendance", "notes", "marks", "tests", "notices", "whatsapp",
+          "finances", "homework", "quizzes", "leads",
+          "recorded_lectures", "release_videos", "test_series"
+        ];
 
-    if (!registration) {
-      registration = await DirectRegistration.create({
-        phone: cleanPhone,
-        name: regName,
-        instituteName: regInstName,
-        trialEndsAt: trialEnds,
-        status: "trial_active",
-        features: defaults.features,
-        wpBalance: defaults.wpBalance,
-        aiBalance: defaults.aiBalance,
-        storageLimitMb: defaults.storageLimitMb,
-        storageUsedBytes: 0,
-        aiEnabled: defaults.aiEnabled !== false,
-        aiStudentEnabled: Boolean(defaults.aiStudentEnabled),
-        recordedLecturesFeatureEnabled: defaults.recordedLecturesFeatureEnabled !== false,
-        releaseVideosFeatureEnabled: defaults.releaseVideosFeatureEnabled !== false,
-        quizFeatureEnabled: defaults.quizFeatureEnabled !== false,
-        testSeriesFeatureEnabled: Boolean(defaults.testSeriesFeatureEnabled),
-        brandingEnabled: defaults.brandingEnabled !== false,
-        maxVideoStorageGb: Number(defaults.maxVideoStorageGb || 5),
-        ipAddress: clientIp,
-        fcmToken: JSON.stringify(fcmList),
-        lastActiveAt: new Date(),
-      });
-    } else {
-      registration.name = regName;
-      registration.instituteName = regInstName;
-      registration.trialEndsAt = trialEnds;
-      registration.status = "trial_active";
-      if (registration.aiEnabled === undefined) registration.aiEnabled = defaults.aiEnabled;
-      if (registration.recordedLecturesFeatureEnabled === undefined) registration.recordedLecturesFeatureEnabled = defaults.recordedLecturesFeatureEnabled;
-      if (registration.quizFeatureEnabled === undefined) registration.quizFeatureEnabled = defaults.quizFeatureEnabled;
-      await registration.save().catch(() => {});
+    const instId = institute ? String(institute._id || institute.id) : crypto.randomUUID();
+
+    // 3. Create or update Institute record in institutes table
+    const instPayload = {
+      id: instId,
+      name: regInstName,
+      owner_name: regName,
+      admin_email: `${cleanPhone}@direct.classtech.in`,
+      admin_phone: cleanPhone,
+      subscription_plan: "trial",
+      subscription_amount: 0,
+      trial_days: Number(defaults.trialDays || 7),
+      subscription_start: new Date().toISOString(),
+      subscription_end: trialEnds.toISOString(),
+      status: "active",
+      tuition_type: "solo",
+      allowed_features: allFeatures,
+      wallet_balance: Number(defaults.wpBalance ?? 10.0),
+      ai_wallet_balance: Number(defaults.aiBalance ?? 50.0),
+      quiz_feature_enabled: defaults.quizFeatureEnabled !== false,
+      ai_enabled: defaults.aiEnabled !== false,
+      ai_student_enabled: Boolean(defaults.aiStudentEnabled),
+      recorded_lectures_feature_enabled: defaults.recordedLecturesFeatureEnabled !== false,
+      release_videos_feature_enabled: defaults.releaseVideosFeatureEnabled !== false,
+      test_series_feature_enabled: defaults.testSeriesFeatureEnabled !== false,
+      max_video_storage_gb: Number(defaults.maxVideoStorageGb || 5),
+      branding_enabled: defaults.brandingEnabled !== false,
+      created_by_name: "direct_registration",
+    };
+
+    try {
+      await supabase.from("institutes").upsert(instPayload, { onConflict: "id" });
+    } catch (upsertErr) {
+      console.warn("[DirectRegistration] institutes upsert warning:", upsertErr.message);
     }
 
-    // 3. Dispatch WhatsApp Notification to 9934597030 on every new registration
+    // Save in institutes metadata
+    const metadata = readInstitutesMetadata();
+    metadata[instId] = {
+      ...(metadata[instId] || {}),
+      registrationSource: "direct",
+      isDirectRegistration: true,
+      storageLimitMb: Number(defaults.storageLimitMb || 500),
+      walletBalance: Number(defaults.wpBalance ?? 10.0),
+      aiWalletBalance: Number(defaults.aiBalance ?? 50.0),
+      aiEnabled: defaults.aiEnabled !== false,
+      aiStudentEnabled: Boolean(defaults.aiStudentEnabled),
+      quizFeatureEnabled: defaults.quizFeatureEnabled !== false,
+      testSeriesFeatureEnabled: defaults.testSeriesFeatureEnabled !== false,
+      recordedLecturesFeatureEnabled: defaults.recordedLecturesFeatureEnabled !== false,
+      releaseVideosFeatureEnabled: defaults.releaseVideosFeatureEnabled !== false,
+      brandingEnabled: defaults.brandingEnabled !== false,
+      maxVideoStorageGb: Number(defaults.maxVideoStorageGb || 5),
+      allowedFeatures: allFeatures,
+      createdByName: "direct_registration",
+    };
+    writeInstitutesMetadata(metadata);
+
+    if (!institute) {
+      institute = await Institute.findById(instId).catch(() => null);
+    }
+
+    // 4. Dispatch WhatsApp Notification to 9934597030 on every new registration
     try {
       const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
       const alertPhone = "9934597030";
@@ -398,68 +442,7 @@ export const verifyOtpAndRegister = async (req, res) => {
       console.warn("[DirectRegistration] WhatsApp alert exception:", wpErr.message);
     }
 
-    const regId = String(registration._id || registration.id);
-    const finalInstUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(regId)
-      ? regId
-      : crypto.randomUUID();
-
-    // 4. Ensure matching Institute exists in institutes table to satisfy foreign key constraints across users, batches, students, notes
-    let institute = await Institute.findOne({
-      $or: [{ _id: finalInstUuid }, { id: finalInstUuid }, { adminPhone: cleanPhone }]
-    });
-
-    let instId = institute ? String(institute._id || institute.id) : finalInstUuid;
-    if (!instId || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(instId)) {
-      instId = finalInstUuid;
-    }
-
-    // Direct upsert to public.institutes to GUARANTEE row exists in PostgreSQL
-    const instPayload = {
-      id: instId,
-      name: regInstName,
-      owner_name: regName,
-      admin_email: `${cleanPhone}@direct.classtech.in`,
-      admin_phone: cleanPhone,
-      subscription_plan: "trial",
-      subscription_amount: 0,
-      trial_days: Number(defaults.trialDays || 7),
-      subscription_start: new Date().toISOString(),
-      subscription_end: trialEnds.toISOString(),
-      status: "active",
-      tuition_type: "solo",
-      allowed_features: defaults.features || [
-        "attendance",
-        "notes",
-        "marks",
-        "tests",
-        "whatsapp",
-        "finances",
-        "homework",
-      ],
-      wallet_balance: Number(defaults.wpBalance || 10.0),
-      ai_wallet_balance: Number(defaults.aiBalance || 50.0),
-      storage_limit_mb: Number(defaults.storageLimitMb || 500),
-      quiz_feature_enabled: registration.quizFeatureEnabled !== false,
-      ai_enabled: registration.aiEnabled !== false,
-      ai_student_enabled: Boolean(registration.aiStudentEnabled),
-      recorded_lectures_feature_enabled: registration.recordedLecturesFeatureEnabled !== false,
-      release_videos_feature_enabled: registration.releaseVideosFeatureEnabled !== false,
-      test_series_feature_enabled: Boolean(registration.testSeriesFeatureEnabled),
-      max_video_storage_gb: Number(registration.maxVideoStorageGb || 5),
-      branding_enabled: registration.brandingEnabled !== false,
-    };
-
-    try {
-      await supabase.from("institutes").upsert(instPayload, { onConflict: "id" });
-    } catch (upsertErr) {
-      console.warn("[DirectRegistration] institutes upsert warning:", upsertErr.message);
-    }
-
-    if (!institute) {
-      institute = await Institute.findById(instId).catch(() => null);
-    }
-
-    // 5. Ensure matching User exists in User model pointing to the valid institute ID
+    // 5. Ensure matching User exists pointing to the valid institute ID
     let isNewRegistration = false;
     let user = await User.findOne({
       $or: [{ phone: cleanPhone }, { email: `${cleanPhone}@direct.classtech.in` }],
@@ -471,7 +454,7 @@ export const verifyOtpAndRegister = async (req, res) => {
       const hashedPassword = await bcrypt.hash(dummyPassword, 10);
       try {
         user = await User.create({
-          name: registration.name,
+          name: regName,
           phone: cleanPhone,
           email: `${cleanPhone}@direct.classtech.in`,
           password: hashedPassword,
@@ -479,64 +462,40 @@ export const verifyOtpAndRegister = async (req, res) => {
           institute: instId,
           institute_id: instId,
           isTrialRegistration: true,
-          trialRegistrationId: regId,
-          aiAccessEnabled: (registration.features || []).includes("ai"),
+          aiAccessEnabled: allFeatures.includes("ai"),
         });
       } catch (userCreateErr) {
-        console.warn("[DirectRegistration] User.create with institute failed, retrying with institute: null:", userCreateErr.message);
-        try {
-          user = await User.create({
-            name: registration.name,
-            phone: cleanPhone,
-            email: `${cleanPhone}@direct.classtech.in`,
-            password: hashedPassword,
-            role: "institute_admin",
-            institute: null,
-            institute_id: null,
-            isTrialRegistration: true,
-            trialRegistrationId: regId,
-            aiAccessEnabled: (registration.features || []).includes("ai"),
-          });
-        } catch (fallbackCreateErr) {
-          console.warn("[DirectRegistration] User model fallback create failed, inserting directly into Supabase:", fallbackCreateErr.message);
-          const newUserId = crypto.randomUUID();
-          const directUserPayload = {
-            id: newUserId,
-            name: registration.name,
-            phone: cleanPhone,
-            email: `${cleanPhone}@direct.classtech.in`,
-            password_hash: hashedPassword,
-            role: "institute_admin",
-            institute_id: null,
-          };
-          await supabase.from("users").insert(directUserPayload);
-          user = await User.findById(newUserId).catch(() => ({
-            _id: newUserId,
-            id: newUserId,
-            name: registration.name,
-            email: `${cleanPhone}@direct.classtech.in`,
-            phone: cleanPhone,
-            role: "institute_admin",
-          }));
-        }
+        console.warn("[DirectRegistration] User.create with institute failed, retrying directly:", userCreateErr.message);
+        const newUserId = crypto.randomUUID();
+        const directUserPayload = {
+          id: newUserId,
+          name: regName,
+          phone: cleanPhone,
+          email: `${cleanPhone}@direct.classtech.in`,
+          password_hash: hashedPassword,
+          role: "institute_admin",
+          institute_id: instId,
+        };
+        await supabase.from("users").insert(directUserPayload).catch(() => {});
+        user = await User.findById(newUserId).catch(() => ({
+          _id: newUserId,
+          id: newUserId,
+          name: regName,
+          email: `${cleanPhone}@direct.classtech.in`,
+          phone: cleanPhone,
+          role: "institute_admin",
+          institute: instId,
+        }));
       }
     } else {
-      user.name = registration.name;
+      user.name = regName;
       user.institute = instId;
       user.institute_id = instId;
       user.isTrialRegistration = true;
-      user.trialRegistrationId = regId;
-      user.aiAccessEnabled = (registration.features || []).includes("ai");
-      try {
-        await user.save();
-      } catch (userSaveErr) {
-        console.warn("[DirectRegistration] user.save with institute failed, saving with institute: null:", userSaveErr.message);
-        user.institute = null;
-        user.institute_id = null;
-        await user.save().catch(async () => {
-          await supabase.from("users").update({ institute_id: null }).eq("id", String(user._id || user.id)).catch(() => {});
-        });
-      }
+      user.aiAccessEnabled = allFeatures.includes("ai");
+      await user.save().catch(async () => {
+        await supabase.from("users").update({ institute_id: instId }).eq("id", String(user._id || user.id)).catch(() => {});
+      });
     }
 
     if (institute && user && (!institute.adminUser || String(institute.adminUser) !== String(user._id || user.id))) {
@@ -577,46 +536,37 @@ export const verifyOtpAndRegister = async (req, res) => {
 
     // Calculate trial days left
     const now = Date.now();
-    const trialEndMs = new Date(registration.trialEndsAt).getTime();
+    const trialEndMs = trialEnds.getTime();
     const daysLeft = Math.max(0, Math.ceil((trialEndMs - now) / (1000 * 60 * 60 * 24)));
-    const isExpired = registration.status === "expired" || trialEndMs < now;
 
     const institutePayload = {
       id: instId,
       _id: instId,
-      name: registration.instituteName,
+      name: regInstName,
       subscriptionPlan: "trial",
       trialDays: defaults.trialDays || 7,
-      subscriptionStart: registration.createdAt,
-      subscriptionEnd: registration.trialEndsAt,
-      status: registration.status,
+      subscriptionStart: new Date(),
+      subscriptionEnd: trialEnds,
+      status: "active",
       tuitionType: "solo",
-      allowedFeatures: registration.features || [
-        "attendance",
-        "notes",
-        "marks",
-        "tests",
-        "whatsapp",
-        "finances",
-        "ai",
-        "homework",
-        "quizzes",
-      ],
-      walletBalance: Number(registration.wpBalance || 0),
-      aiBalance: Number(registration.aiBalance || 0),
-      storageLimitMb: Number(registration.storageLimitMb || 500),
-      quizFeatureEnabled: registration.quizFeatureEnabled !== false,
-      recordedLecturesFeatureEnabled: registration.recordedLecturesFeatureEnabled !== false,
-      releaseVideosFeatureEnabled: registration.releaseVideosFeatureEnabled !== false,
-      aiEnabled: registration.aiEnabled !== false,
-      aiStudentEnabled: Boolean(registration.aiStudentEnabled),
-      testSeriesFeatureEnabled: Boolean(registration.testSeriesFeatureEnabled),
-      maxVideoStorageGb: Number(registration.maxVideoStorageGb || 5),
+      allowedFeatures: allFeatures,
+      walletBalance: Number(defaults.wpBalance ?? 10.0),
+      aiBalance: Number(defaults.aiBalance ?? 50.0),
+      storageLimitMb: Number(defaults.storageLimitMb ?? 500),
+      quizFeatureEnabled: defaults.quizFeatureEnabled !== false,
+      recordedLecturesFeatureEnabled: defaults.recordedLecturesFeatureEnabled !== false,
+      releaseVideosFeatureEnabled: defaults.releaseVideosFeatureEnabled !== false,
+      aiEnabled: defaults.aiEnabled !== false,
+      aiStudentEnabled: Boolean(defaults.aiStudentEnabled),
+      testSeriesFeatureEnabled: defaults.testSeriesFeatureEnabled !== false,
+      maxVideoStorageGb: Number(defaults.maxVideoStorageGb || 5),
       isDirectTrial: true,
       trialDaysLeft: daysLeft,
-      brandingEnabled: registration.brandingEnabled !== false,
+      brandingEnabled: defaults.brandingEnabled !== false,
       logoUrl: null,
       themeColor: "#4C3FBE",
+      registrationSource: "direct",
+      isDirectRegistration: true,
     };
 
     return res.status(isNewRegistration ? 201 : 200).json({
@@ -731,69 +681,106 @@ export const syncAdminDirectRegistrations = async (req, res) => {
  */
 export const getAdminDirectRegistrations = async (req, res) => {
   try {
-    // Attempt auto-sync of any earlier fallback records on load
-    await syncFallbackRecordsToSupabase().catch(() => {});
-
     const { search = "", status = "", page = 1, limit = 50 } = req.query;
 
-    const query = {};
-    if (status && status !== "all") {
-      query.status = status;
-    }
-
-    if (search && search.trim()) {
-      const term = search.trim();
-      query.$or = [
-        { name: { $regex: term, $options: "i" } },
-        { phone: { $regex: term, $options: "i" } },
-        { instituteName: { $regex: term, $options: "i" } },
-      ];
-    }
-
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
-    const skip = (pageNum - 1) * limitNum;
-
-    const [total, registrations] = await Promise.all([
-      DirectRegistration.countDocuments(query),
-      DirectRegistration.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
-    ]);
+    const institutes = await Institute.find({
+      $or: [
+        { registrationSource: "direct" },
+        { isDirectRegistration: true },
+        { createdByName: "direct_registration" },
+      ],
+    }).sort({ createdAt: -1 });
 
     const now = Date.now();
-    const formatted = registrations.map((r) => {
+
+    // Map each institute to registration format
+    let formatted = institutes.map((r) => {
       const doc = r.toObject ? r.toObject() : r;
-      const trialEndMs = new Date(doc.trialEndsAt).getTime();
+      const trialEndMs = new Date(doc.subscriptionEnd || doc.trialEndsAt || now).getTime();
       const daysLeft = Math.max(0, Math.ceil((trialEndMs - now) / (1000 * 60 * 60 * 24)));
-      const isExpired = doc.status === "expired" || trialEndMs < now;
+      const isConverted = doc.subscriptionPlan !== "trial";
+      const isExpired = !isConverted && (doc.status === "expired" || trialEndMs < now);
+      const isSuspended = doc.status === "suspended";
+      const computedStatus = isConverted
+        ? "converted"
+        : isSuspended
+        ? "suspended"
+        : isExpired
+        ? "expired"
+        : "trial_active";
 
       return {
         ...doc,
         id: doc._id || doc.id,
-        aiEnabled: doc.aiEnabled !== undefined ? Boolean(doc.aiEnabled) : (doc.ai_enabled !== undefined ? Boolean(doc.ai_enabled) : true),
+        _id: doc._id || doc.id,
+        phone: doc.adminPhone || doc.phone || "",
+        name: doc.ownerName || doc.name || "Educator",
+        instituteName: doc.name || doc.instituteName || "My Academy",
+        trialEndsAt: doc.subscriptionEnd || doc.trialEndsAt,
+        status: computedStatus,
+        features: doc.allowedFeatures || doc.features || [],
+        wpBalance: Number(doc.walletBalance ?? doc.wpBalance ?? 0),
+        aiBalance: Number(doc.aiWalletBalance ?? doc.aiBalance ?? 0),
+        storageLimitMb: Number(doc.storageLimitMb || 500),
+        aiEnabled: doc.aiEnabled !== false && doc.ai_enabled !== false,
         aiStudentEnabled: Boolean(doc.aiStudentEnabled ?? doc.ai_student_enabled),
-        recordedLecturesFeatureEnabled: doc.recordedLecturesFeatureEnabled !== undefined ? Boolean(doc.recordedLecturesFeatureEnabled) : (doc.recorded_lectures_feature_enabled !== undefined ? Boolean(doc.recorded_lectures_feature_enabled) : true),
-        releaseVideosFeatureEnabled: doc.releaseVideosFeatureEnabled !== undefined ? Boolean(doc.releaseVideosFeatureEnabled) : (doc.release_videos_feature_enabled !== undefined ? Boolean(doc.release_videos_feature_enabled) : true),
-        quizFeatureEnabled: doc.quizFeatureEnabled !== undefined ? Boolean(doc.quizFeatureEnabled) : (doc.quiz_feature_enabled !== undefined ? Boolean(doc.quiz_feature_enabled) : true),
-        testSeriesFeatureEnabled: Boolean(doc.testSeriesFeatureEnabled ?? doc.test_series_feature_enabled),
-        brandingEnabled: doc.brandingEnabled !== undefined ? Boolean(doc.brandingEnabled) : (doc.branding_enabled !== undefined ? Boolean(doc.branding_enabled) : true),
-        maxVideoStorageGb: Number(doc.maxVideoStorageGb ?? doc.max_video_storage_gb ?? 5),
+        recordedLecturesFeatureEnabled:
+          doc.recordedLecturesFeatureEnabled !== false &&
+          doc.recorded_lectures_feature_enabled !== false,
+        releaseVideosFeatureEnabled:
+          doc.releaseVideosFeatureEnabled !== false &&
+          doc.release_videos_feature_enabled !== false,
+        quizFeatureEnabled:
+          doc.quizFeatureEnabled !== false && doc.quiz_feature_enabled !== false,
+        testSeriesFeatureEnabled: Boolean(
+          doc.testSeriesFeatureEnabled ?? doc.test_series_feature_enabled
+        ),
+        brandingEnabled:
+          doc.brandingEnabled !== false && doc.branding_enabled !== false,
+        maxVideoStorageGb: Number(
+          doc.maxVideoStorageGb ?? doc.max_video_storage_gb ?? 5
+        ),
         daysLeft,
         isExpired,
+        notes: doc.adminNotes || doc.notes || "",
       };
     });
 
-    // Summary counters
-    const [activeCount, expiredCount, convertedCount] = await Promise.all([
-      DirectRegistration.countDocuments({ status: "trial_active", trialEndsAt: { $gte: new Date() } }),
-      DirectRegistration.countDocuments({
-        $or: [{ status: "expired" }, { trialEndsAt: { $lt: new Date() } }],
-      }),
-      DirectRegistration.countDocuments({ status: "converted" }),
-    ]);
+    // Apply search filter in memory
+    if (search && search.trim()) {
+      const term = search.trim().toLowerCase();
+      formatted = formatted.filter(
+        (item) =>
+          (item.name || "").toLowerCase().includes(term) ||
+          (item.phone || "").toLowerCase().includes(term) ||
+          (item.instituteName || "").toLowerCase().includes(term)
+      );
+    }
+
+    // Counters for stats
+    const total = formatted.length;
+    const activeCount = formatted.filter(
+      (r) => r.status === "trial_active" && !r.isExpired
+    ).length;
+    const expiredCount = formatted.filter(
+      (r) => r.status === "expired" || r.isExpired
+    ).length;
+    const convertedCount = formatted.filter((r) => r.status === "converted").length;
+
+    // Apply status filter
+    if (status && status !== "all") {
+      formatted = formatted.filter((r) => r.status === status);
+    }
+
+    // Pagination
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
+    const paginated = formatted.slice(skip, skip + limitNum);
 
     return res.json({
       success: true,
-      registrations: formatted,
+      registrations: paginated,
       pagination: {
         total,
         page: pageNum,
@@ -809,7 +796,9 @@ export const getAdminDirectRegistrations = async (req, res) => {
     });
   } catch (error) {
     console.error("[getAdminDirectRegistrations] Error:", error);
-    return res.status(500).json({ success: false, message: "Could not fetch direct registrations." });
+    return res
+      .status(500)
+      .json({ success: false, message: "Could not fetch direct registrations." });
   }
 };
 
@@ -839,128 +828,180 @@ export const updateAdminDirectRegistration = async (req, res) => {
       maxVideoStorageGb,
     } = req.body;
 
-    const registration = await DirectRegistration.findById(id);
-    if (!registration) {
-      return res.status(404).json({ success: false, message: "Registration not found" });
+    let institute = await Institute.findById(id);
+    if (!institute) {
+      institute = await Institute.findOne({
+        $or: [{ _id: id }, { id }, { adminPhone: id }],
+      });
+    }
+
+    if (!institute) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Registration institute not found" });
     }
 
     if (name !== undefined && String(name).trim()) {
-      registration.name = String(name).trim();
+      institute.ownerName = String(name).trim();
     }
     if (instituteName !== undefined && String(instituteName).trim()) {
-      registration.instituteName = String(instituteName).trim();
+      institute.name = String(instituteName).trim();
     }
     if (features !== undefined && Array.isArray(features)) {
-      registration.features = features;
+      institute.allowedFeatures = features;
     }
     if (wpBalance !== undefined) {
-      registration.wpBalance = Math.max(0, Number(wpBalance || 0));
+      institute.walletBalance = Math.max(0, Number(wpBalance || 0));
     }
     if (aiBalance !== undefined) {
-      registration.aiBalance = Math.max(0, Number(aiBalance || 0));
+      institute.aiWalletBalance = Math.max(0, Number(aiBalance || 0));
     }
     if (storageLimitMb !== undefined) {
-      registration.storageLimitMb = Math.max(0, Number(storageLimitMb || 500));
+      institute.storageLimitMb = Math.max(0, Number(storageLimitMb || 500));
     }
     if (aiEnabled !== undefined) {
-      registration.aiEnabled = Boolean(aiEnabled);
+      institute.aiEnabled = Boolean(aiEnabled);
+      institute.ai_enabled = Boolean(aiEnabled);
     }
     if (aiStudentEnabled !== undefined) {
-      registration.aiStudentEnabled = Boolean(aiStudentEnabled);
+      institute.aiStudentEnabled = Boolean(aiStudentEnabled);
+      institute.ai_student_enabled = Boolean(aiStudentEnabled);
     }
     if (recordedLecturesFeatureEnabled !== undefined) {
-      registration.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+      institute.recordedLecturesFeatureEnabled = Boolean(recordedLecturesFeatureEnabled);
+      institute.recorded_lectures_feature_enabled = Boolean(recordedLecturesFeatureEnabled);
     }
     if (releaseVideosFeatureEnabled !== undefined) {
-      registration.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
+      institute.releaseVideosFeatureEnabled = Boolean(releaseVideosFeatureEnabled);
+      institute.release_videos_feature_enabled = Boolean(releaseVideosFeatureEnabled);
     }
     if (quizFeatureEnabled !== undefined) {
-      registration.quizFeatureEnabled = Boolean(quizFeatureEnabled);
+      institute.quizFeatureEnabled = Boolean(quizFeatureEnabled);
+      institute.quiz_feature_enabled = Boolean(quizFeatureEnabled);
     }
     if (testSeriesFeatureEnabled !== undefined) {
-      registration.testSeriesFeatureEnabled = Boolean(testSeriesFeatureEnabled);
+      institute.testSeriesFeatureEnabled = Boolean(testSeriesFeatureEnabled);
+      institute.test_series_feature_enabled = Boolean(testSeriesFeatureEnabled);
     }
     if (brandingEnabled !== undefined) {
-      registration.brandingEnabled = Boolean(brandingEnabled);
+      institute.brandingEnabled = Boolean(brandingEnabled);
+      institute.branding_enabled = Boolean(brandingEnabled);
     }
     if (maxVideoStorageGb !== undefined) {
-      registration.maxVideoStorageGb = Math.max(1, Number(maxVideoStorageGb || 5));
+      institute.maxVideoStorageGb = Math.max(1, Number(maxVideoStorageGb || 5));
+      institute.max_video_storage_gb = institute.maxVideoStorageGb;
     }
-    if (status && ["trial_active", "expired", "converted", "suspended"].includes(status)) {
-      registration.status = status;
+    if (
+      status &&
+      ["trial_active", "expired", "converted", "suspended", "active"].includes(status)
+    ) {
+      if (status === "trial_active") {
+        institute.status = "active";
+        institute.subscriptionPlan = "trial";
+      } else if (status === "suspended") {
+        institute.status = "suspended";
+      } else if (status === "expired") {
+        institute.status = "expired";
+      } else if (status === "converted") {
+        institute.subscriptionPlan = "monthly";
+        institute.status = "active";
+      }
     }
     if (notes !== undefined) {
-      registration.notes = String(notes || "").trim();
+      institute.adminNotes = String(notes || "").trim();
     }
 
     // Extend trial by X days if requested
     if (extendDays && !isNaN(Number(extendDays)) && Number(extendDays) > 0) {
-      const currentEnd = new Date(registration.trialEndsAt);
+      const currentEnd = new Date(institute.subscriptionEnd);
       const baseDate = currentEnd.getTime() > Date.now() ? currentEnd : new Date();
-      registration.trialEndsAt = new Date(baseDate.getTime() + Number(extendDays) * 24 * 60 * 60 * 1000);
-      if (registration.status === "expired") {
-        registration.status = "trial_active";
+      institute.subscriptionEnd = new Date(
+        baseDate.getTime() + Number(extendDays) * 24 * 60 * 60 * 1000
+      );
+      if (institute.status === "expired") {
+        institute.status = "active";
       }
     }
 
-    await registration.save();
+    await institute.save();
 
-    const regId = String(registration._id || registration.id);
-    const cleanPhone = String(registration.phone || "").trim();
+    // Also update public.institutes in PostgreSQL directly
+    const instId = String(institute._id || institute.id);
+    const instUpdate = {
+      name: institute.name,
+      owner_name: institute.ownerName,
+      allowed_features: institute.allowedFeatures,
+      wallet_balance: institute.walletBalance,
+      ai_wallet_balance: institute.aiWalletBalance,
+      quiz_feature_enabled: institute.quizFeatureEnabled,
+      recorded_lectures_feature_enabled: institute.recordedLecturesFeatureEnabled,
+      release_videos_feature_enabled: institute.releaseVideosFeatureEnabled,
+      test_series_feature_enabled: institute.testSeriesFeatureEnabled,
+      ai_enabled: institute.aiEnabled,
+      ai_student_enabled: institute.aiStudentEnabled,
+      branding_enabled: institute.brandingEnabled,
+      max_video_storage_gb: institute.maxVideoStorageGb,
+      subscription_end: new Date(institute.subscriptionEnd).toISOString(),
+      status: institute.status,
+    };
+    await supabase.from("institutes").update(instUpdate).eq("id", instId).catch(() => {});
 
-    // Sync matching Institute in institutes table
-    try {
-      const institute = await Institute.findOne({
-        $or: [{ _id: regId }, { id: regId }, { adminPhone: cleanPhone }]
-      });
-      if (institute) {
-        if (registration.name) institute.ownerName = registration.name;
-        if (registration.instituteName) institute.name = registration.instituteName;
-        if (registration.trialEndsAt) institute.subscriptionEnd = registration.trialEndsAt;
-        if (registration.status === "suspended") institute.status = "suspended";
-        else if (registration.status === "trial_active") institute.status = "active";
+    // Save in metadata
+    const metadata = readInstitutesMetadata();
+    metadata[instId] = {
+      ...(metadata[instId] || {}),
+      registrationSource: "direct",
+      isDirectRegistration: true,
+      storageLimitMb: institute.storageLimitMb,
+      walletBalance: institute.walletBalance,
+      aiWalletBalance: institute.aiWalletBalance,
+      quizFeatureEnabled: institute.quizFeatureEnabled,
+      testSeriesFeatureEnabled: institute.testSeriesFeatureEnabled,
+      recordedLecturesFeatureEnabled: institute.recordedLecturesFeatureEnabled,
+      releaseVideosFeatureEnabled: institute.releaseVideosFeatureEnabled,
+      aiEnabled: institute.aiEnabled,
+      aiStudentEnabled: institute.aiStudentEnabled,
+      brandingEnabled: institute.brandingEnabled,
+      maxVideoStorageGb: institute.maxVideoStorageGb,
+      allowedFeatures: institute.allowedFeatures,
+    };
+    writeInstitutesMetadata(metadata);
 
-        institute.aiEnabled = registration.aiEnabled !== false;
-        institute.ai_enabled = registration.aiEnabled !== false;
-        institute.aiStudentEnabled = Boolean(registration.aiStudentEnabled);
-        institute.ai_student_enabled = Boolean(registration.aiStudentEnabled);
-        institute.recordedLecturesFeatureEnabled = registration.recordedLecturesFeatureEnabled !== false;
-        institute.recorded_lectures_feature_enabled = registration.recordedLecturesFeatureEnabled !== false;
-        institute.releaseVideosFeatureEnabled = registration.releaseVideosFeatureEnabled !== false;
-        institute.release_videos_feature_enabled = registration.releaseVideosFeatureEnabled !== false;
-        institute.quizFeatureEnabled = registration.quizFeatureEnabled !== false;
-        institute.quiz_feature_enabled = registration.quizFeatureEnabled !== false;
-        institute.testSeriesFeatureEnabled = Boolean(registration.testSeriesFeatureEnabled);
-        institute.test_series_feature_enabled = Boolean(registration.testSeriesFeatureEnabled);
-        institute.brandingEnabled = registration.brandingEnabled !== false;
-        institute.branding_enabled = registration.brandingEnabled !== false;
-        institute.maxVideoStorageGb = Number(registration.maxVideoStorageGb || 5);
-        institute.max_video_storage_gb = Number(registration.maxVideoStorageGb || 5);
-        institute.walletBalance = Number(registration.wpBalance || 0);
-        institute.aiWalletBalance = Number(registration.aiBalance || 0);
-        institute.allowedFeatures = registration.features;
-        await institute.save().catch(() => {});
-      }
-    } catch (instSyncErr) {
-      console.warn("[updateAdminDirectRegistration] Institute sync warning:", instSyncErr.message);
-    }
-
-    // Also sync User if AI access toggled
+    // Sync User AI access
+    const cleanPhone = String(institute.adminPhone || "").trim();
     try {
       await User.updateMany(
-        { $or: [{ institute: regId }, { trialRegistrationId: regId }, { phone: cleanPhone }] },
-        { aiAccessEnabled: registration.aiEnabled !== false }
+        { $or: [{ institute: instId }, { phone: cleanPhone }] },
+        { aiAccessEnabled: institute.aiEnabled !== false }
       );
     } catch (_) {}
 
     return res.json({
       success: true,
-      message: "Registration updated successfully!",
-      registration,
+      message: "Direct registration updated successfully!",
+      registration: {
+        ...(institute.toObject ? institute.toObject() : institute),
+        id: instId,
+        phone: institute.adminPhone,
+        name: institute.ownerName,
+        instituteName: institute.name,
+        trialEndsAt: institute.subscriptionEnd,
+        features: institute.allowedFeatures,
+        wpBalance: institute.walletBalance,
+        aiBalance: institute.aiWalletBalance,
+        status:
+          institute.subscriptionPlan === "trial"
+            ? new Date(institute.subscriptionEnd) < new Date()
+              ? "expired"
+              : "trial_active"
+            : "converted",
+      },
     });
   } catch (error) {
     console.error("[updateAdminDirectRegistration] Error:", error);
-    return res.status(500).json({ success: false, message: "Could not update registration: " + error.message });
+    return res
+      .status(500)
+      .json({ success: false, message: "Could not update registration: " + error.message });
   }
 };
 
@@ -972,98 +1013,58 @@ export const convertTrialToInstitute = async (req, res) => {
     const { id } = req.params;
     const { subscriptionPlan = "monthly", subscriptionAmount = 0 } = req.body;
 
-    const registration = await DirectRegistration.findById(id);
-    if (!registration) {
-      return res.status(404).json({ success: false, message: "Registration not found" });
-    }
-
-    const cleanPhone = registration.phone;
-    let user = await User.findOne({
-      $or: [{ phone: cleanPhone }, { email: `${cleanPhone}@direct.classtech.in` }],
-    });
-
-    // Update or create Institute in institutes table
-    let targetInstitute = await Institute.findOne({
-      $or: [{ _id: id }, { id }, { adminPhone: cleanPhone }],
-    });
-
-    if (targetInstitute) {
-      targetInstitute.subscriptionPlan = subscriptionPlan;
-      targetInstitute.subscriptionAmount = Number(subscriptionAmount || 0);
-      targetInstitute.subscriptionStart = new Date();
-      targetInstitute.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days active
-      targetInstitute.status = "active";
-      targetInstitute.aiEnabled = registration.aiEnabled !== false;
-      targetInstitute.aiStudentEnabled = Boolean(registration.aiStudentEnabled);
-      targetInstitute.recordedLecturesFeatureEnabled = registration.recordedLecturesFeatureEnabled !== false;
-      targetInstitute.releaseVideosFeatureEnabled = registration.releaseVideosFeatureEnabled !== false;
-      targetInstitute.quizFeatureEnabled = registration.quizFeatureEnabled !== false;
-      targetInstitute.testSeriesFeatureEnabled = Boolean(registration.testSeriesFeatureEnabled);
-      targetInstitute.brandingEnabled = registration.brandingEnabled !== false;
-      targetInstitute.maxVideoStorageGb = Number(registration.maxVideoStorageGb || 50);
-      if (user) targetInstitute.adminUser = user._id;
-      await targetInstitute.save();
-    } else {
-      targetInstitute = await Institute.create({
-        _id: id,
-        id: id,
-        name: registration.instituteName || "My Academy",
-        ownerName: registration.name || "Educator",
-        adminUser: user ? user._id : null,
-        adminEmail: user?.email || `${cleanPhone}@classtech.in`,
-        adminPhone: cleanPhone,
-        subscriptionPlan,
-        subscriptionAmount: Number(subscriptionAmount || 0),
-        subscriptionStart: new Date(),
-        subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days active
-        status: "active",
-        allowedFeatures: registration.features || [
-          "attendance",
-          "notes",
-          "marks",
-          "tests",
-          "whatsapp",
-          "finances",
-          "ai",
-        ],
-        walletBalance: registration.wpBalance || 10.0,
-        aiWalletBalance: registration.aiBalance || 50.0,
-        storageLimitMb: registration.storageLimitMb || 500,
-        aiEnabled: registration.aiEnabled !== false,
-        aiStudentEnabled: Boolean(registration.aiStudentEnabled),
-        recordedLecturesFeatureEnabled: registration.recordedLecturesFeatureEnabled !== false,
-        releaseVideosFeatureEnabled: registration.releaseVideosFeatureEnabled !== false,
-        quizFeatureEnabled: registration.quizFeatureEnabled !== false,
-        testSeriesFeatureEnabled: Boolean(registration.testSeriesFeatureEnabled),
-        brandingEnabled: registration.brandingEnabled !== false,
-        maxVideoStorageGb: Number(registration.maxVideoStorageGb || 50),
-        tuitionType: "solo",
+    let institute = await Institute.findById(id);
+    if (!institute) {
+      institute = await Institute.findOne({
+        $or: [{ _id: id }, { id }, { adminPhone: id }],
       });
     }
 
-    const newInstId = String(targetInstitute._id || targetInstitute.id);
-
-    // Update DirectRegistration status
-    registration.status = "converted";
-    registration.convertedToInstituteId = newInstId;
-    await registration.save();
-
-    // Update User
-    if (user) {
-      user.institute = newInstId;
-      user.isTrialRegistration = false;
-      await user.save();
+    if (!institute) {
+      return res.status(404).json({ success: false, message: "Registration not found" });
     }
+
+    institute.subscriptionPlan = subscriptionPlan;
+    institute.subscriptionAmount = Number(subscriptionAmount || 0);
+    institute.subscriptionStart = new Date();
+    institute.subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days active
+    institute.status = "active";
+    institute.registrationSource = "admin";
+    institute.isDirectRegistration = false;
+    await institute.save();
+
+    const instId = String(institute._id || institute.id);
+    await supabase
+      .from("institutes")
+      .update({
+        subscription_plan: subscriptionPlan,
+        subscription_amount: Number(subscriptionAmount || 0),
+        subscription_start: new Date().toISOString(),
+        subscription_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        status: "active",
+        created_by_name: "admin",
+      })
+      .eq("id", instId)
+      .catch(() => {});
+
+    const metadata = readInstitutesMetadata();
+    metadata[instId] = {
+      ...(metadata[instId] || {}),
+      registrationSource: "admin",
+      isDirectRegistration: false,
+    };
+    writeInstitutesMetadata(metadata);
 
     return res.json({
       success: true,
-      message: `Educator successfully converted to official Institute: "${targetInstitute.name}"!`,
-      institute: targetInstitute,
-      registration,
+      message: `Educator successfully converted to official Institute: "${institute.name}"!`,
+      institute,
     });
   } catch (error) {
     console.error("[convertTrialToInstitute] Error:", error);
-    return res.status(500).json({ success: false, message: "Could not convert registration: " + error.message });
+    return res
+      .status(500)
+      .json({ success: false, message: "Could not convert registration: " + error.message });
   }
 };
 

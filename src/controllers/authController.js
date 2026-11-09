@@ -20,10 +20,6 @@ const generateToken = (payload) =>
 import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 
 const buildInstituteState = async (user) => {
-  if (!user.institute) {
-    return null;
-  }
-
   const rawInst = user.institute;
   const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
 
@@ -31,7 +27,7 @@ const buildInstituteState = async (user) => {
   if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
     try {
       institute = await Institute.findById(instIdStr).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration"
       );
     } catch (_) {}
   }
@@ -40,8 +36,23 @@ const buildInstituteState = async (user) => {
       institute = await Institute.findOne({
         $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
       }).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration"
       );
+    } catch (_) {}
+  }
+
+  // Fallback: search Institute by user.phone if not linked yet
+  if (!institute && user.phone) {
+    try {
+      const cleanPhone = String(user.phone).replace(/\D/g, "").slice(-10);
+      institute = await Institute.findOne({ adminPhone: cleanPhone }).select(
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration"
+      );
+      if (institute) {
+        user.institute = institute._id;
+        user.institute_id = institute._id;
+        await user.save().catch(() => {});
+      }
     } catch (_) {}
   }
 
@@ -153,7 +164,11 @@ const buildInstituteState = async (user) => {
     brandingEnabled: institute.brandingEnabled !== false,
     logoUrl: institute.logoUrl || null,
     themeColor: institute.themeColor || "#4C3FBE",
-    allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "whatsapp", "finances"],
+    allowedFeatures: institute.allowedFeatures || [
+      "attendance", "notes", "marks", "tests", "whatsapp",
+      "finances", "homework", "quizzes", "leads", "notices",
+      "recorded_lectures", "release_videos", "test_series"
+    ],
     whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
     studentCustomFields: institute.studentCustomFields || [],
     walletBalance: Number(liveBalance || 0),
@@ -163,6 +178,8 @@ const buildInstituteState = async (user) => {
     aiWalletBalance: Number(institute.aiWalletBalance ?? institute.ai_wallet_balance ?? 0),
     aiCreditsPerRupee: Number(institute.aiCreditsPerRupee ?? institute.ai_credits_per_rupee ?? 10),
     maxVideoStorageGb: Number(institute.maxVideoStorageGb ?? institute.max_video_storage_gb ?? 50),
+    registrationSource: institute.registrationSource || "admin",
+    isDirectRegistration: Boolean(institute.isDirectRegistration),
   };
 };
 

@@ -191,6 +191,13 @@ const protect = async (req, res, next) => {
         if (!institute && req.user._id && String(req.user._id) !== "[object Object]") {
           institute = await Institute.findOne({ adminUser: req.user._id });
         }
+        if (!institute && req.user.phone) {
+          const cleanPhone = String(req.user.phone).replace(/\D/g, "").slice(-10);
+          institute = await Institute.findOne({ adminPhone: cleanPhone });
+          if (institute && !req.user.institute) {
+            req.user.institute = institute._id;
+          }
+        }
 
         // Check DirectRegistration table for trial accounts if not found in Institute table
         if (!institute) {

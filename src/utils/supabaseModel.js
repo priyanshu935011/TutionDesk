@@ -657,7 +657,8 @@ const snakeToCamel = (str) => {
 
 const KNOWN_MISSING_COLUMNS = new Map([
   ["notes", new Set(["created_by", "user"])],
-  ["test_marks", new Set(["enrollment_number"])]
+  ["test_marks", new Set(["enrollment_number"])],
+  ["institutes", new Set(["registration_source", "is_direct_registration", "storage_limit_mb"])]
 ]);
 
 export function recordMissingColumn(tableName, badCol) {
@@ -906,6 +907,12 @@ class SupabaseDocument {
       this.payout_approved_at = this.payoutApprovedAt;
       this.payoutApprovedBy = data.payout_approved_by || meta.payoutApprovedBy || null;
       this.payout_approved_by = this.payoutApprovedBy;
+      this.registrationSource = data.registration_source || meta.registrationSource || (data.created_by_name === "direct_registration" ? "direct" : (this.registrationSource || "admin"));
+      this.registration_source = this.registrationSource;
+      this.isDirectRegistration = meta.isDirectRegistration ?? (this.registrationSource === "direct");
+      this.is_direct_registration = this.isDirectRegistration;
+      this.storageLimitMb = Number(data.storage_limit_mb ?? meta.storageLimitMb ?? this.storageLimitMb ?? 500);
+      this.storage_limit_mb = this.storageLimitMb;
     }
 
     if (tableName === "students" && this._id) {
@@ -1181,6 +1188,10 @@ class SupabaseDocument {
       delete payload.staffName;
       delete payload.storage_limit_mb;
       delete payload.storageLimitMb;
+      delete payload.registration_source;
+      delete payload.registrationSource;
+      delete payload.is_direct_registration;
+      delete payload.isDirectRegistration;
     }
 
     if (this._tableName === "users") {
@@ -1427,6 +1438,9 @@ class SupabaseDocument {
           payoutApprovedAt: this.payoutApprovedAt ?? metadata[this._id]?.payoutApprovedAt ?? null,
           payoutApprovedBy: this.payoutApprovedBy ?? metadata[this._id]?.payoutApprovedBy ?? null,
           absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
+          registrationSource: this.registrationSource ?? metadata[this._id]?.registrationSource ?? "admin",
+          isDirectRegistration: this.isDirectRegistration ?? metadata[this._id]?.isDirectRegistration ?? false,
+          storageLimitMb: this.storageLimitMb ?? metadata[this._id]?.storageLimitMb ?? 500,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1589,6 +1603,9 @@ class SupabaseDocument {
           payoutApprovedAt: this.payoutApprovedAt ?? metadata[this._id]?.payoutApprovedAt ?? null,
           payoutApprovedBy: this.payoutApprovedBy ?? metadata[this._id]?.payoutApprovedBy ?? null,
           absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
+          registrationSource: this.registrationSource ?? metadata[this._id]?.registrationSource ?? "admin",
+          isDirectRegistration: this.isDirectRegistration ?? metadata[this._id]?.isDirectRegistration ?? false,
+          storageLimitMb: this.storageLimitMb ?? metadata[this._id]?.storageLimitMb ?? 500,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1837,6 +1854,11 @@ class SupabaseQuery {
         delete currentFilter.leadApiKey;
         delete currentFilter.lead_api_key;
       }
+    }
+
+    if (this.tableName === "institutes" && (currentFilter.registrationSource !== undefined || currentFilter.isDirectRegistration !== undefined)) {
+      const allInsts = await this.find(filter);
+      return allInsts.length;
     }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {
@@ -2098,7 +2120,21 @@ class SupabaseQuery {
           }
         }
 
-        const docs = rows.map(row => new SupabaseDocument(tableName, row, this.model));
+        let docs = rows.map(row => new SupabaseDocument(tableName, row, this.model));
+        if (tableName === "institutes" && docs.length > 0) {
+          if (initialFilter.registrationSource !== undefined) {
+            const targetSource = initialFilter.registrationSource;
+            if (typeof targetSource === "string") {
+              docs = docs.filter(d => (d.registrationSource || "admin") === targetSource);
+            } else if (targetSource && targetSource.$ne) {
+              docs = docs.filter(d => (d.registrationSource || "admin") !== targetSource.$ne);
+            }
+          }
+          if (initialFilter.isDirectRegistration !== undefined) {
+            const targetBool = Boolean(initialFilter.isDirectRegistration);
+            docs = docs.filter(d => Boolean(d.isDirectRegistration) === targetBool);
+          }
+        }
         if (tableName === "students" && docs.length > 0) {
           await this.populateStudentRecords(docs);
         }
@@ -2782,6 +2818,10 @@ class SupabaseModel {
       delete payload.absentContactPhone;
       delete payload.storage_limit_mb;
       delete payload.storageLimitMb;
+      delete payload.registration_source;
+      delete payload.registrationSource;
+      delete payload.is_direct_registration;
+      delete payload.isDirectRegistration;
     }
 
     if (this.tableName === "users") {
@@ -3123,6 +3163,9 @@ class SupabaseModel {
         payoutApprovalStatus: doc.payoutApprovalStatus || "pending",
         payoutApprovedAt: doc.payoutApprovedAt || null,
         payoutApprovedBy: doc.payoutApprovedBy || null,
+        registrationSource: doc.registrationSource || (doc.createdByName === "direct_registration" ? "direct" : "admin"),
+        isDirectRegistration: doc.isDirectRegistration ?? (doc.registrationSource === "direct" || doc.createdByName === "direct_registration"),
+        storageLimitMb: doc.storageLimitMb ?? 500,
       };
       writeInstitutesMetadata(metadata);
     }
@@ -3589,6 +3632,11 @@ class SupabaseModel {
         delete currentFilter.leadApiKey;
         delete currentFilter.lead_api_key;
       }
+    }
+
+    if (this.tableName === "institutes" && (currentFilter.registrationSource !== undefined || currentFilter.isDirectRegistration !== undefined)) {
+      const allInsts = await this.find(filter);
+      return allInsts.length;
     }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {

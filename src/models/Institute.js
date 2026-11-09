@@ -126,6 +126,19 @@ const instituteSchema = new mongoose.Schema(
       enum: ["institution", "solo"],
       default: "solo",
     },
+    registrationSource: {
+      type: String,
+      enum: ["admin", "direct"],
+      default: "admin",
+    },
+    isDirectRegistration: {
+      type: Boolean,
+      default: false,
+    },
+    storageLimitMb: {
+      type: Number,
+      default: 500,
+    },
     isDemoAccount: {
       type: Boolean,
       default: false,
