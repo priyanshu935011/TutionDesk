@@ -52,6 +52,10 @@ import {
   getAdminFestivalTheme,
   updateAdminFestivalTheme,
   getAiHarvestLogs,
+  getTextBeeSettings,
+  updateTextBeeSettings,
+  sendTextBeeTestSms,
+  getTextBeeDevices,
 } from "../controllers/adminController.js";
 import {
   sendBroadcastNotification,
@@ -115,6 +119,12 @@ router.put("/whatsapp-settings", updateMetaWhatsAppSettings);
 
 router.get("/fcm-settings", getFcmSettings);
 router.put("/fcm-settings", updateFcmSettings);
+
+// TextBee SMS Gateway Routes
+router.get("/textbee-settings", getTextBeeSettings);
+router.put("/textbee-settings", updateTextBeeSettings);
+router.post("/textbee/test-sms", sendTextBeeTestSms);
+router.get("/textbee/devices", getTextBeeDevices);
 
 // Push Notification Studio Routes
 router.post("/push-notifications/broadcast", sendBroadcastNotification);

@@ -291,7 +291,7 @@ export const forgotStudentPassword = async (req, res) => {
 
     const recipientPhone = cleanPhone || student.phone?.trim() || student.parentPhone?.trim();
 
-    // 1. If user entered a Phone Number (or input is not email): send OTP via Hanu SMS API
+    // 1. If user entered a Phone Number (or input is not email): send OTP via TextBee SMS Gateway
     if (!isEmail && recipientPhone) {
       try {
         await sendSMSOTP(recipientPhone, otp);

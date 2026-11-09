@@ -513,7 +513,7 @@ export const appForgotUserPassword = async (req, res) => {
 
     const recipientPhone = cleanPhone || user.phone?.trim();
 
-    // 1. If user entered a Phone Number (or input is not email): send OTP via Hanu SMS API
+    // 1. If user entered a Phone Number (or input is not email): send OTP via TextBee SMS Gateway
     if (!isEmail && recipientPhone) {
       try {
         await sendSMSOTP(recipientPhone, otp);
@@ -703,7 +703,7 @@ export const sendLoginOtp = async (req, res) => {
 
     const recipientPhone = cleanPhone || user.phone?.trim();
 
-    // 1. If mobile number entered or present, send SMS OTP via Hanu SMS
+    // 1. If mobile number entered or present, send SMS OTP via TextBee SMS Gateway
     if (!isEmail && recipientPhone) {
       try {
         await sendSMSOTP(recipientPhone, otp);

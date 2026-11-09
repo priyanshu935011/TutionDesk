@@ -213,12 +213,12 @@ export const sendRegistrationOtp = async (req, res) => {
     memoryOtpStore.set(cleanPhone, otpPayload);
     phoneCooldownTracker.set(cleanPhone, Date.now());
 
-    // 5. Dispatch SMS OTP via Hanu OTP API
+    // 5. Dispatch SMS OTP via TextBee SMS Gateway
     try {
       await sendSMSOTP(cleanPhone, otp);
-      console.log(`[DirectRegistration] Hanu OTP sent successfully to ${cleanPhone}`);
+      console.log(`[DirectRegistration] TextBee SMS OTP sent successfully to ${cleanPhone}`);
     } catch (smsErr) {
-      console.error("[DirectRegistration] Failed to send Hanu OTP:", smsErr.message);
+      console.error("[DirectRegistration] Failed to send TextBee SMS OTP:", smsErr.message);
       return res.status(500).json({
         success: false,
         message: smsErr.message || "Could not deliver verification SMS. Please check the number.",

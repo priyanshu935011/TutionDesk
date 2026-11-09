@@ -34,6 +34,7 @@ import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import { getInstituteAiDetails } from "../services/aiService.js";
+import { getTextBeeConfig, sendCustomSMS, fetchTextBeeDevices } from "../utils/smsHelper.js";
 
 const getAdminEmails = async () => {
   try {
@@ -1695,6 +1696,100 @@ export const updateMetaWhatsAppSettings = async (req, res) => {
   } catch (error) {
     console.error("updateMetaWhatsAppSettings error:", error);
     return res.status(500).json({ message: "Could not update Meta WhatsApp settings" });
+  }
+};
+
+export const getTextBeeSettings = async (req, res) => {
+  try {
+    const config = await getTextBeeConfig();
+    return res.json({
+      success: true,
+      settings: {
+        apiKey: config.apiKey || "",
+        deviceId: config.deviceId || "",
+        messageTemplate: config.messageTemplate || "Your ClassTech verification code is {otp}. Valid for 5 minutes.",
+        baseUrl: config.baseUrl || "https://api.textbee.dev/api/v1",
+        enabled: config.enabled !== false,
+        isConfigured: config.isConfigured,
+      },
+    });
+  } catch (error) {
+    console.error("getTextBeeSettings error:", error);
+    return res.status(500).json({ success: false, message: "Could not fetch TextBee settings" });
+  }
+};
+
+export const updateTextBeeSettings = async (req, res) => {
+  try {
+    const { apiKey, deviceId, messageTemplate, baseUrl, enabled } = req.body;
+    let setting = await SystemSetting.findOne({ key: "textbee_sms_settings" });
+    const updatedValue = {
+      apiKey: (apiKey || "").trim(),
+      deviceId: (deviceId || "").trim(),
+      messageTemplate: (messageTemplate || "Your ClassTech verification code is {otp}. Valid for 5 minutes.").trim(),
+      baseUrl: (baseUrl || "https://api.textbee.dev/api/v1").trim().replace(/\/+$/, ""),
+      enabled: enabled !== false,
+    };
+
+    if (setting) {
+      setting.value = updatedValue;
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "textbee_sms_settings",
+        value: updatedValue,
+        description: "TextBee SMS gateway credentials and configuration for sending OTPs and alerts",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "TextBee SMS settings saved successfully!",
+      settings: setting.value,
+    });
+  } catch (error) {
+    console.error("updateTextBeeSettings error:", error);
+    return res.status(500).json({ success: false, message: "Could not save TextBee settings" });
+  }
+};
+
+export const sendTextBeeTestSms = async (req, res) => {
+  try {
+    const { phone, message, apiKey, deviceId } = req.body;
+    if (!phone) {
+      return res.status(400).json({ success: false, message: "Recipient mobile number is required." });
+    }
+    const testMsg = (message || "Hello from ClassTech! This is a test SMS from TextBee SMS Gateway.").trim();
+    const result = await sendCustomSMS(phone, testMsg, { apiKey, deviceId });
+
+    return res.json({
+      success: true,
+      message: `Test SMS successfully sent via TextBee to ${result.recipient}!`,
+      data: result.data,
+    });
+  } catch (error) {
+    console.error("sendTextBeeTestSms error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to send test SMS via TextBee.",
+    });
+  }
+};
+
+export const getTextBeeDevices = async (req, res) => {
+  try {
+    const { apiKey } = req.query;
+    const devices = await fetchTextBeeDevices(apiKey);
+    return res.json({
+      success: true,
+      devices,
+    });
+  } catch (error) {
+    console.error("getTextBeeDevices error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Could not fetch devices from TextBee.",
+    });
   }
 };
 
