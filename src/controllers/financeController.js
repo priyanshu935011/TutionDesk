@@ -72,7 +72,7 @@ export const getFinanceAnalytics = async (req, res) => {
     // 2. Fetch Extra Incomes for this month
     const extraIncomesDocs = await InstituteIncome.find({
       institute: instituteId,
-      $or: [{ monthKey: monthKey }, { date: { $regex: `^${monthKey}` } }],
+      monthKey: monthKey,
     }).sort({ date: -1 });
 
     const extraIncomes = extraIncomesDocs.map((doc) => {
@@ -148,7 +148,7 @@ export const getFinanceAnalytics = async (req, res) => {
     // 4. Fetch Extra Expenses for this month
     const extraExpensesDocs = await InstituteExpense.find({
       institute: instituteId,
-      $or: [{ monthKey: monthKey }, { date: { $regex: `^${monthKey}` } }],
+      monthKey: monthKey,
     }).sort({ date: -1 });
 
     const extraExpenses = extraExpensesDocs.map((doc) => {

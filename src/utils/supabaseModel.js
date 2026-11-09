@@ -15,8 +15,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs",
-  "staff_attendances", "institute_expenses", "institute_incomes", "staff_salaries"
+  "activity_logs", "activitylogs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -3019,6 +3018,29 @@ class SupabaseModel {
       if (payload.max_video_storage_gb === undefined && doc.maxVideoStorageGb !== undefined) payload.max_video_storage_gb = Number(doc.maxVideoStorageGb);
     }
 
+    if (this.tableName === "institute_expenses" || this.tableName === "institute_incomes") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.created_by || payload.createdBy) {
+        const cb = payload.created_by || payload.createdBy;
+        payload.created_by = cb ? toValidUUID(cb) : null;
+        delete payload.createdBy;
+      }
+    }
+
+    if (this.tableName === "staff_salaries" || this.tableName === "staff_attendances") {
+      if (payload.institute || payload.institute_id) {
+        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        delete payload.institute;
+      }
+      if (payload.staff || payload.staff_id) {
+        payload.staff_id = toValidUUID(payload.staff_id || payload.staff);
+        delete payload.staff;
+      }
+    }
+
     const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
     for (const key of uuidPayloadKeys) {
       if (key in payload) {
@@ -3049,7 +3071,12 @@ class SupabaseModel {
         .maybeSingle();
 
       if (error && error.message) {
-        const strictTables = ["notes", "institutes", "students", "batches", "test_series", "test_series_folders", "institute_test_series", "test_series_categories", "test_series_attempts", "support_tickets", "support_faqs", "support_tutorials"];
+        const strictTables = [
+          "notes", "institutes", "students", "batches", "test_series",
+          "test_series_folders", "institute_test_series", "test_series_categories",
+          "test_series_attempts", "support_tickets", "support_faqs", "support_tutorials",
+          "institute_expenses", "institute_incomes", "staff_salaries", "staff_attendances"
+        ];
         const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
 
         if (!isStrictTable && (
