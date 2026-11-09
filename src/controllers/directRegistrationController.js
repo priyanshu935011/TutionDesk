@@ -558,6 +558,7 @@ export const verifyOtpAndRegister = async (req, res) => {
     const now = Date.now();
     const trialEndMs = trialEnds.getTime();
     const daysLeft = Math.max(0, Math.ceil((trialEndMs - now) / (1000 * 60 * 60 * 24)));
+    const isExpired = daysLeft <= 0;
 
     const institutePayload = {
       id: instId,
@@ -604,7 +605,7 @@ export const verifyOtpAndRegister = async (req, res) => {
         institute: institutePayload,
       },
       trial: {
-        endsAt: registration.trialEndsAt,
+        endsAt: trialEnds,
         daysLeft,
         isExpired,
       },
