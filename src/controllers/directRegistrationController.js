@@ -75,7 +75,6 @@ export const getGlobalTrialDefaults = async () => {
         trialDays: Number(val.trialDays || 7),
         wpBalance: Number(val.wpBalance ?? 10.0),
         aiBalance: Number(val.aiBalance ?? 50.0),
-        storageLimitMb: Number(val.storageLimitMb ?? 500),
         aiEnabled: val.aiEnabled !== undefined ? Boolean(val.aiEnabled) : true,
         aiStudentEnabled: val.aiStudentEnabled !== undefined ? Boolean(val.aiStudentEnabled) : false,
         recordedLecturesFeatureEnabled: val.recordedLecturesFeatureEnabled !== undefined ? Boolean(val.recordedLecturesFeatureEnabled) : true,
@@ -109,7 +108,6 @@ export const getGlobalTrialDefaults = async () => {
     trialDays: 7,
     wpBalance: 10.0,
     aiBalance: 50.0,
-    storageLimitMb: 500,
     aiEnabled: true,
     aiStudentEnabled: false,
     recordedLecturesFeatureEnabled: true,
@@ -390,7 +388,6 @@ export const verifyOtpAndRegister = async (req, res) => {
       ...(metadata[instId] || {}),
       registrationSource: "direct",
       isDirectRegistration: true,
-      storageLimitMb: Number(defaults.storageLimitMb || 500),
       walletBalance: Number(defaults.wpBalance ?? 10.0),
       aiWalletBalance: Number(defaults.aiBalance ?? 50.0),
       aiEnabled: defaults.aiEnabled !== false,
@@ -552,7 +549,6 @@ export const verifyOtpAndRegister = async (req, res) => {
       allowedFeatures: allFeatures,
       walletBalance: Number(defaults.wpBalance ?? 10.0),
       aiBalance: Number(defaults.aiBalance ?? 50.0),
-      storageLimitMb: Number(defaults.storageLimitMb ?? 500),
       quizFeatureEnabled: defaults.quizFeatureEnabled !== false,
       recordedLecturesFeatureEnabled: defaults.recordedLecturesFeatureEnabled !== false,
       releaseVideosFeatureEnabled: defaults.releaseVideosFeatureEnabled !== false,
@@ -633,7 +629,6 @@ export const syncFallbackRecordsToSupabase = async () => {
               : ["attendance", "notes", "marks", "tests", "whatsapp", "finances", "ai", "homework", "quizzes"],
             wp_balance: Number(item.wpBalance ?? item.wp_balance ?? 10.0),
             ai_balance: Number(item.aiBalance ?? item.ai_balance ?? 50.0),
-            storage_limit_mb: Number(item.storageLimitMb ?? item.storage_limit_mb ?? 500),
             storage_used_bytes: Number(item.storageUsedBytes ?? item.storage_used_bytes ?? 0),
             ai_enabled: item.aiEnabled !== undefined ? Boolean(item.aiEnabled) : (item.ai_enabled !== undefined ? Boolean(item.ai_enabled) : true),
             ai_student_enabled: Boolean(item.aiStudentEnabled ?? item.ai_student_enabled),
@@ -721,7 +716,6 @@ export const getAdminDirectRegistrations = async (req, res) => {
         features: doc.allowedFeatures || doc.features || [],
         wpBalance: Number(doc.walletBalance ?? doc.wpBalance ?? 0),
         aiBalance: Number(doc.aiWalletBalance ?? doc.aiBalance ?? 0),
-        storageLimitMb: Number(doc.storageLimitMb || 500),
         aiEnabled: doc.aiEnabled !== false && doc.ai_enabled !== false,
         aiStudentEnabled: Boolean(doc.aiStudentEnabled ?? doc.ai_student_enabled),
         recordedLecturesFeatureEnabled:
@@ -812,7 +806,6 @@ export const updateAdminDirectRegistration = async (req, res) => {
       features,
       wpBalance,
       aiBalance,
-      storageLimitMb,
       status,
       extendDays,
       notes,
@@ -855,9 +848,6 @@ export const updateAdminDirectRegistration = async (req, res) => {
     }
     if (aiBalance !== undefined) {
       institute.aiWalletBalance = Math.max(0, Number(aiBalance || 0));
-    }
-    if (storageLimitMb !== undefined) {
-      institute.storageLimitMb = Math.max(0, Number(storageLimitMb || 500));
     }
     if (aiEnabled !== undefined) {
       institute.aiEnabled = Boolean(aiEnabled);
@@ -952,7 +942,6 @@ export const updateAdminDirectRegistration = async (req, res) => {
       ...(metadata[instId] || {}),
       registrationSource: "direct",
       isDirectRegistration: true,
-      storageLimitMb: institute.storageLimitMb,
       walletBalance: institute.walletBalance,
       aiWalletBalance: institute.aiWalletBalance,
       quizFeatureEnabled: institute.quizFeatureEnabled,
@@ -1346,7 +1335,6 @@ export const updateAdminTrialDefaults = async (req, res) => {
       trialDays,
       wpBalance,
       aiBalance,
-      storageLimitMb,
       features,
       aiEnabled,
       aiStudentEnabled,
@@ -1362,7 +1350,6 @@ export const updateAdminTrialDefaults = async (req, res) => {
       trialDays: Number(trialDays || 7),
       wpBalance: Number(wpBalance ?? 10.0),
       aiBalance: Number(aiBalance ?? 50.0),
-      storageLimitMb: Number(storageLimitMb ?? 500),
       aiEnabled: aiEnabled !== undefined ? Boolean(aiEnabled) : true,
       aiStudentEnabled: aiStudentEnabled !== undefined ? Boolean(aiStudentEnabled) : false,
       recordedLecturesFeatureEnabled: recordedLecturesFeatureEnabled !== undefined ? Boolean(recordedLecturesFeatureEnabled) : true,

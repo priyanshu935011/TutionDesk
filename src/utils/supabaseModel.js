@@ -658,7 +658,7 @@ const snakeToCamel = (str) => {
 const KNOWN_MISSING_COLUMNS = new Map([
   ["notes", new Set(["created_by", "user"])],
   ["test_marks", new Set(["enrollment_number"])],
-  ["institutes", new Set(["registration_source", "is_direct_registration", "storage_limit_mb"])]
+  ["institutes", new Set(["registration_source", "is_direct_registration"])]
 ]);
 
 export function recordMissingColumn(tableName, badCol) {
@@ -911,8 +911,6 @@ class SupabaseDocument {
       this.registration_source = this.registrationSource;
       this.isDirectRegistration = meta.isDirectRegistration ?? (this.registrationSource === "direct");
       this.is_direct_registration = this.isDirectRegistration;
-      this.storageLimitMb = Number(data.storage_limit_mb ?? meta.storageLimitMb ?? this.storageLimitMb ?? 500);
-      this.storage_limit_mb = this.storageLimitMb;
     }
 
     if (tableName === "students" && this._id) {
@@ -1186,8 +1184,6 @@ class SupabaseDocument {
       delete payload.whatsappSettings;
       delete payload.staff_name;
       delete payload.staffName;
-      delete payload.storage_limit_mb;
-      delete payload.storageLimitMb;
       delete payload.registration_source;
       delete payload.registrationSource;
       delete payload.is_direct_registration;
@@ -1440,7 +1436,6 @@ class SupabaseDocument {
           absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
           registrationSource: this.registrationSource ?? metadata[this._id]?.registrationSource ?? "admin",
           isDirectRegistration: this.isDirectRegistration ?? metadata[this._id]?.isDirectRegistration ?? false,
-          storageLimitMb: this.storageLimitMb ?? metadata[this._id]?.storageLimitMb ?? 500,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1605,7 +1600,6 @@ class SupabaseDocument {
           absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
           registrationSource: this.registrationSource ?? metadata[this._id]?.registrationSource ?? "admin",
           isDirectRegistration: this.isDirectRegistration ?? metadata[this._id]?.isDirectRegistration ?? false,
-          storageLimitMb: this.storageLimitMb ?? metadata[this._id]?.storageLimitMb ?? 500,
         };
         writeInstitutesMetadata(metadata);
       }
@@ -2816,8 +2810,6 @@ class SupabaseModel {
       delete payload.whatsappSettings;
       delete payload.absent_contact_phone;
       delete payload.absentContactPhone;
-      delete payload.storage_limit_mb;
-      delete payload.storageLimitMb;
       delete payload.registration_source;
       delete payload.registrationSource;
       delete payload.is_direct_registration;
@@ -3165,7 +3157,6 @@ class SupabaseModel {
         payoutApprovedBy: doc.payoutApprovedBy || null,
         registrationSource: doc.registrationSource || (doc.createdByName === "direct_registration" ? "direct" : "admin"),
         isDirectRegistration: doc.isDirectRegistration ?? (doc.registrationSource === "direct" || doc.createdByName === "direct_registration"),
-        storageLimitMb: doc.storageLimitMb ?? 500,
       };
       writeInstitutesMetadata(metadata);
     }

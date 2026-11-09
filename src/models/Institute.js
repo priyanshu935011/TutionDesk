@@ -135,10 +135,6 @@ const instituteSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    storageLimitMb: {
-      type: Number,
-      default: 500,
-    },
     isDemoAccount: {
       type: Boolean,
       default: false,

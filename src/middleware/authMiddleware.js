@@ -247,7 +247,7 @@ const protect = async (req, res, next) => {
                 ],
                 walletBalance: Number(reg.wpBalance || 0),
                 aiBalance: Number(reg.aiBalance || 0),
-                storageLimitMb: Number(reg.storageLimitMb || 500),
+                maxVideoStorageGb: Number(reg.maxVideoStorageGb || 5),
                 isDirectTrial: true,
               };
             }
