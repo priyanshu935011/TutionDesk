@@ -12,7 +12,13 @@ import { sendSMSOTP } from "../utils/smsHelper.js";
 import { sendMessage } from "../services/whatsappService.js";
 import redisClient from "../config/redis.js";
 import { clearCachePattern } from "../utils/cache.js";
-import { supabase, readFallbackData, writeFallbackData } from "../utils/supabaseModel.js";
+import {
+  supabase,
+  readFallbackData,
+  writeFallbackData,
+  readInstitutesMetadata,
+  writeInstitutesMetadata,
+} from "../utils/supabaseModel.js";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
