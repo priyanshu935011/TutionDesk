@@ -166,12 +166,15 @@ export const sendRegistrationOtp = async (req, res) => {
     }
 
     const existingInst = await Institute.findOne({ adminPhone: cleanPhone });
-    if (existingInst) {
-      return res.status(400).json({
-        success: false,
-        isExistingUser: true,
-        message: "An academy is already registered with this mobile number. Please log in directly.",
-      });
+    if (existingInst && existingInst.adminUser) {
+      const adminUser = await User.findById(existingInst.adminUser).catch(() => null);
+      if (adminUser) {
+        return res.status(400).json({
+          success: false,
+          isExistingUser: true,
+          message: "An academy is already registered with this mobile number. Please log in directly.",
+        });
+      }
     }
 
     const existingTrial = await DirectRegistration.findOne({ phone: cleanPhone });
@@ -260,6 +263,8 @@ export const sendRegistrationOtp = async (req, res) => {
  * Verify OTP, create 7-day trial direct registration, and open educator account
  */
 export const verifyOtpAndRegister = async (req, res) => {
+  let instId = null;
+  let isNewRegistration = false;
   try {
     const { phone, otp, name, instituteName, fcmToken } = req.body;
     const cleanPhone = (phone || "").toString().replace(/\D/g, "").slice(-10);
@@ -352,7 +357,7 @@ export const verifyOtpAndRegister = async (req, res) => {
           "recorded_lectures", "release_videos", "test_series"
         ];
 
-    const instId = institute ? String(institute._id || institute.id) : crypto.randomUUID();
+    instId = institute ? String(institute._id || institute.id) : crypto.randomUUID();
 
     // 3. Create or update Institute record in institutes table
     const instPayload = {
@@ -433,10 +438,12 @@ export const verifyOtpAndRegister = async (req, res) => {
         `⏰ *Time:* ${timeStr}\n\n` +
         `_Login to Super Admin to configure trial features & balances._`;
 
-      const templateConfig = {
-        templateName: process.env.META_REGISTRATION_TEMPLATE_NAME || "app_educator_registration",
-        parameters: [regName, cleanPhone, regInstName, timeStr],
-      };
+      const templateConfig = process.env.META_REGISTRATION_TEMPLATE_NAME
+        ? {
+            templateName: process.env.META_REGISTRATION_TEMPLATE_NAME,
+            parameters: [regName, cleanPhone, regInstName, timeStr],
+          }
+        : null;
 
       sendMessage("admin_test", alertPhone, wpMessage, "custom", templateConfig).catch((err) => {
         console.warn("[DirectRegistration] WhatsApp alert to 9934597030 warning:", err.message);
@@ -446,7 +453,7 @@ export const verifyOtpAndRegister = async (req, res) => {
     }
 
     // 5. Ensure matching User exists pointing to the valid institute ID
-    let isNewRegistration = false;
+    isNewRegistration = false;
     let user = await User.findOne({
       $or: [{ phone: cleanPhone }, { email: `${cleanPhone}@direct.classtech.in` }],
     });
@@ -479,7 +486,9 @@ export const verifyOtpAndRegister = async (req, res) => {
           role: "institute_admin",
           institute_id: instId,
         };
-        await supabase.from("users").insert(directUserPayload).catch(() => {});
+        try {
+          await supabase.from("users").insert(directUserPayload);
+        } catch (_) {}
         user = await User.findById(newUserId).catch(() => ({
           _id: newUserId,
           id: newUserId,
@@ -496,15 +505,23 @@ export const verifyOtpAndRegister = async (req, res) => {
       user.institute_id = instId;
       user.isTrialRegistration = true;
       user.aiAccessEnabled = allFeatures.includes("ai");
-      await user.save().catch(async () => {
-        await supabase.from("users").update({ institute_id: instId }).eq("id", String(user._id || user.id)).catch(() => {});
-      });
+      try {
+        await user.save();
+      } catch (_) {
+        try {
+          await supabase.from("users").update({ institute_id: instId }).eq("id", String(user._id || user.id));
+        } catch (_) {}
+      }
     }
 
     if (institute && user && (!institute.adminUser || String(institute.adminUser) !== String(user._id || user.id))) {
       institute.adminUser = user._id || user.id;
-      await institute.save().catch(() => {});
-      await supabase.from("institutes").update({ admin_user: String(user._id || user.id) }).eq("id", instId).catch(() => {});
+      try {
+        await institute.save();
+      } catch (_) {}
+      try {
+        await supabase.from("institutes").update({ admin_user: String(user._id || user.id) }).eq("id", instId);
+      } catch (_) {}
     }
 
     // 6. Generate Session and JWT Token
@@ -594,6 +611,17 @@ export const verifyOtpAndRegister = async (req, res) => {
     });
   } catch (error) {
     console.error("[verifyOtpAndRegister] Error:", error);
+    if (isNewRegistration && instId) {
+      try {
+        await Institute.findByIdAndDelete(instId);
+        await supabase.from("institutes").delete().eq("id", instId);
+        const metadata = readInstitutesMetadata();
+        if (metadata[instId]) {
+          delete metadata[instId];
+          writeInstitutesMetadata(metadata);
+        }
+      } catch (_) {}
+    }
     return res.status(500).json({
       success: false,
       message: "Verification failed: " + error.message,
@@ -940,7 +968,9 @@ export const updateAdminDirectRegistration = async (req, res) => {
       subscription_end: new Date(institute.subscriptionEnd).toISOString(),
       status: institute.status,
     };
-    await supabase.from("institutes").update(instUpdate).eq("id", instId).catch(() => {});
+    try {
+      await supabase.from("institutes").update(instUpdate).eq("id", instId);
+    } catch (_) {}
 
     // Save in metadata
     const metadata = readInstitutesMetadata();

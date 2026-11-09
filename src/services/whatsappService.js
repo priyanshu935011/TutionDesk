@@ -428,8 +428,35 @@ export const sendMessage = async (instituteId, to, text, msgType = "custom", tem
       });
     }
 
-    const data = await response.json();
+    let data = await response.json();
     if (!response.ok) {
+      if (templateConfig && templateConfig.templateName) {
+        console.warn(`Meta template [${templateConfig.templateName}] rejected (${data.error?.message || "error"}). Retrying with direct text message to ${cleanNumber}...`);
+        try {
+          const fallbackRes = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${accessToken}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              recipient_type: "individual",
+              to: cleanNumber,
+              type: "text",
+              text: {
+                preview_url: false,
+                body: text
+              }
+            })
+          });
+          const fallbackData = await fallbackRes.json();
+          if (fallbackRes.ok) {
+            await recordLogAndDeduct(instituteId, inst, charge, cleanNumber, text, msgType, true);
+            return { success: true, messageId: fallbackData.messages?.[0]?.id || "wa_id_sent" };
+          }
+        } catch (_) {}
+      }
       throw new Error(data.error?.message || "Meta API response error");
     }
 

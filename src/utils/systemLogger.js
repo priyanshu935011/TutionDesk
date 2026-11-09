@@ -169,14 +169,16 @@ export const logSystemError = async ({
         `🚨 *Error:* ${message || "Unknown error"}\n` +
         `⏰ *Time:* ${timeStr}`;
 
-      const templateConfig = {
-        templateName: process.env.META_ERROR_TEMPLATE_NAME || "system_error_alert",
-        parameters: [
-          methodPath,    // {{1}}
-          errorDetails,  // {{2}}
-          timeStr,       // {{3}}
-        ],
-      };
+      const templateConfig = process.env.META_ERROR_TEMPLATE_NAME
+        ? {
+            templateName: process.env.META_ERROR_TEMPLATE_NAME,
+            parameters: [
+              methodPath,    // {{1}}
+              errorDetails,  // {{2}}
+              timeStr,       // {{3}}
+            ],
+          }
+        : null;
 
       sendMessage("admin_test", alertPhone, whatsappMessage, "error_alert", templateConfig).catch((err) => {
         console.warn("Failed to dispatch WhatsApp error alert:", err.message);
