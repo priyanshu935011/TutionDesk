@@ -189,13 +189,17 @@ export const getSalesOverview = async (req, res) => {
       return false;
     });
 
-    // Count calls logged today
+    // Count calls logged today and this month
     let callsToday = 0;
+    let callsThisMonth = 0;
     myLeads.forEach((lead) => {
       (lead.callLogs || []).forEach((call) => {
         const callDate = new Date(call.date);
         if (callDate >= startOfToday) {
           callsToday++;
+        }
+        if (callDate >= startOfMonth) {
+          callsThisMonth++;
         }
       });
     });
@@ -224,6 +228,7 @@ export const getSalesOverview = async (req, res) => {
       },
       dailyMetrics: {
         callsToday,
+        callsThisMonth,
         callsTarget: 30,
         followupsToday: todayFollowups.length,
         todaySalesCount: todayInstitutes.length,
