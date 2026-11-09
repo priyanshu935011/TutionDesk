@@ -385,6 +385,8 @@ export const verifyOtpAndRegister = async (req, res) => {
       max_video_storage_gb: Number(defaults.maxVideoStorageGb || 5),
       branding_enabled: defaults.brandingEnabled !== false,
       created_by_name: "direct_registration",
+      registration_source: "direct",
+      is_direct_registration: true,
     };
 
     try {

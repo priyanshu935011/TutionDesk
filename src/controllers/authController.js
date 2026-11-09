@@ -639,12 +639,47 @@ export const appResetUserPassword = async (req, res) => {
   }
 };
 
+const loginOtpIpTracker = new Map();
+const loginOtpPhoneCooldown = new Map();
+
 export const sendLoginOtp = async (req, res) => {
   try {
+    const clientIp = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.ip || "unknown").toString().split(",")[0].trim();
+    const now = Date.now();
+
+    // 1. IP-level Rate Limiting: max 5 requests per 10 minutes per IP
+    const ipRecord = loginOtpIpTracker.get(clientIp) || { count: 0, resetAt: now + 10 * 60 * 1000 };
+    if (now > ipRecord.resetAt) {
+      ipRecord.count = 0;
+      ipRecord.resetAt = now + 10 * 60 * 1000;
+    }
+    if (ipRecord.count >= 5) {
+      const waitSec = Math.ceil((ipRecord.resetAt - now) / 1000);
+      return res.status(429).json({
+        success: false,
+        message: `Too many login attempts. Please wait ${waitSec} seconds before trying again.`,
+      });
+    }
+
     const rawIdentifier = (req.body.identifier || req.body.email || req.body.phone || "").toString().trim();
     if (!rawIdentifier) {
       return res.status(400).json({ success: false, message: "Email or Mobile Number is required." });
     }
+
+    // 2. Cooldown per identifier: 60 seconds interval
+    const cleanCooldownKey = rawIdentifier.toLowerCase();
+    const lastSentTime = loginOtpPhoneCooldown.get(cleanCooldownKey) || 0;
+    if (now - lastSentTime < 60 * 1000) {
+      const remainingSec = Math.ceil((60 * 1000 - (now - lastSentTime)) / 1000);
+      return res.status(429).json({
+        success: false,
+        message: `Please wait ${remainingSec}s before requesting a new code.`,
+      });
+    }
+
+    ipRecord.count += 1;
+    loginOtpIpTracker.set(clientIp, ipRecord);
+    loginOtpPhoneCooldown.set(cleanCooldownKey, now);
 
     const isEmail = rawIdentifier.includes("@");
     const cleanPhone = rawIdentifier.replace(/\D/g, "");

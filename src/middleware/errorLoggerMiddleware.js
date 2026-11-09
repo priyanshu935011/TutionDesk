@@ -18,9 +18,9 @@ export const errorLoggerMiddleware = (req, res, next) => {
         errorMessage = body;
       }
 
-      // Ignore routine unauthenticated / expired session 401s (not server bugs)
+      // Ignore routine unauthenticated / expired session 401s, routine auth 404s, 400 validation failures, and 429 rate limits
       const isRoutineAuth =
-        res.statusCode === 401 &&
+        (res.statusCode === 401 &&
         (
           !req.headers.authorization ||
           (req.path === "/auth/me" || req.path === "/api/auth/me" || req.path === "/student/auth/me") ||
@@ -30,7 +30,20 @@ export const errorLoggerMiddleware = (req, res, next) => {
           errorMessage.includes("Not authorized") ||
           errorMessage.includes("Invalid student token") ||
           errorMessage.includes("Invalid token")
-        );
+        )) ||
+        (res.statusCode === 404 &&
+        (
+          errorMessage.includes("Educator account not found") ||
+          errorMessage.includes("User not found") ||
+          errorMessage.includes("Account not found")
+        )) ||
+        (res.statusCode === 400 &&
+        (
+          errorMessage.includes("Incorrect verification code") ||
+          errorMessage.includes("Invalid verification") ||
+          errorMessage.includes("Verification session has expired")
+        )) ||
+        res.statusCode === 429;
 
       if (!isRoutineAuth) {
         res.locals.errorLogged = true;

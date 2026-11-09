@@ -125,11 +125,17 @@ export const getInstituteFeatures = async (req, res) => {
       institute = await Institute.findOne({ adminUser: req.user._id });
     }
 
-    const feats = (institute && Array.isArray(institute.allowedFeatures))
+    const feats = (institute && Array.isArray(institute.allowedFeatures) && institute.allowedFeatures.length > 0)
       ? institute.allowedFeatures
-      : (rawInst && Array.isArray(rawInst.allowedFeatures) ? rawInst.allowedFeatures : ["attendance", "notes", "marks", "tests", "whatsapp", "recorded_lectures"]);
+      : (rawInst && Array.isArray(rawInst.allowedFeatures) && rawInst.allowedFeatures.length > 0
+          ? rawInst.allowedFeatures
+          : [
+              "attendance", "notes", "marks", "tests", "notices", "whatsapp",
+              "finances", "homework", "quizzes", "leads",
+              "recorded_lectures", "release_videos", "test_series"
+            ]);
 
-    return res.json({ allowedFeatures: feats });
+    return res.json({ allowedFeatures: feats, allowed_features: feats });
   } catch (error) {
     console.error("getInstituteFeatures error:", error);
     return res.status(500).json({ message: "Could not load features" });
@@ -203,6 +209,31 @@ export const getTeacherDashboard = async (req, res) => {
       if (savedSettings && Object.keys(savedSettings).length > 0) {
         institute.whatsappSettings = savedSettings;
       }
+
+      // Guarantee allowedFeatures & flags are never empty for active institutes & trials
+      const rawFeats = (institute && (institute.allowedFeatures || institute.allowed_features)) ||
+        (rawInst && (rawInst.allowedFeatures || rawInst.allowed_features));
+      const defaultFeatures = [
+        "attendance", "notes", "marks", "tests", "notices", "whatsapp",
+        "finances", "homework", "quizzes", "leads",
+        "recorded_lectures", "release_videos", "test_series"
+      ];
+      const finalFeatures = Array.isArray(rawFeats) && rawFeats.length > 0 ? rawFeats : defaultFeatures;
+      institute.allowedFeatures = finalFeatures;
+      institute.allowed_features = finalFeatures;
+      if (institute.testSeriesFeatureEnabled === undefined) {
+        institute.testSeriesFeatureEnabled = institute.test_series_feature_enabled !== false;
+      }
+      if (institute.recordedLecturesFeatureEnabled === undefined) {
+        institute.recordedLecturesFeatureEnabled = institute.recorded_lectures_feature_enabled !== false;
+      }
+      if (institute.quizFeatureEnabled === undefined) {
+        institute.quizFeatureEnabled = institute.quiz_feature_enabled !== false;
+      }
+      if (institute.brandingEnabled === undefined) {
+        institute.brandingEnabled = institute.branding_enabled !== false;
+      }
+
       steps["step1_institute"] = "ok";
     } catch (e1) {
       steps["step1_institute"] = { error: e1.message };
