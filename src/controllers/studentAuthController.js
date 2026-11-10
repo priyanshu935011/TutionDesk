@@ -11,11 +11,9 @@ import { sendSMSOTP } from "../utils/smsHelper.js";
 import redisClient from "../config/redis.js";
 import cloudinary from "../utils/cloudinary.js";
 import { deleteCache } from "../utils/cache.js";
+import { signSessionToken } from "../utils/jwtHelper.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
-
-const generateToken = (payload) =>
-  jwt.sign(payload, JWT_SECRET, { expiresIn: "3650d" });
+const generateToken = (payload) => signSessionToken(payload, "30d");
 
 const resolveInstituteForUserId = async (
   userId,
@@ -69,15 +67,15 @@ export const studentLogin = async (req, res) => {
       if (student.password) {
         isMatch = await bcrypt.compare(password, student.password);
       } else {
-        // Backwards compatibility for legacy accounts
+        // Legacy fallback migration ONLY for per-student initial password (no hardcoded global "123456")
         const legacyPassword = ((name, phone) => {
           const namePart = (name || "").replace(/\s+/g, "").substring(0, 4).toLowerCase();
           const cleanPhone = (phone || "").replace(/\D/g, "");
-          const phonePart = cleanPhone.length >= 4 ? cleanPhone.slice(-4) : "1234";
-          return namePart + phonePart;
+          const phonePart = cleanPhone.length >= 4 ? cleanPhone.slice(-4) : "";
+          return namePart && phonePart ? namePart + phonePart : null;
         })(student.name, student.phone);
 
-        if (password === "123456" || password === legacyPassword) {
+        if (legacyPassword && password === legacyPassword) {
           isMatch = true;
           student.password = await bcrypt.hash(password, 10);
           await student.save();

@@ -1,11 +1,12 @@
 import "dotenv/config";
 import cors from "cors";
 import express from "express";
+import helmet from "helmet";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import compression from "compression";
 import connectDB from "./config/db.js";
-import { initializeUptimeTracking } from "./middleware/authMiddleware.js";
+import protect, { initializeUptimeTracking } from "./middleware/authMiddleware.js";
 import { globalLimiter, authLimiter } from "./middleware/rateLimiter.js";
 import authRoutes from "./routes/authRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
@@ -28,11 +29,13 @@ import salesRoutes from "./routes/salesRoutes.js";
 import supportRoutes from "./routes/supportRoutes.js";
 import storeRoutes from "./routes/storeRoutes.js";
 import directRegistrationRoutes from "./routes/directRegistrationRoutes.js";
+import privacyRoutes from "./routes/privacyRoutes.js";
 import { reconnectAllSessions } from "./services/whatsappService.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js";
 import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
+import { startDpdpRetentionScheduler } from "./services/dpdpRetentionService.js";
 import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
 
 import { errorLoggerMiddleware, globalErrorHandler } from "./middleware/errorLoggerMiddleware.js";
@@ -62,7 +65,6 @@ const checkOrigin = (origin, callback) => {
                     normalized.startsWith("http://127.0.0.1:") ||
                     normalized.startsWith("https://127.0.0.1:") ||
                     normalized.endsWith("classtech.in") ||
-                    normalized.endsWith("classtech.in") ||
                     normalized.includes("netlify.app") ||
                     normalized.includes("vercel.app");
   if (isAllowed) {
@@ -80,6 +82,12 @@ const io = new Server(server, {
   },
 });
 
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    contentSecurityPolicy: false,
+  })
+);
 app.use(
   cors({
     origin: checkOrigin,
@@ -100,7 +108,10 @@ app.get(["/health", "/api/health"], (_, res) => {
   res.json({ status: "ok", uptime: process.uptime(), timestamp: new Date() });
 });
 
-app.get(["/flush-cache", "/api/flush-cache"], async (_, res) => {
+app.get(["/flush-cache", "/api/flush-cache"], protect, async (req, res) => {
+  if (req.user?.role !== "super_admin") {
+    return res.status(403).json({ message: "Super Admin authorization required." });
+  }
   try {
     flushMemoryCache();
     await clearCachePattern("*");
@@ -173,7 +184,12 @@ app.use(["/sales", "/api/sales"], salesRoutes);
 app.use(["/support", "/api/support"], supportRoutes);
 app.use(["/store", "/api/store"], storeRoutes);
 app.use(["/direct-registration", "/api/direct-registration"], directRegistrationRoutes);
-app.get("/debug-sentry", function mainHandler(req, res) {
+app.use(["/privacy", "/api/privacy"], privacyRoutes);
+
+app.get("/debug-sentry", protect, function mainHandler(req, res) {
+  if (process.env.NODE_ENV === "production" || req.user?.role !== "super_admin") {
+    return res.status(403).json({ message: "Forbidden" });
+  }
   throw new Error("My first Sentry error!");
 });
 
@@ -188,6 +204,7 @@ initializeSupabaseStorage().then(() => {
     clearCachePattern("*").catch(() => {});
     startVideoProcessingWorker();
     startAttendanceReminderScheduler();
+    startDpdpRetentionScheduler();
     reconnectAllSessions().catch((err) => {
       console.error("Failed to auto-resume WhatsApp sessions:", err);
     });
@@ -198,6 +215,7 @@ initializeSupabaseStorage().then(() => {
     console.log(`Server running on port ${PORT}`);
     startVideoProcessingWorker();
     startAttendanceReminderScheduler();
+    startDpdpRetentionScheduler();
     reconnectAllSessions().catch((err) => {
       console.error("Failed to auto-resume WhatsApp sessions:", err);
     });

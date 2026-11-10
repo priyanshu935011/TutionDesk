@@ -8,14 +8,15 @@ import ContactMessage from "../models/ContactMessage.js";
 import redisClient from "../config/redis.js";
 import { sendResetEmail, sendDemoRequestEmail, sendOTPEmail } from "../utils/mailer.js";
 import { sendSMSOTP } from "../utils/smsHelper.js";
+import { signSessionToken } from "../utils/jwtHelper.js";
+import ConsentRecord from "../models/ConsentRecord.js";
+import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
+import { maskIp } from "../utils/piiSanitizer.js";
 
-const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "admin@classtech.com").toLowerCase();
-const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "Admin@12345!";
+const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "";
 
-const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
-
-const generateToken = (payload) =>
-  jwt.sign(payload, JWT_SECRET, { expiresIn: "3650d" });
+const generateToken = (payload) => signSessionToken(payload, "30d");
 
 import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 
@@ -198,6 +199,8 @@ export const loginUser = async (req, res) => {
     const cleanPhone = normalizedIdentifier.replace(/\D/g, "");
 
     if (
+      SUPER_ADMIN_EMAIL &&
+      SUPER_ADMIN_PASSWORD &&
       normalizedIdentifier === SUPER_ADMIN_EMAIL &&
       password === SUPER_ADMIN_PASSWORD
     ) {
@@ -427,10 +430,24 @@ export const resetUserPassword = async (req, res) => {
 
 export const bookDemo = async (req, res) => {
   try {
-    const { name, phone, email, instituteName, tuitionType, studentCount, preferredTime, notes } = req.body;
+    const {
+      name,
+      phone,
+      email,
+      instituteName,
+      tuitionType,
+      studentCount,
+      preferredTime,
+      notes,
+      consentAccepted,
+      consentNoticeVersion,
+    } = req.body;
 
     if (!name || !phone) {
       return res.status(400).json({ message: "Full Name and Phone Number are required." });
+    }
+    if (consentAccepted === false) {
+      return res.status(400).json({ message: "Consent to process inquiry details is required." });
     }
 
     const cleanName = name.trim();
@@ -452,7 +469,7 @@ export const bookDemo = async (req, res) => {
 - Special Notes / Requirements: ${cleanNotes || "None"}
     `.trim();
 
-    await ContactMessage.create({
+    const createdMsg = await ContactMessage.create({
       name: cleanName,
       email: cleanEmail || `${cleanPhone}@demorequest.local`,
       phone: cleanPhone,
@@ -460,6 +477,18 @@ export const bookDemo = async (req, res) => {
       message: demoDetailsMessage,
       status: "unread",
     });
+
+    if (consentAccepted) {
+      ConsentRecord.create({
+        principalType: "contact",
+        principalId: String(createdMsg?._id || cleanPhone),
+        purpose: "lead_inquiry",
+        granted: true,
+        noticeVersion: consentNoticeVersion || DPDP_NOTICE_VERSION,
+        method: "checkbox_web",
+        ipMasked: maskIp(req.ip || ""),
+      }).catch(() => {});
+    }
 
     // 2. Dispatch email notification to priyanshugiri63@gmail.com
     try {

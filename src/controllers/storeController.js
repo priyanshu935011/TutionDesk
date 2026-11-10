@@ -1,8 +1,8 @@
 import crypto from "crypto";
 import axios from "axios";
 import mongoose from "mongoose";
-import jwt from "jsonwebtoken";
 import Product from "../models/Product.js";
+import { verifyJwtToken } from "../utils/jwtHelper.js";
 import Order from "../models/Order.js";
 import StudentAddress from "../models/StudentAddress.js";
 import TestSeries from "../models/TestSeries.js";
@@ -696,11 +696,13 @@ export const getStudentPurchasedProductIds = async (req) => {
   try {
     let studentId = req.student?._id || req.user?._id;
     if (!studentId && req.headers?.authorization?.startsWith("Bearer ")) {
-      const token = req.headers.authorization.split(" ")[1];
-      const decoded = jwt.decode(token);
-      if (decoded) {
-        studentId = decoded.studentId || decoded.id || decoded._id;
-      }
+      try {
+        const token = req.headers.authorization.split(" ")[1];
+        const decoded = verifyJwtToken(token);
+        if (decoded) {
+          studentId = decoded.studentId || decoded.id || decoded._id;
+        }
+      } catch (_) {}
     }
     if (!studentId && req.headers?.["x-student-id"]) {
       studentId = req.headers["x-student-id"];

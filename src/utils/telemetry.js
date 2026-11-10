@@ -40,10 +40,11 @@ export const initTelemetry = () => {
 };
 
 export const captureException = async (error, context = {}) => {
+  const safeUser = context.user?.id ? { id: String(context.user.id) } : null;
   if (isSentryInitialized) {
     try {
       Sentry.withScope((scope) => {
-        if (context.user) scope.setUser(context.user);
+        if (safeUser) scope.setUser(safeUser);
         if (context.extra) scope.setExtras(context.extra);
         if (context.tags) scope.setTags(context.tags);
         Sentry.captureException(error);
@@ -53,15 +54,14 @@ export const captureException = async (error, context = {}) => {
     }
   }
 
-  if (posthogClient) {
+  if (posthogClient && context.user?.role !== "student") {
     try {
-      const distinctId = context.user?.id || context.distinctId || "backend_system";
+      const distinctId = safeUser?.id || context.distinctId || "backend_system";
       posthogClient.capture({
         distinctId: String(distinctId),
         event: "backend_exception",
         properties: {
           errorMessage: error?.message || String(error),
-          errorStack: error?.stack,
           ...context.extra,
         },
       });

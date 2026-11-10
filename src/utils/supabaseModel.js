@@ -3871,6 +3871,10 @@ const mockMongoose = {
     else if (modelName === "StaffSalary" || modelName === "StaffSalaries") tableName = "staff_salaries";
     else if (modelName === "DirectRegistration" || modelName === "DirectRegistrations") tableName = "direct_registrations";
     else if (modelName === "PushNotificationLog" || modelName === "PushNotificationLogs") tableName = "push_notification_logs";
+    else if (modelName === "ConsentRecord" || modelName === "ConsentRecords") tableName = "consent_records";
+    else if (modelName === "GrievanceTicket" || modelName === "GrievanceTickets") tableName = "grievance_tickets";
+    else if (modelName === "DataAccessLog" || modelName === "DataAccessLogs") tableName = "data_access_logs";
+    else if (modelName === "DpdpRetentionNotice" || modelName === "DpdpRetentionNotices") tableName = "dpdp_retention_notices";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";

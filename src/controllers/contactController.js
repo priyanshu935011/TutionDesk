@@ -1,12 +1,18 @@
 import ContactMessage from "../models/ContactMessage.js";
 import SystemSetting from "../models/SystemSetting.js";
+import ConsentRecord from "../models/ConsentRecord.js";
+import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
+import { maskIp } from "../utils/piiSanitizer.js";
 
 // Public submission
 export const submitContactMessage = async (req, res) => {
   try {
-    const { name, email, phone, subject, message } = req.body;
+    const { name, email, phone, subject, message, consentAccepted, consentNoticeVersion } = req.body;
     if (!name || !email || !message) {
       return res.status(400).json({ message: "Name, email and message are required." });
+    }
+    if (consentAccepted === false) {
+      return res.status(400).json({ message: "Consent is required to submit your message." });
     }
 
     const newMessage = await ContactMessage.create({
@@ -16,6 +22,18 @@ export const submitContactMessage = async (req, res) => {
       subject: subject ? subject.trim() : "General Inquiry",
       message: message.trim(),
     });
+
+    if (consentAccepted) {
+      ConsentRecord.create({
+        principalType: "contact",
+        principalId: String(newMessage?._id || email.trim().toLowerCase()),
+        purpose: "lead_inquiry",
+        granted: true,
+        noticeVersion: consentNoticeVersion || DPDP_NOTICE_VERSION,
+        method: "checkbox_web",
+        ipMasked: maskIp(req.ip || ""),
+      }).catch(() => {});
+    }
 
     return res.status(201).json({
       success: true,

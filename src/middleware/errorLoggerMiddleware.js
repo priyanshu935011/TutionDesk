@@ -1,5 +1,6 @@
 import { logSystemError } from "../utils/systemLogger.js";
 import { captureException } from "../utils/telemetry.js";
+import { sanitizeObjectForLog } from "../utils/piiSanitizer.js";
 
 /**
  * Middleware to automatically intercept API error responses (4xx and 5xx) across all routes,
@@ -49,8 +50,8 @@ export const errorLoggerMiddleware = (req, res, next) => {
         res.locals.errorLogged = true;
 
         if (res.statusCode >= 500) {
-          captureException(new Error(errorMessage), {
-            user: req.user ? { id: req.user._id || req.user.id, email: req.user.email } : null,
+          captureException(new Error(sanitizeObjectForLog(errorMessage)), {
+            user: req.user ? { id: String(req.user._id || req.user.id || "") } : null,
             extra: {
               statusCode: res.statusCode,
               method: req.method,
@@ -68,7 +69,6 @@ export const errorLoggerMiddleware = (req, res, next) => {
             statusCode: res.statusCode,
             method: req.method,
             path: req.originalUrl || req.url,
-            query: req.query,
             ip: req.ip,
           },
         }).catch((err) => console.error("errorLoggerMiddleware log error:", err.message));
@@ -96,7 +96,7 @@ export const globalErrorHandler = (err, req, res, next) => {
   console.error("Uncaught API Exception:", err);
 
   captureException(err, {
-    user: req.user ? { id: req.user._id || req.user.id, email: req.user.email } : null,
+    user: req.user ? { id: String(req.user._id || req.user.id || "") } : null,
     extra: {
       method: req.method,
       path: req.originalUrl || req.url,

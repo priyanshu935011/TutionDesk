@@ -20,6 +20,7 @@ import {
   readTestsMetadata,
   toValidUUID,
 } from "../utils/supabaseModel.js";
+import { createStudentPiiTokenizer } from "../utils/aiPiiTokenizer.js";
 
 // Safe JSON parser for LLM responses
 export function extractJsonFromText(text) {
@@ -1382,12 +1383,21 @@ Real-time Context:
 
 ${contextStr}`;
 
-  return await callGeminiRaw({
-    prompt: question,
-    systemInstruction,
+  const tokenizer = createStudentPiiTokenizer(activeStudents);
+  const sanitizedQuestion = tokenizer.sanitizeForLlm(question);
+  const sanitizedSystemInstruction = tokenizer.sanitizeForLlm(systemInstruction);
+  const sanitizedHistory = Array.isArray(history)
+    ? history.map((h) => ({ ...h, text: tokenizer.sanitizeForLlm(h?.text || "") }))
+    : [];
+
+  const rawAnswer = await callGeminiRaw({
+    prompt: sanitizedQuestion,
+    systemInstruction: sanitizedSystemInstruction,
     temperature: 0.2,
-    history,
+    history: sanitizedHistory,
   });
+
+  return tokenizer.restoreInResponse(rawAnswer);
 }
 
 // 8. Task D: Announcement & WhatsApp Broadcast Generator
@@ -1552,7 +1562,7 @@ export async function solveStudentDoubt(
   const systemInstruction = `You are a supportive, friendly AI tutor for students.
 Your goal is to explain concepts clearly, provide step-by-step solutions, highlight formulas, and encourage learning.
 If the student uploaded a math, science, or physics question photo, solve it step-by-step.
-Address student by name: ${studentName}.
+Address the student warmly as Learner (never request or repeat personal phone numbers/emails).
 Formatting rules:
 - Present steps with clear numbering (Step 1, Step 2).
 - Use clean bullet points (•) and highlight final answers and formulas cleanly.

@@ -5,53 +5,24 @@ import User from "../models/User.js";
 import Student from "../models/Student.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import { updateConcurrentPeak } from "../utils/activityTracker.js";
+import { verifyJwtToken } from "../utils/jwtHelper.js";
 import redisClient from "../config/redis.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
-
 const protect = async (req, res, next) => {
-  let authHeader = req.headers.authorization;
+  const authHeader = req.headers.authorization;
 
-  // Fallback to query parameter for token authentication (e.g. for iframe preview routes)
-  if (!authHeader && req.query?.token) {
-    authHeader = `Bearer ${req.query.token}`;
-  }
-
-  if (!authHeader) {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ message: "Not authorized" });
   }
 
   try {
-    let token = authHeader.trim();
-    if (token.startsWith("Bearer ")) {
-      token = token.substring(7);
-    }
-    token = token.trim().replace(/^["']+|["']+$|\\"/g, "");
+    let token = authHeader.substring(7).trim().replace(/^["']+|["']+$|\\"/g, "");
 
     if (!token || token === "null" || token === "undefined") {
       return res.status(401).json({ message: "Not authorized" });
     }
 
-    let decoded = null;
-    const secretsToTry = [
-      process.env.JWT_SECRET,
-      "classtech_default_jwt_secret_key_2026",
-      "secret",
-      "jwtsecret",
-    ].filter(Boolean);
-
-    for (const secret of secretsToTry) {
-      try {
-        decoded = jwt.verify(token, secret);
-        break;
-      } catch (_) {}
-    }
-
-    if (!decoded) {
-      try {
-        decoded = jwt.decode(token);
-      } catch (_) {}
-    }
+    const decoded = verifyJwtToken(token);
 
     if (!decoded || typeof decoded !== "object") {
       return res.status(401).json({ message: "Invalid token" });

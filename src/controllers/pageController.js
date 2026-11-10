@@ -1,85 +1,84 @@
 import CustomPage from "../models/CustomPage.js";
 
-// Helper to seed default pages if none exist
-const seedDefaultPagesIfNeeded = async () => {
-  try {
-    const count = await CustomPage.countDocuments({});
-    if (count === 0) {
-      console.log("Seeding default custom pages (Privacy, Terms, User data deletion, FAQ)...");
-      const defaultPages = [
-        {
-          slug: "privacy-policy",
-          title: "Privacy Policy",
-          isDefault: true,
-          isActive: true,
-          content: `### Privacy Policy
-Last updated: August 2026
+const DPDP_DEFAULT_PAGES = [
+  {
+    slug: "privacy-policy",
+    title: "Privacy Policy",
+    isDefault: true,
+    isActive: true,
+    content: `### Privacy Policy (DPDP Act, 2023 & DPDP Rules, 2025 Compliant)
+Last updated: November 2026 | Notice Version: 2026.11-v1
 
-At Classtech, accessible from our tuition platforms, one of our main priorities is the privacy of our visitors. This Privacy Policy document contains types of information that is collected and recorded by Classtech and how we use it.
+At **ClassTech Operating System**, we process personal data strictly in compliance with India's **Digital Personal Data Protection (DPDP) Act, 2023** and **DPDP Rules, 2025**.
 
-#### 1. Information We Collect
-We collect student enrollment data, parent contact phone numbers (for automatic WhatsApp updates), visual attendance logs, score metrics, and uploaded study materials.
+#### 1. Role Clarification (Data Fiduciary vs. Data Processor)
+* **For Coaching Institutes, Educators & Website Visitors:** ClassTech acts as the **Data Fiduciary** for account registration, login OTP, subscriptions, wallet recharges, and inquiry leads.
+* **For Enrolled Students & Parents:** Your respective Coaching Institute is the primary **Data Fiduciary**, and ClassTech acts as their **Data Processor** under a binding B2B Data Processing Addendum (DPA).
 
-#### 2. How We Use Your Information
-We use the collected information to:
-* Provide, operate, and maintain student dashboards.
-* Mark and display monthly attendance records.
-* Send automated WhatsApp notifications for fee updates and reschedules.
-* Host live WebSockets quizzes.
+#### 2. Itemized Data Collected & Specific Purposes (Rule 3)
+* **Educators & Staff:** Name, phone, email, academy details, password hash, and device push tokens — for workspace provisioning, OTP authentication, and billing.
+* **Students & Guardians:** Student name, DOB/minor status, enrollment number, phone, parent/guardian name & contact, attendance logs, marks, and fee records — solely for academic operations and parent alerts.
+* **ClassTech AI:** Educational doubts and institute intelligence queries — student names and phone numbers are **tokenized/pseudonymized** before external LLM processing.
 
-#### 3. Log Files
-Classtech follows a standard procedure of using log files to track error reports and system uptime metrics.
+#### 3. Children's Data & Strict Ad/Tracking Ban (Section 9 & Rule 10)
+* Learners under 18 require **Verifiable Parental Consent** (verified via Guardian OTP) prior to optional AI Tutor processing.
+* We **do not** run behavioral analytics (PostHog), session replay (Sentry Replay), or Google AdSense ads on Student accounts.
 
-#### 4. Contact Us
-If you have additional questions or require more information about our Privacy Policy, do not hesitate to contact your institution admin or the Classtech team.`
-        },
-        {
-          slug: "terms-of-service",
-          title: "Terms of Service",
-          isDefault: true,
-          isActive: true,
-          content: `### Terms of Service
-Last updated: August 2026
+#### 4. Sub-Processors & Security Safeguards (Rule 6)
+Data is protected with verified JWT authentication, role-based tenant isolation, TLS/encryption, PII-masked system logs, and strict sub-processor contracts (Supabase, Google/OpenAI, Meta WhatsApp/TextBee, Cashfree, Cloudinary, Firebase). Security access logs are retained for at least **1 year**.
 
-Welcome to Classtech! By accessing our platforms and using our services, you agree to comply with and be bound by the following terms.
+#### 5. Data Retention & Principal Rights (Rules 8 & 14)
+You can **access/export**, **correct**, **withdraw consent**, or **permanently erase** your data anytime via your Profile **DPDP Privacy Center**. Automated inactivity purges include a mandatory **48-hour advance notice**.
 
-#### 1. Account Security
-Teachers and Students are responsible for maintaining the confidentiality of their login credentials and are fully responsible for all activities that occur under their accounts.
+#### 6. Grievance Officer & DPBI Escalation (Section 13)
+**Grievance Officer:** privacy@classtech.in | +91-9934597030 (Response SLA: 30 days; statutory max: 90 days). Unresolved complaints may be escalated to the **Data Protection Board of India (dpb.gov.in)**.`
+  },
+  {
+    slug: "terms-of-service",
+    title: "Terms of Service & B2B DPA",
+    isDefault: true,
+    isActive: true,
+    content: `### Terms of Service & B2B Data Processing Addendum (DPA)
+Last updated: November 2026
 
-#### 2. Proper Usage
-Institutes must use the Baileys WhatsApp integration responsibly. Automated reminders should follow institute-level guidelines to avoid spamming recipient numbers.
+Welcome to ClassTech! By creating an account or accessing our platforms, you agree to these Terms and, for Coaching Institutes/Educators, the **DPDP B2B Data Processing Addendum (DPA)** below.
 
-#### 3. Subscription & Billings
-Institute accounts operate on a subscription basis managed by the Super Admin. Accounts that exceed their subscription end dates will be subject to temporary lockouts.
+#### 1. Account Security & Lawful Use
+Teachers, Institute Admins, and Students are responsible for maintaining credential confidentiality. Institutes must obtain lawful notice and verifiable parental consent (where students are under 18) prior to uploading learner records or enabling automated WhatsApp/AI features.
 
-#### 4. Content Ownership
-Study notes, PDF documents, announcements, and quiz questions uploaded to Classtech remain the intellectual property of their respective creators.`
-        },
-        {
-          slug: "user-data-deletion",
-          title: "User Data Deletion",
-          isDefault: true,
-          isActive: true,
-          content: `### User Data Deletion Instructions
-Last updated: August 2026
+#### 2. Data Processing Addendum (Institute as Fiduciary / ClassTech as Processor)
+* **Instructions & Minimization:** ClassTech processes student/parent data solely to provide attendance, fee, test, video, notice, and AI services configured by the Institute.
+* **Sub-Processors & Safeguards (Rule 6):** ClassTech enforces JWT signature verification, role-based tenant isolation, PII-masked error logs, and LLM PII tokenization.
+* **Breach Notification (Rule 7):** ClassTech will notify affected Institute Administrators promptly upon discovering any confirmed security breach to support immediate DPBI and 72-hour Data Principal notifications.
+* **Cascade Deletion (Rule 8):** Upon institute termination or valid deletion request, ClassTech executes cascade deletion/anonymization of personal records within statutory timelines (retaining anonymized GST accounting figures only where legally mandated).
 
-We respect your right to control your personal data. Below are instructions on how to delete your account or purge data collected on Classtech.
+#### 3. Subscription, Wallets & Content Ownership
+All notes, lectures, and test content uploaded by Educators remain their intellectual property.`
+  },
+  {
+    slug: "user-data-deletion",
+    title: "User Data Deletion",
+    isDefault: true,
+    isActive: true,
+    content: `### User Data Deletion & DPDP Rights Instructions (Section 12)
+Last updated: November 2026
 
-#### For Students and Parents
-To delete your student profile, attendance logs, and fee history:
-1. Contact your respective Tuition Academy administrator.
-2. The administrator can delete your profile directly from the **Students** management dashboard.
-3. Upon deletion, all associated files, test marks, and attendance logs are permanently deleted from our database.
+We provide instant self-service and assisted erasure workflows in compliance with Section 12 and Rule 8 of the DPDP framework.
 
-#### For Institution Admins
-If you wish to terminate your Classtech subscription and delete your entire institute record (including all student data, teacher logins, and settings), please email a deletion request to **support@classtech.in**. We will process and confirm your request within 5 business days.`
-        },
-        {
-          slug: "faq",
-          title: "Frequently Asked Questions (FAQ)",
-          isDefault: true,
-          isActive: true,
-          content: `### Frequently Asked Questions (FAQ)
+#### Option 1: Instant Self-Service Privacy Center (Web & Mobile App)
+1. Sign in to your **Educator / Institute Profile** or **Student Portal Profile**.
+2. Open the **DPDP Privacy & Rights Center** section.
+3. Click **Export My Data (JSON)** to download a copy of your data, or **Delete Account & Erase Data** to trigger complete cascade deletion across student records, attendance logs, test attempts, AI prompts, push tokens, and uploaded photos (only anonymized GST invoice totals may remain where mandated by Indian tax laws).
+
+#### Option 2: Request via Grievance Officer
+Email **privacy@classtech.in** or file a ticket in the in-app Grievance Center. All erasure requests are processed within our 30-day SLA (and strictly within statutory timelines).`
+  },
+  {
+    slug: "faq",
+    title: "Frequently Asked Questions (FAQ)",
+    isDefault: true,
+    isActive: true,
+    content: `### Frequently Asked Questions (FAQ)
 
 #### Q1. How do I access my student portal?
 You can log in to your portal by visiting the **Student Portal Login** page and entering the phone number registered with your academy along with your student password.
@@ -87,15 +86,20 @@ You can log in to your portal by visiting the **Student Portal Login** page and 
 #### Q2. Can I download study materials on mobile devices?
 Yes! Classtech supports direct one-click PDF downloads. You can access the **Study Notes** tab on your mobile dashboard to view and download all uploaded PDFs.
 
-#### Q3. How do I join a live quiz?
-When your teacher starts a live quiz session, a socket connection will prompt you on your portal screen. Click **Join Live Quiz** to participate and answer questions in real time.
+#### Q3. How do I verify Parental Consent for minor students under DPDP?
+Parents or guardians can verify consent in seconds via **6-digit SMS or Email OTP** inside **Student Profile -> DPDP Privacy & Rights Center**.
 
-#### Q4. Why am I not receiving WhatsApp alerts?
-WhatsApp alerts are dispatched if your institute admin has configured Meta/Baileys WhatsApp settings. If alerts are delayed, verify your registered contact number with your academy admin.`
-        }
-      ];
+#### Q4. How do I export or permanently delete my personal data?
+Visit **Profile -> DPDP Privacy & Rights Center** in the web portal or mobile app to download a JSON summary, withdraw optional consents, file a grievance, or erase your account.`
+  }
+];
 
-      for (const page of defaultPages) {
+const seedDefaultPagesIfNeeded = async () => {
+  try {
+    const count = await CustomPage.countDocuments({});
+    if (count === 0) {
+      console.log("Seeding default DPDP custom pages...");
+      for (const page of DPDP_DEFAULT_PAGES) {
         await CustomPage.create(page);
       }
     }
@@ -209,7 +213,17 @@ export const getPublicPageBySlug = async (req, res) => {
     const { slug } = req.params;
     const page = await CustomPage.findOne({ slug, isActive: true });
     if (!page) {
+      const fallback = DPDP_DEFAULT_PAGES.find((p) => p.slug === slug);
+      if (fallback) return res.json(fallback);
       return res.status(404).json({ message: "Page not found." });
+    }
+    // Auto-upgrade unmodified legacy August 2026 default boilerplate pages
+    if (page.isDefault && typeof page.content === "string" && page.content.includes("Last updated: August 2026")) {
+      const updatedDefault = DPDP_DEFAULT_PAGES.find((p) => p.slug === slug);
+      if (updatedDefault) {
+        const plain = typeof page.toObject === "function" ? page.toObject() : { ...page };
+        return res.json({ ...plain, title: updatedDefault.title, content: updatedDefault.content });
+      }
     }
     return res.json(page);
   } catch (err) {

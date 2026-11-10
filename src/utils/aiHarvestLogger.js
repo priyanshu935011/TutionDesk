@@ -1,7 +1,8 @@
 import AiHarvestLog from "../models/AiHarvestLog.js";
+import { sanitizeObjectForLog } from "./piiSanitizer.js";
 
 /**
- * Harvest and log AI interaction in database
+ * Harvest and log AI interaction in database (with PII stripped per DPDP data minimization).
  */
 export async function logAiHarvest({
   instituteId = null,
@@ -25,17 +26,21 @@ export async function logAiHarvest({
       textResponse = response.reply || response.content || response.message || JSON.stringify(response);
     }
 
+    const safePrompt = sanitizeObjectForLog(String(prompt || "").trim());
+    const safeResponse = sanitizeObjectForLog(String(textResponse || "").substring(0, 4000));
+    const safeRole = user?.role || "user";
+
     await AiHarvestLog.create({
       institute: cleanInstId,
       instituteId: cleanInstId,
       user: rawUserId,
-      userName: user?.name || user?.email || "User",
-      userRole: user?.role || "user",
+      userName: safeRole === "student" ? "Student" : user?.role || "User",
+      userRole: safeRole,
       taskType: String(taskType || "QUERY").toUpperCase(),
-      prompt: String(prompt || "").trim(),
-      response: textResponse,
-      generatedContent: generatedContent || null,
-      metadata: metadata || {},
+      prompt: safePrompt,
+      response: safeResponse,
+      generatedContent: generatedContent ? sanitizeObjectForLog(generatedContent) : null,
+      metadata: sanitizeObjectForLog(metadata || {}),
       creditsDeducted: Number(creditsDeducted || 0),
     });
   } catch (err) {

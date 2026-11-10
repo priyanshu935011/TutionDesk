@@ -1,8 +1,8 @@
-import jwt from "jsonwebtoken";
 import express from "express";
 import multer from "multer";
 import protect from "../middleware/authMiddleware.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
+import { verifyJwtToken } from "../utils/jwtHelper.js";
 import {
   getCategories,
   createCategory,
@@ -39,11 +39,13 @@ const studentAuth = (req, res, next) => {
   if (authHeader && authHeader.startsWith("Bearer ")) {
     try {
       const token = authHeader.split(" ")[1];
-      const decoded = jwt.decode(token);
+      const decoded = verifyJwtToken(token);
       if (decoded && decoded.role && decoded.role !== "student") {
         return protect(req, res, next);
       }
-    } catch (_) {}
+    } catch (_) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
   }
   return protectStudent(req, res, next);
 };

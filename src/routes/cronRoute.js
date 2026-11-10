@@ -6,6 +6,7 @@ import { getGlobalTemplates, formatFeeReminderMessage } from "../utils/whatsappT
 import { cronVerifyPendingRecharges } from "../controllers/paymentController.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
 import { checkPendingBatchAttendanceReminders } from "../services/attendanceReminderService.js";
+import { runDpdpRetentionSweep } from "../services/dpdpRetentionService.js";
 
 const router = express.Router();
 
@@ -43,6 +44,9 @@ router.post("/fee-reminders", async (req, res) => {
       today.setHours(0, 0, 0, 0);
 
       for (const student of instStudents) {
+        if (student.whatsappConsentGranted === false) {
+          continue;
+        }
         const pending = calculatePendingAmount(student);
 
         const targetPhone = (student.parentPhone && student.parentPhone.trim()) ? student.parentPhone.trim() : student.phone;
@@ -112,6 +116,21 @@ router.post("/attendance-reminders", async (req, res) => {
   } catch (error) {
     console.error("Cron attendance reminder error:", error);
     return res.status(500).json({ success: false, message: "Cron execution failed", error: error.message });
+  }
+});
+
+router.post("/dpdp-retention", async (req, res) => {
+  const token = req.headers["x-cron-token"];
+  if (process.env.CRON_SECRET && token !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const report = await runDpdpRetentionSweep();
+    return res.json({ success: true, message: "DPDP Rule 8 retention sweep completed.", report });
+  } catch (error) {
+    console.error("Cron DPDP retention error:", error);
+    return res.status(500).json({ success: false, message: "Retention sweep failed", error: error.message });
   }
 });
 

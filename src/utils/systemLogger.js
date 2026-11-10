@@ -1,13 +1,13 @@
 import SystemLog from "../models/SystemLog.js";
 import { sendMessage } from "../services/whatsappService.js";
 import crypto from "crypto";
+import { maskEmail, maskIp, maskPhone, sanitizeObjectForLog } from "./piiSanitizer.js";
 
 // In-memory log cache store for instant access & fallback
 export const inMemoryLogs = [];
 
 /**
- * Utility to log system failures and errors with user context (student, teacher, super admin, tuition admin)
- * automatically saving to database and dispatching WhatsApp alerts to 9934597030.
+ * Utility to log system failures and errors with masked user context (DPDP Rule 6 PII sanitization).
  */
 export const logSystemError = async ({
   level = "error",
@@ -75,18 +75,22 @@ export const logSystemError = async ({
       phone = phone || req.teacher.phone || req.teacher.mobile;
       role = role || "teacher";
     }
-    if (req.body) {
-      name = name || req.body.name || req.body.userName || req.body.username || req.body.fullName;
-      email = email || req.body.email || req.body.userEmail || req.body.studentEmail || req.body.teacherEmail;
-      phone = phone || req.body.phone || req.body.mobile || req.body.userPhone || req.body.parentPhone;
-    }
   }
 
-  name = name || "Anonymous User";
-  email = email || "N/A";
-  phone = phone || "N/A";
+  const maskedEmail = email ? maskEmail(email) : "N/A";
+  const maskedPhone = phone ? maskPhone(phone) : "N/A";
+  const safeName = name ? `${String(name).trim().charAt(0)}***` : "User";
   role = role || (req?.originalUrl?.includes("/student") ? "student" : req?.originalUrl?.includes("/teacher") ? "teacher" : req?.originalUrl?.includes("/admin") ? "super_admin" : "user");
   instName = instName || "General System";
+
+  const sanitizedMessage = sanitizeObjectForLog(String(message || "Unknown error occurred"));
+  const cleanMeta = sanitizeObjectForLog({
+    ...metadata,
+    path: req?.originalUrl || req?.path || undefined,
+    method: req?.method || undefined,
+    ip: metadata?.ip ? maskIp(metadata.ip) : req?.ip ? maskIp(req.ip) : undefined,
+    timestamp: new Date().toISOString(),
+  });
 
   const logId = crypto.randomUUID();
   const newLog = {
@@ -94,18 +98,13 @@ export const logSystemError = async ({
     id: logId,
     level,
     category,
-    message: message || "Unknown error occurred",
-    userName: name,
-    userEmail: email,
-    userPhone: phone,
+    message: sanitizedMessage,
+    userName: safeName,
+    userEmail: maskedEmail,
+    userPhone: maskedPhone,
     userRole: role,
     instituteName: instName,
-    metadata: {
-      ...metadata,
-      path: req?.originalUrl || req?.path || undefined,
-      method: req?.method || undefined,
-      timestamp: new Date().toISOString(),
-    },
+    metadata: cleanMeta,
     isRead: false,
     createdAt: new Date().toISOString(),
   };
@@ -125,14 +124,13 @@ export const logSystemError = async ({
     console.error("SystemLog DB Save Error:", err.message);
   }
 
-  // Instant WhatsApp alert dispatch to 9934597030 (Only for important/critical 5xx server errors)
+  // Dispatch strictly PII-free operational error alert (never include raw user phone, email, or name)
   try {
     const statusCode = metadata?.statusCode || 500;
     const reqPath = (req?.originalUrl || req?.path || metadata?.path || "").toLowerCase();
     const categoryLower = String(category || "").toLowerCase();
-    const msgLower = String(message || "").toLowerCase();
+    const msgLower = String(sanitizedMessage || "").toLowerCase();
 
-    // Skip WhatsApp alert for routine login, authentication, password reset, rate-limiting, and 4xx client errors
     const isLoginOrAuth =
       reqPath.includes("/auth") ||
       reqPath.includes("/login") ||
@@ -145,38 +143,32 @@ export const logSystemError = async ({
 
     const isClientSideOrNonCritical = statusCode < 500 && statusCode !== 0;
 
-    // Dispatch WhatsApp ONLY for critical/important server errors (500+, unhandled exceptions, DB crashes)
     const shouldSendWhatsapp =
       !isLoginOrAuth &&
       !isClientSideOrNonCritical &&
       (statusCode >= 500 || level === "critical" || level === "fatal" || categoryLower.includes("unhandled"));
 
-    if (shouldSendWhatsapp) {
-      const alertPhone = "9934597030";
+    const alertPhone = process.env.ALERT_PHONE || "";
+    if (shouldSendWhatsapp && alertPhone) {
       const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
       const methodPath = req?.method && (req?.originalUrl || req?.path)
         ? `${req.method} ${req.originalUrl || req.path}`
         : "N/A";
-      const userSummary = `${name} (${email} / ${phone})`;
-      const errorDetails = `${userSummary} [Role: ${role}] | Error: ${String(message || "Unknown error").substring(0, 300)}`;
+      const actorRef = req?.user?._id || req?.student?._id || "anonymous";
+      const sanitizedErrorDetails = `Role: ${role} | Ref: ${String(actorRef).slice(-8)} | Error: ${String(sanitizedMessage).substring(0, 260)}`;
 
       const whatsappMessage =
-        `⚠️ *IMPORTANT SYSTEM ERROR ALERT*\n\n` +
+        `⚠️ *SYSTEM ERROR ALERT (PII-Redacted)*\n\n` +
         `📌 *Endpoint:* ${methodPath}\n` +
-        `👤 *User:* ${userSummary}\n` +
-        `🛡️ *Role:* ${role}\n` +
+        `🛡️ *Role:* ${role} (Ref: ${String(actorRef).slice(-8)})\n` +
         `🏢 *Institute:* ${instName}\n` +
-        `🚨 *Error:* ${message || "Unknown error"}\n` +
+        `🚨 *Error:* ${sanitizedMessage}\n` +
         `⏰ *Time:* ${timeStr}`;
 
       const templateConfig = process.env.META_ERROR_TEMPLATE_NAME
         ? {
             templateName: process.env.META_ERROR_TEMPLATE_NAME,
-            parameters: [
-              methodPath,    // {{1}}
-              errorDetails,  // {{2}}
-              timeStr,       // {{3}}
-            ],
+            parameters: [methodPath, sanitizedErrorDetails, timeStr],
           }
         : null;
 
@@ -188,6 +180,7 @@ export const logSystemError = async ({
     console.warn("Error triggering WhatsApp error alert:", err.message);
   }
 
-  console.warn(`[SystemErrorLog] ${category}: ${message} (${name} | ${email} | ${phone})`);
+  console.warn(`[SystemErrorLog] ${category}: ${sanitizedMessage} (${role})`);
   return newLog;
 };
+

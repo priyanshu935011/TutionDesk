@@ -3,6 +3,9 @@ import Lead from "../models/Lead.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import LeadForm from "../models/LeadForm.js";
+import ConsentRecord from "../models/ConsentRecord.js";
+import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
+import { maskIp } from "../utils/piiSanitizer.js";
 import { sendMessage } from "../services/whatsappService.js";
 import cloudinary from "../utils/cloudinary.js";
 import { Readable } from "stream";
@@ -387,13 +390,16 @@ export const submitPublicLead = async (req, res) => {
       return res.status(400).json({ message: "This form is no longer accepting new responses." });
     }
 
-    const { name, phone, email, course, message, customFields } = req.body;
+    const { name, phone, email, course, message, customFields, consentAccepted, consentNoticeVersion } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: "Name is required." });
     }
     if (!phone || !phone.trim()) {
       return res.status(400).json({ message: "Phone number is required." });
+    }
+    if (consentAccepted === false) {
+      return res.status(400).json({ message: "Explicit consent is required to submit this inquiry." });
     }
 
     const lead = await Lead.create({
@@ -408,6 +414,19 @@ export const submitPublicLead = async (req, res) => {
       customFields: customFields || {},
       status: "new",
     });
+
+    if (consentAccepted) {
+      ConsentRecord.create({
+        principalType: "lead",
+        principalId: String(lead._id || lead.id || phone.trim()),
+        instituteId: String(form.institute._id || ""),
+        purpose: "lead_inquiry",
+        granted: true,
+        noticeVersion: consentNoticeVersion || DPDP_NOTICE_VERSION,
+        method: "checkbox_web",
+        ipMasked: maskIp(req.ip || ""),
+      }).catch(() => {});
+    }
 
     // Send WhatsApp notification alert
     setImmediate(async () => {

@@ -23,6 +23,7 @@ import Notification from "../models/Notification.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import { parseFcmTokens, addFcmToken, removeFcmToken, serializeTokensForDb } from "../utils/fcmTokenHelper.js";
+import { cascadeDeleteStudent } from "../utils/cascadeErasure.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -676,6 +677,11 @@ export const createStudent = async (req, res) => {
       paymentHistory: initialPaymentHistory = [],
       attendanceRecords = [],
       feeStatus = "unpaid",
+      dateOfBirth = null,
+      isMinor,
+      parentConsentStatus,
+      aiConsentGranted = true,
+      whatsappConsentGranted = true,
     } = req.body;
 
     let paymentHistory = Array.isArray(initialPaymentHistory) ? [...initialPaymentHistory] : [];
@@ -845,6 +851,20 @@ export const createStudent = async (req, res) => {
       note: p.note || ""
     }));
 
+    const resolvedIsMinor = (() => {
+      if (dateOfBirth) {
+        const dob = new Date(dateOfBirth);
+        if (!isNaN(dob.getTime())) {
+          const now = new Date();
+          let age = now.getFullYear() - dob.getFullYear();
+          const m = now.getMonth() - dob.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+          return age < 18;
+        }
+      }
+      return isMinor !== undefined ? Boolean(isMinor) : true;
+    })();
+
     const student = await Student.create({
       user: ownerId,
       name,
@@ -864,6 +884,13 @@ export const createStudent = async (req, res) => {
       attendanceRecords,
       password: hashedPasswordToUse,
       customFields,
+      dateOfBirth: dateOfBirth || null,
+      isMinor: resolvedIsMinor,
+      parentConsentStatus:
+        parentConsentStatus || (resolvedIsMinor ? "pending" : "not_required"),
+      parentConsentPhone: parentPhone || "",
+      aiConsentGranted: Boolean(aiConsentGranted),
+      whatsappConsentGranted: Boolean(whatsappConsentGranted),
     });
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
@@ -1004,6 +1031,11 @@ export const updateStudent = async (req, res) => {
       paymentHistory,
       attendanceRecords,
       customFields,
+      dateOfBirth,
+      isMinor,
+      parentConsentStatus,
+      aiConsentGranted,
+      whatsappConsentGranted,
     } = req.body;
 
     const safeParseDate = (val) => {
@@ -1173,6 +1205,22 @@ export const updateStudent = async (req, res) => {
     }
     student.customFields = customFieldsObj;
 
+    if (dateOfBirth !== undefined) student.dateOfBirth = dateOfBirth || null;
+    if (isMinor !== undefined) student.isMinor = Boolean(isMinor);
+    if (dateOfBirth) {
+      const dob = new Date(dateOfBirth);
+      if (!isNaN(dob.getTime())) {
+        const now = new Date();
+        let age = now.getFullYear() - dob.getFullYear();
+        const m = now.getMonth() - dob.getMonth();
+        if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+        student.isMinor = age < 18;
+      }
+    }
+    if (parentConsentStatus !== undefined) student.parentConsentStatus = parentConsentStatus;
+    if (aiConsentGranted !== undefined) student.aiConsentGranted = Boolean(aiConsentGranted);
+    if (whatsappConsentGranted !== undefined) student.whatsappConsentGranted = Boolean(whatsappConsentGranted);
+
     if (typeof student.markModified === "function") {
       student.markModified("batch");
       student.markModified("batches");
@@ -1234,7 +1282,7 @@ export const deleteStudent = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    const student = await Student.findOneAndDelete({
+    const student = await Student.findOne({
       _id: req.params.id,
       user: ownerId,
     });
@@ -1243,21 +1291,16 @@ export const deleteStudent = async (req, res) => {
       return res.status(404).json({ message: "Student not found" });
     }
 
-    try {
-      await supabase.from("attendance").delete().eq("student_id", student._id);
-      await supabase.from("payments").delete().eq("student_id", student._id);
-    } catch (e) {}
+    await cascadeDeleteStudent({
+      studentId: student._id || student.id,
+      studentDoc: student,
+      retainTaxLedger: true,
+      actorId: req.user?._id || ownerId,
+      actorRole: req.user?.role || "institute_admin",
+      reason: "admin_deleted_student",
+    });
 
-    try {
-      if (student.enrollmentNumber) {
-        await deleteCache(`student:dashboard:${student.enrollmentNumber}`);
-      }
-      await clearCachePattern("teacher:dashboard:*");
-      await clearCachePattern("teacher:students:*");
-      await clearCachePattern("teacher:batches:*");
-    } catch (cErr) {}
-
-    return res.json({ message: "Student deleted successfully" });
+    return res.json({ message: "Student and associated personal data erased successfully (anonymized tax ledger retained if applicable)" });
   } catch (error) {
     console.error("deleteStudent error:", error);
     return res.status(500).json({ message: "Could not delete student" });
@@ -1478,7 +1521,8 @@ export const addPayment = async (req, res) => {
       studentId: student._id,
       paidAmount: student.paidAmount,
       pendingAmount: student.pendingAmount,
-      totalFees: student.totalFees
+      totalFees: student.totalFees,
+      dueDate: student.dueDate,
     });
   } catch (error) {
     console.error("addPayment error:", error);

@@ -19,9 +19,10 @@ import {
   readInstitutesMetadata,
   writeInstitutesMetadata,
 } from "../utils/supabaseModel.js";
-import jwt from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET || "classtech_default_jwt_secret_key_2026";
+import ConsentRecord from "../models/ConsentRecord.js";
+import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
+import { signSessionToken } from "../utils/jwtHelper.js";
+import { maskIp, maskPhone } from "../utils/piiSanitizer.js";
 
 // In-memory OTP store & rate limiting fallback
 const memoryOtpStore = new Map(); // phone -> { otp, attempts, ip, createdAt }
@@ -266,8 +267,15 @@ export const verifyOtpAndRegister = async (req, res) => {
   let instId = null;
   let isNewRegistration = false;
   try {
-    const { phone, otp, name, instituteName, fcmToken } = req.body;
+    const { phone, otp, name, instituteName, fcmToken, consentAccepted, consentNoticeVersion, dpaAccepted } = req.body;
     const cleanPhone = (phone || "").toString().replace(/\D/g, "").slice(-10);
+
+    if (consentAccepted === false) {
+      return res.status(400).json({
+        success: false,
+        message: "Consent under the DPDP Privacy Notice is required to register.",
+      });
+    }
 
     if (!cleanPhone || cleanPhone.length !== 10) {
       return res.status(400).json({ success: false, message: "Valid 10-digit mobile number required." });
@@ -420,38 +428,29 @@ export const verifyOtpAndRegister = async (req, res) => {
       institute = await Institute.findById(instId).catch(() => null);
     }
 
-    // 4. Dispatch WhatsApp Notification to 9934597030 on every new registration
+    // 4. Dispatch PII-minimized registration alert if configured
     try {
       const timeStr = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-      const alertPhone = "9934597030";
+      const alertPhone = process.env.ALERT_PHONE || "";
       const trialDateFormatted = new Date(trialEnds).toLocaleDateString("en-IN", {
         day: "2-digit",
         month: "short",
         year: "numeric",
       });
 
-      const wpMessage =
-        `🎉 *NEW EDUCATOR APP REGISTRATION*\n\n` +
-        `👤 *Educator:* ${regName}\n` +
-        `📱 *Phone:* ${cleanPhone}\n` +
-        `🏫 *Academy:* ${regInstName}\n` +
-        `⏳ *Trial Plan:* 7 Days (Until ${trialDateFormatted})\n` +
-        `🌐 *IP:* ${clientIp}\n` +
-        `⏰ *Time:* ${timeStr}\n\n` +
-        `_Login to Super Admin to configure trial features & balances._`;
+      if (alertPhone) {
+        const wpMessage =
+          `🎉 *NEW EDUCATOR APP REGISTRATION*\n\n` +
+          `🏫 *Academy:* ${regInstName}\n` +
+          `📱 *Phone:* ${maskPhone(cleanPhone)}\n` +
+          `⏳ *Trial Plan:* 7 Days (Until ${trialDateFormatted})\n` +
+          `🌐 *IP:* ${maskIp(clientIp)}\n` +
+          `⏰ *Time:* ${timeStr}`;
 
-      const templateConfig = process.env.META_REGISTRATION_TEMPLATE_NAME
-        ? {
-            templateName: process.env.META_REGISTRATION_TEMPLATE_NAME,
-            parameters: [regName, cleanPhone, regInstName, timeStr],
-          }
-        : null;
-
-      sendMessage("admin_test", alertPhone, wpMessage, "custom", templateConfig).catch((err) => {
-        console.warn("[DirectRegistration] WhatsApp alert to 9934597030 warning:", err.message);
-      });
+        sendMessage("admin_test", alertPhone, wpMessage, "custom").catch(() => {});
+      }
     } catch (wpErr) {
-      console.warn("[DirectRegistration] WhatsApp alert exception:", wpErr.message);
+      console.warn("[DirectRegistration] WhatsApp alert warning:", wpErr.message);
     }
 
     // 5. Ensure matching User exists pointing to the valid institute ID
@@ -542,7 +541,7 @@ export const verifyOtpAndRegister = async (req, res) => {
       } catch (_) {}
     }
 
-    const token = jwt.sign(
+    const token = signSessionToken(
       {
         id: userId,
         email: user.email,
@@ -552,9 +551,32 @@ export const verifyOtpAndRegister = async (req, res) => {
         isDirectTrial: true,
         sessionId,
       },
-      JWT_SECRET,
-      { expiresIn: "30d" }
+      "30d"
     );
+
+    // Record verifiable consent receipts (Rule 3/Rule 5 + B2B DPA)
+    ConsentRecord.create({
+      principalType: "user",
+      principalId: userId,
+      instituteId: instId,
+      purpose: "core_service",
+      granted: consentAccepted !== false,
+      noticeVersion: consentNoticeVersion || DPDP_NOTICE_VERSION,
+      method: "otp_registration",
+      ipMasked: maskIp(clientIp),
+    }).catch(() => {});
+    if (dpaAccepted) {
+      ConsentRecord.create({
+        principalType: "user",
+        principalId: userId,
+        instituteId: instId,
+        purpose: "b2b_dpa",
+        granted: true,
+        noticeVersion: consentNoticeVersion || DPDP_NOTICE_VERSION,
+        method: "otp_registration",
+        ipMasked: maskIp(clientIp),
+      }).catch(() => {});
+    }
 
     // Calculate trial days left
     const now = Date.now();
