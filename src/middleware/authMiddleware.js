@@ -73,24 +73,61 @@ const protect = async (req, res, next) => {
 
     if (isStudentToken) {
       try {
-        const studentQuery = [];
-        if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-          studentQuery.push({ _id: userId });
+        const requestedStudentId =
+          req.headers["x-student-id"] ||
+          req.query?.studentId ||
+          req.body?.studentId;
+
+        if (requestedStudentId) {
+          const targetStudent = await Student.findById(requestedStudentId).catch(() => null);
+          if (targetStudent) {
+            const decEmail = String(decoded.email || "").toLowerCase().trim();
+            const tEmail = String(targetStudent.email || "").toLowerCase().trim();
+            const decPhone = String(decoded.phone || decoded.parentPhone || "").replace(/\D/g, "").slice(-10);
+            const tPhone = String(targetStudent.phone || "").replace(/\D/g, "").slice(-10);
+            const tParentPhone = String(targetStudent.parentPhone || "").replace(/\D/g, "").slice(-10);
+            const sameIdentity =
+              String(targetStudent._id || targetStudent.id) === String(userId) ||
+              (decoded.enrollmentNumber && String(targetStudent.enrollmentNumber) === String(decoded.enrollmentNumber)) ||
+              (decEmail && tEmail && decEmail === tEmail) ||
+              (decPhone && decPhone.length >= 7 && (tPhone === decPhone || tParentPhone === decPhone));
+
+            if (sameIdentity) {
+              user = {
+                _id: targetStudent._id,
+                id: targetStudent._id,
+                name: targetStudent.name,
+                email: targetStudent.email,
+                role: "student",
+                institute: targetStudent.user || targetStudent.institute,
+              };
+            }
+          }
         }
-        if (decoded.email) {
-          studentQuery.push({ email: decoded.email.toLowerCase().trim() });
-        }
-        if (studentQuery.length > 0) {
-          const student = await Student.findOne({ $or: studentQuery });
-          if (student) {
-            user = {
-              _id: student._id,
-              id: student._id,
-              name: student.name,
-              email: student.email,
-              role: "student",
-              institute: student.user || student.institute,
-            };
+
+        if (!user) {
+          const studentQuery = [];
+          if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+            studentQuery.push({ _id: userId });
+          }
+          if (decoded.email) {
+            studentQuery.push({ email: decoded.email.toLowerCase().trim() });
+          }
+          if (decoded.enrollmentNumber) {
+            studentQuery.push({ enrollmentNumber: String(decoded.enrollmentNumber).trim() });
+          }
+          if (studentQuery.length > 0) {
+            const student = await Student.findOne({ $or: studentQuery });
+            if (student) {
+              user = {
+                _id: student._id,
+                id: student._id,
+                name: student.name,
+                email: student.email,
+                role: "student",
+                institute: student.user || student.institute,
+              };
+            }
           }
         }
       } catch (_) {}
