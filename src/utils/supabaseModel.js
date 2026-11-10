@@ -1849,9 +1849,12 @@ class SupabaseQuery {
       }
     }
 
-    if (this.tableName === "institutes" && (currentFilter.registrationSource !== undefined || currentFilter.isDirectRegistration !== undefined)) {
-      const allInsts = await this.find(filter);
-      return allInsts.length;
+    if (tableName === "institutes") {
+      // Strip metadata-backed institute fields from SQL filter so first cold query never short-circuits to []
+      delete currentFilter.registrationSource;
+      delete currentFilter.registration_source;
+      delete currentFilter.isDirectRegistration;
+      delete currentFilter.is_direct_registration;
     }
 
     for (const key of ["user", "institute", "institute_id", "instituteId"]) {
@@ -2119,13 +2122,18 @@ class SupabaseQuery {
             const targetSource = initialFilter.registrationSource;
             if (typeof targetSource === "string") {
               docs = docs.filter(d => (d.registrationSource || "admin") === targetSource);
-            } else if (targetSource && targetSource.$ne) {
+            } else if (targetSource && typeof targetSource === "object" && targetSource.$ne !== undefined) {
               docs = docs.filter(d => (d.registrationSource || "admin") !== targetSource.$ne);
             }
           }
           if (initialFilter.isDirectRegistration !== undefined) {
-            const targetBool = Boolean(initialFilter.isDirectRegistration);
-            docs = docs.filter(d => Boolean(d.isDirectRegistration) === targetBool);
+            const rawFlag = initialFilter.isDirectRegistration;
+            if (typeof rawFlag === "boolean") {
+              docs = docs.filter(d => Boolean(d.isDirectRegistration) === rawFlag);
+            } else if (rawFlag && typeof rawFlag === "object" && rawFlag.$ne !== undefined) {
+              const excludedBool = Boolean(rawFlag.$ne);
+              docs = docs.filter(d => Boolean(d.isDirectRegistration) !== excludedBool);
+            }
           }
         }
         if (tableName === "students" && docs.length > 0) {
