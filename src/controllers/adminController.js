@@ -1806,6 +1806,27 @@ export const getTextBeeDevices = async (req, res) => {
   }
 };
 
+// Helper: sync direct telecalling reports assigned to a Sales Manager (sales_admin)
+const syncManagerTeam = async (managerId, assignedStaffIds = []) => {
+  const managerIdStr = String(managerId);
+  const desiredSet = new Set((assignedStaffIds || []).map((id) => String(id)));
+  const candidates = await User.find({
+    role: { $in: ["sales_person", "marketing_person"] },
+  });
+
+  for (const member of candidates || []) {
+    const memberId = String(member._id || member.id);
+    const currentManagerId = String(member.parentAdmin?._id || member.parentAdmin || "");
+    const shouldBelong = desiredSet.has(memberId);
+
+    if (shouldBelong && currentManagerId !== managerIdStr) {
+      await User.findByIdAndUpdate(memberId, { parentAdmin: managerIdStr }).catch(() => {});
+    } else if (!shouldBelong && currentManagerId === managerIdStr) {
+      await User.findByIdAndUpdate(memberId, { parentAdmin: null }).catch(() => {});
+    }
+  }
+};
+
 // Staff management CRUD
 export const getStaff = async (req, res) => {
   try {
@@ -1827,8 +1848,8 @@ export const getStaff = async (req, res) => {
     }
 
     const staffList = await User.find(query)
-      .select("name email role parentAdmin payoutConfig allowStudentAiDoubtSolver createdAt")
-      .populate("parentAdmin", "name email");
+      .select("name email phone role parentAdmin payoutConfig allowStudentAiDoubtSolver lastActiveAt createdAt")
+      .populate("parentAdmin", "name email role");
 
     return res.json(staffList);
   } catch (err) {
@@ -1839,7 +1860,16 @@ export const getStaff = async (req, res) => {
 
 export const createStaff = async (req, res) => {
   try {
-    const { name, email, password, role, payoutConfig, allowStudentAiDoubtSolver } = req.body;
+    const {
+      name,
+      email,
+      password,
+      role,
+      payoutConfig,
+      allowStudentAiDoubtSolver,
+      parentAdmin,
+      assignedStaffIds,
+    } = req.body;
     if (!name || !email || !password || !role) {
       return res.status(400).json({ message: "All fields are required." });
     }
@@ -1862,17 +1892,28 @@ export const createStaff = async (req, res) => {
       return res.status(400).json({ message: "A user with this email already exists." });
     }
 
+    const isSuperOrTech = requesterRole === "super_admin" || requesterRole === "tech_admin";
+    const resolvedParentAdmin = isSuperOrTech
+      ? parentAdmin !== undefined
+        ? parentAdmin || null
+        : req.user._id
+      : req.user._id;
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const staff = await User.create({
       name: name.trim(),
       email: email.toLowerCase().trim(),
       password: hashedPassword,
       role,
-      parentAdmin: req.user._id,
+      parentAdmin: resolvedParentAdmin,
       institute: null,
       payoutConfig: payoutConfig || null,
       allowStudentAiDoubtSolver: allowStudentAiDoubtSolver !== undefined ? Boolean(allowStudentAiDoubtSolver) : true,
     });
+
+    if (isSuperOrTech && role === "sales_admin" && Array.isArray(assignedStaffIds) && assignedStaffIds.length > 0) {
+      await syncManagerTeam(staff._id || staff.id, assignedStaffIds);
+    }
 
     await logActivity(req.user._id, "Create Staff", `Created staff member ${email} with role ${role}`, req.ip);
 
@@ -1881,8 +1922,8 @@ export const createStaff = async (req, res) => {
       name: staff.name,
       email: staff.email,
       role: staff.role,
+      parentAdmin: staff.parentAdmin || null,
       payoutConfig: staff.payoutConfig,
-      allowStudentAiDoubtSolver: staff.allowStudentAiDoubtSolver,
       allowStudentAiDoubtSolver: staff.allowStudentAiDoubtSolver,
       createdAt: staff.createdAt,
     });
@@ -1894,13 +1935,23 @@ export const createStaff = async (req, res) => {
 
 export const updateStaff = async (req, res) => {
   try {
-    const { name, email, password, role, payoutConfig, allowStudentAiDoubtSolver } = req.body;
+    const {
+      name,
+      email,
+      password,
+      role,
+      payoutConfig,
+      allowStudentAiDoubtSolver,
+      parentAdmin,
+      assignedStaffIds,
+    } = req.body;
     const staff = await User.findById(req.params.id);
     if (!staff) {
       return res.status(404).json({ message: "Staff member not found." });
     }
 
     const requesterRole = req.user.role;
+    const isSuperOrTech = requesterRole === "super_admin" || requesterRole === "tech_admin";
 
     // Access control
     if (requesterRole === "sales_admin" && (staff.role !== "sales_person" || String(staff.parentAdmin) !== String(req.user._id))) {
@@ -1942,8 +1993,16 @@ export const updateStaff = async (req, res) => {
     if (allowStudentAiDoubtSolver !== undefined) {
       staff.allowStudentAiDoubtSolver = Boolean(allowStudentAiDoubtSolver);
     }
+    if (isSuperOrTech && parentAdmin !== undefined) {
+      staff.parentAdmin = parentAdmin || null;
+    }
 
     await staff.save();
+
+    if (isSuperOrTech && (staff.role === "sales_admin" || role === "sales_admin") && Array.isArray(assignedStaffIds)) {
+      await syncManagerTeam(staff._id || staff.id, assignedStaffIds);
+    }
+
     await logActivity(req.user._id, "Update Staff", `Updated staff member ${staff.email}`, req.ip);
 
     return res.json({
@@ -1951,12 +2010,45 @@ export const updateStaff = async (req, res) => {
       name: staff.name,
       email: staff.email,
       role: staff.role,
+      parentAdmin: staff.parentAdmin || null,
       payoutConfig: staff.payoutConfig,
       createdAt: staff.createdAt,
     });
   } catch (err) {
     console.error("updateStaff error:", err);
     return res.status(500).json({ message: "Could not update staff member." });
+  }
+};
+
+export const assignManagerStaff = async (req, res) => {
+  try {
+    if (req.user.role !== "super_admin" && req.user.role !== "tech_admin") {
+      return res.status(403).json({ message: "Only Super Admin or Tech Admin can assign staff teams." });
+    }
+
+    const manager = await User.findById(req.params.id);
+    if (!manager) {
+      return res.status(404).json({ message: "Sales manager not found." });
+    }
+    if (manager.role !== "sales_admin") {
+      return res.status(400).json({ message: "Target user is not a Sales Manager." });
+    }
+
+    const { staffIds = [] } = req.body;
+    await syncManagerTeam(manager._id || manager.id, Array.isArray(staffIds) ? staffIds : []);
+    await logActivity(
+      req.user._id,
+      "Assign Manager Team",
+      `Assigned ${Array.isArray(staffIds) ? staffIds.length : 0} staff member(s) to Sales Manager ${manager.name}`,
+      req.ip
+    );
+
+    return res.json({
+      message: `Team updated for ${manager.name} (${Array.isArray(staffIds) ? staffIds.length : 0} assigned)`,
+    });
+  } catch (err) {
+    console.error("assignManagerStaff error:", err);
+    return res.status(500).json({ message: "Could not assign team to manager." });
   }
 };
 

@@ -2184,10 +2184,11 @@ class SupabaseQuery {
       const idKey = path === "teacher" ? "teacher_id" : 
                     (path === "batch" || path === "batches") ? "batch_id" : 
                     path === "institute" ? "institute_id" : 
-                    (path === "student" || path === "students") ? "student_id" : path;
+                    (path === "student" || path === "students") ? "student_id" :
+                    path === "parentAdmin" ? "parent_admin" : path;
       
       let refTable = "";
-      if (path === "teacher" || path === "user") refTable = "users";
+      if (path === "teacher" || path === "user" || path === "parentAdmin") refTable = "users";
       else if (path === "batch" || path === "batches") refTable = "batches";
       else if (path === "institute") refTable = "institutes";
       else if (path === "student" || path === "students") refTable = "students";

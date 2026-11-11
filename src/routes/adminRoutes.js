@@ -39,6 +39,7 @@ import {
   updateStaff,
   deleteStaff,
   getStaffDetails,
+  assignManagerStaff,
   getActivityLogs,
   topupInstituteWallet,
   updateInstituteMessageCharge,
@@ -197,6 +198,7 @@ router.route("/staff/:id")
   .delete(deleteStaff);
 
 router.get("/staff/:id/details", getStaffDetails);
+router.put("/staff/:id/assign-team", assignManagerStaff);
 
 router.get("/activity-logs", getActivityLogs);
 

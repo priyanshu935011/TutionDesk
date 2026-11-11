@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import {
   getSalesOverview,
+  getSalesManagerDashboard,
   getSalesLeads,
   createSalesLead,
   updateSalesLead,
@@ -26,10 +27,11 @@ import staffOnly from "../middleware/staffMiddleware.js";
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Require logged in staff member (sales_person, super_admin, etc.)
+// Require logged in staff member (sales_person, sales_admin, super_admin, etc.)
 router.use(protect, staffOnly);
 
 router.get("/overview", getSalesOverview);
+router.get("/manager/dashboard", getSalesManagerDashboard);
 router.get("/leads", getSalesLeads);
 router.post("/leads", createSalesLead);
 router.put("/leads/:id", updateSalesLead);

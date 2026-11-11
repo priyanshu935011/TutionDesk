@@ -4,6 +4,7 @@ import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
 import SystemSetting from "../models/SystemSetting.js";
 import CashfreePayment from "../models/CashfreePayment.js";
+import ActivityLog from "../models/ActivityLog.js";
 import bcrypt from "bcryptjs";
 import axios from "axios";
 import crypto from "crypto";
@@ -81,11 +82,230 @@ const calculateIncentiveForAmount = (amount, slabs) => {
   return 500;
 };
 
+const buildTerritoryLookup = (assignments = [], staffId) => {
+  const idStr = String(staffId || "");
+  const myAssignments = (assignments || []).filter((t) => String(t.salesPersonId || "") === idStr);
+  const assignedStates = myAssignments
+    .filter((t) => !t.city)
+    .map((t) => (t.state || "").trim().toLowerCase());
+  const assignedCities = myAssignments
+    .filter((t) => t.city)
+    .map((t) => `${(t.state || "").trim().toLowerCase()}::${(t.city || "").trim().toLowerCase()}`);
+
+  return {
+    myAssignments,
+    assignedStates,
+    assignedCities,
+    territories: myAssignments.map((t) => ({
+      state: (t.state || "").trim(),
+      city: (t.city || "").trim(),
+    })),
+  };
+};
+
+const doesStaffOwnLead = (lead, staffId, territoryLookup) => {
+  const idStr = String(staffId || "");
+  if (String(lead.addedBy || "") === idStr) return true;
+  if (String(lead.salesPerson || "") === idStr) return true;
+  const lState = (lead.state || "").trim().toLowerCase();
+  const lCity = (lead.district || lead.city || "").trim().toLowerCase();
+  if (lState && lCity && territoryLookup.assignedCities.includes(`${lState}::${lCity}`)) return true;
+  if (lState && territoryLookup.assignedStates.includes(lState)) return true;
+  return false;
+};
+
+const doesStaffOwnInstitute = (inst, staffId, staffName = "") => {
+  const spId = String(inst.salesPerson || inst.createdBy || "");
+  const myId = String(staffId || "");
+  const myName = (staffName || "").trim().toLowerCase();
+  const creatorName = (inst.createdByName || inst.staffName || "").trim().toLowerCase();
+  return (spId && spId === myId) || (creatorName && myName && creatorName === myName);
+};
+
+const sanitizeSalesInstitute = (inst, req) => ({
+  _id: inst._id || inst.id,
+  name: inst.name,
+  ownerName: inst.ownerName,
+  adminEmail: inst.adminEmail,
+  adminPhone: inst.adminPhone,
+  subscriptionPlan: inst.subscriptionPlan,
+  subscriptionAmount: inst.subscriptionAmount,
+  subscriptionStart: inst.subscriptionStart,
+  subscriptionEnd: inst.subscriptionEnd,
+  status: inst.status,
+  tuitionType: inst.tuitionType,
+  walletBalance: Number(inst.walletBalance || 0),
+  aiWalletBalance: Number(inst.aiWalletBalance || 0),
+  aiEnabled: Boolean(inst.aiEnabled),
+  aiStudentEnabled: Boolean(inst.aiStudentEnabled),
+  recordedLecturesFeatureEnabled: inst.recordedLecturesFeatureEnabled !== false,
+  quizFeatureEnabled: inst.quizFeatureEnabled !== undefined ? Boolean(inst.quizFeatureEnabled) : false,
+  studentCustomFields: inst.studentCustomFields || [],
+  allowedFeatures: inst.allowedFeatures || [],
+  brandingEnabled: Boolean(inst.brandingEnabled),
+  themeColor: inst.themeColor || "#6366f1",
+  logoUrl: inst.logoUrl || null,
+  createdByName: inst.createdByName || inst.staffName || "",
+  subscriptionPaymentStatus: inst.subscriptionPaymentStatus || (inst.subscriptionPlan === "trial" ? "paid" : "unpaid"),
+  subscriptionPaymentLink:
+    inst.subscriptionOrderId &&
+    (!inst.subscriptionPaymentLink ||
+      inst.subscriptionPaymentLink.includes("payments.cashfree.com/order/") ||
+      inst.subscriptionPaymentLink.includes("railway.app"))
+      ? `${getClientBaseUrl(req)}/pay/${inst.subscriptionOrderId}`
+      : inst.subscriptionPaymentLink || null,
+  subscriptionOrderId: inst.subscriptionOrderId || null,
+  subscriptionPaidAt: inst.subscriptionPaidAt || null,
+  subscriptionPaidAmount: Number(inst.subscriptionPaidAmount || 0),
+  payoutApprovalStatus: inst.payoutApprovalStatus || "pending",
+  payoutApprovedAt: inst.payoutApprovedAt || null,
+  createdAt: inst.createdAt,
+});
+
+const computeStaffPerformance = ({
+  staffId,
+  staffName,
+  config,
+  allInstitutes,
+  allLeads,
+  assignments,
+  startOfMonth,
+  startOfToday,
+  endOfToday,
+  isAdminRole = false,
+}) => {
+  const territoryLookup = buildTerritoryLookup(assignments, staffId);
+
+  const myInstitutes = (allInstitutes || []).filter((inst) =>
+    isAdminRole ? true : doesStaffOwnInstitute(inst, staffId, staffName)
+  );
+
+  const monthInstitutes = myInstitutes
+    .filter((inst) => {
+      const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
+      const isPaid = inst.subscriptionPaymentStatus === "paid";
+      const isApproved = inst.payoutApprovalStatus === "approved";
+      return d >= startOfMonth && inst.subscriptionPlan !== "trial" && isPaid && isApproved;
+    })
+    .sort((a, b) => new Date(a.subscriptionStart || a.createdAt || 0) - new Date(b.subscriptionStart || b.createdAt || 0));
+
+  const pendingApprovalInstitutes = myInstitutes.filter(
+    (inst) => inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus === "paid" && inst.payoutApprovalStatus !== "approved"
+  );
+  const unpaidInstitutes = myInstitutes.filter(
+    (inst) => inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus !== "paid"
+  );
+  const todayInstitutes = myInstitutes.filter((inst) => {
+    const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
+    return d >= startOfToday && inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus === "paid" && inst.payoutApprovalStatus === "approved";
+  });
+
+  const monthSalesCount = monthInstitutes.length;
+  const monthSalesVolume = monthInstitutes.reduce((sum, inst) => sum + Number(inst.subscriptionAmount || 0), 0);
+  const minSales = Number(config.minSalesToQualify ?? 1);
+  const isQualified = monthSalesCount >= minSales;
+  const fixedPayoutEarned = isQualified ? Number(config.fixedBasePayout ?? 10000) : 0;
+
+  const salesBreakdown = monthInstitutes.map((inst, index) => {
+    const amount = Number(inst.subscriptionAmount || 0);
+    const isQualifyingDeal = index < minSales;
+    const incentive = isQualifyingDeal ? 0 : calculateIncentiveForAmount(amount, config.incentiveSlabs);
+    return {
+      _id: inst._id || inst.id,
+      instituteName: inst.name,
+      ownerName: inst.ownerName,
+      plan: inst.subscriptionPlan,
+      amount,
+      incentive,
+      isQualifyingDeal,
+      saleNumber: index + 1,
+      date: inst.subscriptionStart || inst.createdAt,
+    };
+  });
+
+  const totalIncentiveEarned = salesBreakdown.reduce((sum, item) => sum + item.incentive, 0);
+  const totalEstimatedPayout = fixedPayoutEarned + totalIncentiveEarned;
+
+  const myLeads = (allLeads || []).filter((lead) => {
+    if (isAdminRole) {
+      return lead.source !== "Self-Added" || String(lead.addedBy) === String(staffId);
+    }
+    return doesStaffOwnLead(lead, staffId, territoryLookup);
+  });
+
+  let callsToday = 0;
+  let callsThisMonth = 0;
+  myLeads.forEach((lead) => {
+    (lead.callLogs || []).forEach((call) => {
+      const callDate = new Date(call.date);
+      if (callDate >= startOfToday) callsToday++;
+      if (callDate >= startOfMonth) callsThisMonth++;
+    });
+  });
+
+  const leadsAddedToday = myLeads.filter(
+    (lead) => String(lead.addedBy || "") === String(staffId) && new Date(lead.createdAt) >= startOfToday
+  ).length;
+
+  const todayFollowups = myLeads.filter((lead) => {
+    if (!lead.nextFollowUpDate || lead.status === "converted" || lead.status === "lost") {
+      return false;
+    }
+    return new Date(lead.nextFollowUpDate) <= endOfToday;
+  });
+
+  const leadsByStatus = {
+    new: 0,
+    contacted: 0,
+    interested: 0,
+    demo_scheduled: 0,
+    follow_up: 0,
+    converted: 0,
+    lost: 0,
+  };
+  myLeads.forEach((lead) => {
+    const st = (lead.status || "new").toLowerCase();
+    if (leadsByStatus[st] !== undefined) leadsByStatus[st]++;
+  });
+
+  return {
+    territoryLookup,
+    myInstitutes,
+    myLeads,
+    todayFollowups,
+    payout: {
+      criteria: config,
+      monthSalesCount,
+      monthSalesVolume,
+      isQualified,
+      fixedPayoutEarned,
+      totalIncentiveEarned,
+      totalEstimatedPayout,
+      salesBreakdown,
+      pendingApprovalCount: pendingApprovalInstitutes.length,
+      unpaidCount: unpaidInstitutes.length,
+    },
+    dailyMetrics: {
+      callsToday,
+      callsThisMonth,
+      callsTarget: 30,
+      leadsAddedToday,
+      followupsToday: todayFollowups.length,
+      todaySalesCount: todayInstitutes.length,
+      todaySalesVolume: todayInstitutes.reduce((sum, inst) => sum + Number(inst.subscriptionAmount || 0), 0),
+      monthSalesCount,
+      monthSalesVolume,
+    },
+    leadsByStatus,
+  };
+};
+
 // GET /api/sales/overview
 export const getSalesOverview = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
     const userRole = req.user.role;
+    const isAdminRole = userRole === "super_admin" || userRole === "tech_admin";
     const config = await getEffectivePayoutConfig(userId);
 
     const now = new Date();
@@ -93,150 +313,30 @@ export const getSalesOverview = async (req, res) => {
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    // 1. Fetch tuition accounts closed by this sales person
-    const allInstitutes = await Institute.find();
-    const myInstitutes = allInstitutes.filter((inst) => {
-      if (userRole === "super_admin" || userRole === "tech_admin") return true;
-      const spId = String(inst.salesPerson || inst.createdBy || "");
-      const myId = String(userId);
-      const myName = (req.user?.name || "").trim().toLowerCase();
-      const creatorName = (inst.createdByName || inst.staffName || "").trim().toLowerCase();
-      return (spId && spId === myId) || (creatorName && myName && creatorName === myName);
-    });
+    const [allInstitutes, allLeads, assignments] = await Promise.all([
+      Institute.find(),
+      SalesLead.find(),
+      SalesTerritory.find(),
+    ]);
 
-    // Month Sales: Only tuitions whose payment is DONE and APPROVED by Super Admin count towards payout & performance stats!
-    const monthInstitutes = myInstitutes.filter((inst) => {
-      const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
-      const isPaid = inst.subscriptionPaymentStatus === "paid";
-      const isApproved = inst.payoutApprovalStatus === "approved";
-      return d >= startOfMonth && inst.subscriptionPlan !== "trial" && isPaid && isApproved;
-    });
-
-    const pendingApprovalInstitutes = myInstitutes.filter((inst) => {
-      return inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus === "paid" && inst.payoutApprovalStatus !== "approved";
-    });
-
-    const unpaidInstitutes = myInstitutes.filter((inst) => {
-      return inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus !== "paid";
-    });
-
-    // Sort month institutes chronologically (earliest to latest)
-    monthInstitutes.sort((a, b) => {
-      const da = new Date(a.subscriptionStart || a.createdAt || 0);
-      const db = new Date(b.subscriptionStart || b.createdAt || 0);
-      return da - db;
-    });
-
-    // Today Sales (Paid & Approved)
-    const todayInstitutes = myInstitutes.filter((inst) => {
-      const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
-      return d >= startOfToday && inst.subscriptionPlan !== "trial" && inst.subscriptionPaymentStatus === "paid" && inst.payoutApprovalStatus === "approved";
-    });
-
-    // Calculate Month Payout & Incentives
-    const monthSalesCount = monthInstitutes.length;
-    const monthSalesVolume = monthInstitutes.reduce((sum, inst) => sum + Number(inst.subscriptionAmount || 0), 0);
-
-    const minSales = Number(config.minSalesToQualify ?? 1);
-    const isQualified = monthSalesCount >= minSales;
-    const fixedPayoutEarned = isQualified ? Number(config.fixedBasePayout ?? 10000) : 0;
-
-    // Incentive starts applying ONLY AFTER minimum qualifying sales are achieved!
-    // E.g., if minSales is 2, first 2 sales qualify the fixed base payout (earn ₹0 incentive).
-    // Deals from sale #3 onwards unlock deal incentive slabs.
-    const salesBreakdown = monthInstitutes.map((inst, index) => {
-      const amount = Number(inst.subscriptionAmount || 0);
-      const isQualifyingDeal = index < minSales;
-      const incentive = isQualifyingDeal ? 0 : calculateIncentiveForAmount(amount, config.incentiveSlabs);
-      return {
-        _id: inst._id || inst.id,
-        instituteName: inst.name,
-        ownerName: inst.ownerName,
-        plan: inst.subscriptionPlan,
-        amount,
-        incentive,
-        isQualifyingDeal,
-        saleNumber: index + 1,
-        date: inst.subscriptionStart || inst.createdAt,
-      };
-    });
-
-    const totalIncentiveEarned = salesBreakdown.reduce((sum, item) => sum + item.incentive, 0);
-    const totalEstimatedPayout = fixedPayoutEarned + totalIncentiveEarned;
-
-    // 2. Fetch Leads for Today's Follow-ups and Call Counts
-    const allLeads = await SalesLead.find();
-    // Lookup territory assignments for this user
-    const assignments = await SalesTerritory.find();
-    const myAssignments = (assignments || []).filter((t) => String(t.salesPersonId) === String(userId));
-    const assignedStates = myAssignments.filter((t) => !t.city).map((t) => (t.state || "").trim().toLowerCase());
-    const assignedCities = myAssignments.filter((t) => t.city).map((t) => `${(t.state || "").trim().toLowerCase()}::${(t.city || "").trim().toLowerCase()}`);
-
-    const myLeads = allLeads.filter((lead) => {
-      if (userRole === "super_admin" || userRole === "tech_admin") {
-        return lead.source !== "Self-Added" || String(lead.addedBy) === String(userId);
-      }
-      // Staff's own self-added lead
-      if (String(lead.addedBy || "") === String(userId)) return true;
-      // Directly assigned lead
-      if (String(lead.salesPerson || "") === String(userId)) return true;
-      // Territory assigned
-      const lState = (lead.state || "").trim().toLowerCase();
-      const lCity = (lead.district || lead.city || "").trim().toLowerCase();
-      if (lState && lCity && assignedCities.includes(`${lState}::${lCity}`)) return true;
-      if (lState && assignedStates.includes(lState)) return true;
-
-      return false;
-    });
-
-    // Count calls logged today and this month
-    let callsToday = 0;
-    let callsThisMonth = 0;
-    myLeads.forEach((lead) => {
-      (lead.callLogs || []).forEach((call) => {
-        const callDate = new Date(call.date);
-        if (callDate >= startOfToday) {
-          callsToday++;
-        }
-        if (callDate >= startOfMonth) {
-          callsThisMonth++;
-        }
-      });
-    });
-
-    // Follow-ups due today or overdue
-    const todayFollowups = myLeads.filter((lead) => {
-      if (!lead.nextFollowUpDate || lead.status === "converted" || lead.status === "lost") {
-        return false;
-      }
-      const fuDate = new Date(lead.nextFollowUpDate);
-      return fuDate <= endOfToday;
+    const perf = computeStaffPerformance({
+      staffId: userId,
+      staffName: req.user?.name || "",
+      config,
+      allInstitutes,
+      allLeads,
+      assignments,
+      startOfMonth,
+      startOfToday,
+      endOfToday,
+      isAdminRole,
     });
 
     return res.json({
-      payout: {
-        criteria: config,
-        monthSalesCount,
-        monthSalesVolume,
-        isQualified,
-        fixedPayoutEarned,
-        totalIncentiveEarned,
-        totalEstimatedPayout,
-        salesBreakdown,
-        pendingApprovalCount: pendingApprovalInstitutes.length,
-        unpaidCount: unpaidInstitutes.length,
-      },
-      dailyMetrics: {
-        callsToday,
-        callsThisMonth,
-        callsTarget: 30,
-        followupsToday: todayFollowups.length,
-        todaySalesCount: todayInstitutes.length,
-        todaySalesVolume: todayInstitutes.reduce((sum, inst) => sum + Number(inst.subscriptionAmount || 0), 0),
-        monthSalesCount,
-        monthSalesVolume,
-      },
-      todayFollowups,
+      payout: perf.payout,
+      dailyMetrics: perf.dailyMetrics,
+      todayFollowups: perf.todayFollowups,
+      territories: perf.territoryLookup.territories,
     });
   } catch (error) {
     console.error("getSalesOverview error:", error);
@@ -250,33 +350,18 @@ export const getSalesLeads = async (req, res) => {
     const userId = req.user._id || req.user.id;
     const userRole = req.user.role;
 
-    const leads = await SalesLead.find().sort({ updatedAt: -1, createdAt: -1 });
+    const [leads, assignments] = await Promise.all([
+      SalesLead.find().sort({ updatedAt: -1, createdAt: -1 }),
+      SalesTerritory.find(),
+    ]);
 
-    // Lookup territory assignments for this sales person
-    const assignments = await SalesTerritory.find();
-    const myAssignments = (assignments || []).filter((t) => String(t.salesPersonId) === String(userId));
-    const assignedStates = myAssignments.filter((t) => !t.city).map((t) => (t.state || "").trim().toLowerCase());
-    const assignedCities = myAssignments.filter((t) => t.city).map((t) => `${(t.state || "").trim().toLowerCase()}::${(t.city || "").trim().toLowerCase()}`);
+    const territoryLookup = buildTerritoryLookup(assignments, userId);
 
     const filtered = leads.filter((lead) => {
-      // Super admin sees master leads (never staff self-added leads)
       if (userRole === "super_admin" || userRole === "tech_admin") {
         return lead.source !== "Self-Added" || String(lead.addedBy) === String(userId);
       }
-
-      // 1. Staff's own self-added leads ("show leads added by staff only in staff dashboard")
-      if (String(lead.addedBy || "") === String(userId)) return true;
-
-      // 2. Directly assigned leads
-      if (String(lead.salesPerson || "") === String(userId)) return true;
-
-      // 3. Leads matching assigned state/city territories
-      const lState = (lead.state || "").trim().toLowerCase();
-      const lCity = (lead.district || lead.city || "").trim().toLowerCase();
-      if (lState && lCity && assignedCities.includes(`${lState}::${lCity}`)) return true;
-      if (lState && assignedStates.includes(lState)) return true;
-
-      return false;
+      return doesStaffOwnLead(lead, userId, territoryLookup);
     });
 
     return res.json(filtered);
@@ -341,6 +426,15 @@ export const createSalesLead = async (req, res) => {
       callLogs: [],
     });
 
+    try {
+      await logActivity(
+        req.user._id || req.user.id,
+        "Sales Lead Added",
+        `${req.user.name} added coaching lead "${coachingName.trim()}" (${resolvedCity || resolvedState || "Location N/A"})`,
+        req.ip
+      );
+    } catch (_) {}
+
     return res.status(201).json({
       message: "Lead created successfully",
       lead: newLead,
@@ -381,12 +475,14 @@ export const logLeadCall = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
+    const actorId = String(req.user._id || req.user.id || "");
     const callLogItem = {
       date: new Date().toISOString(),
       duration: duration || "1-2 mins",
       outcome: outcome || "Connected",
       note: note ? note.trim() : "",
       loggedBy: req.user.name || "Sales Specialist",
+      loggedById: actorId,
     };
 
     const currentCallLogs = Array.isArray(lead.callLogs) ? lead.callLogs : [];
@@ -407,6 +503,16 @@ export const logLeadCall = async (req, res) => {
     }
 
     const updated = await SalesLead.findByIdAndUpdate(id, updatePayload, { new: true });
+
+    try {
+      await logActivity(
+        actorId,
+        "Sales Call Logged",
+        `${req.user.name} logged call (${outcome || "Connected"}) for "${lead.coachingName}"${status ? ` • Status: ${status}` : ""}`,
+        req.ip
+      );
+    } catch (_) {}
+
     return res.json({ message: "Call logged successfully", lead: updated });
   } catch (error) {
     console.error("logLeadCall error:", error);
@@ -425,49 +531,10 @@ export const getSalesInstitutes = async (req, res) => {
 
     const filtered = allInstitutes.filter((inst) => {
       if (userRole === "super_admin" || userRole === "tech_admin") return true;
-      const spId = String(inst.salesPerson || inst.createdBy || "");
-      const myId = String(userId);
-      const myName = (req.user?.name || "").trim().toLowerCase();
-      const creatorName = (inst.createdByName || inst.staffName || "").trim().toLowerCase();
-      return (spId && spId === myId) || (creatorName && myName && creatorName === myName);
+      return doesStaffOwnInstitute(inst, userId, req.user?.name || "");
     });
 
-    // Project ONLY basic institution info (no students, no teachers, no test marks, no credentials)
-    const sanitized = filtered.map((inst) => ({
-      _id: inst._id || inst.id,
-      name: inst.name,
-      ownerName: inst.ownerName,
-      adminEmail: inst.adminEmail,
-      adminPhone: inst.adminPhone,
-      subscriptionPlan: inst.subscriptionPlan,
-      subscriptionAmount: inst.subscriptionAmount,
-      subscriptionStart: inst.subscriptionStart,
-      subscriptionEnd: inst.subscriptionEnd,
-      status: inst.status,
-      tuitionType: inst.tuitionType,
-      walletBalance: Number(inst.walletBalance || 0),
-      aiWalletBalance: Number(inst.aiWalletBalance || 0),
-      aiEnabled: Boolean(inst.aiEnabled),
-      aiStudentEnabled: Boolean(inst.aiStudentEnabled),
-      recordedLecturesFeatureEnabled: inst.recordedLecturesFeatureEnabled !== false,
-      quizFeatureEnabled: inst.quizFeatureEnabled !== undefined ? Boolean(inst.quizFeatureEnabled) : false,
-      studentCustomFields: inst.studentCustomFields || [],
-      allowedFeatures: inst.allowedFeatures || [],
-      brandingEnabled: Boolean(inst.brandingEnabled),
-      themeColor: inst.themeColor || "#6366f1",
-      logoUrl: inst.logoUrl || null,
-      createdByName: inst.createdByName || inst.staffName || "",
-      subscriptionPaymentStatus: inst.subscriptionPaymentStatus || (inst.subscriptionPlan === "trial" ? "paid" : "unpaid"),
-      subscriptionPaymentLink: (inst.subscriptionOrderId && (!inst.subscriptionPaymentLink || inst.subscriptionPaymentLink.includes("payments.cashfree.com/order/") || inst.subscriptionPaymentLink.includes("railway.app")))
-        ? `${getClientBaseUrl(req)}/pay/${inst.subscriptionOrderId}`
-        : (inst.subscriptionPaymentLink || null),
-      subscriptionOrderId: inst.subscriptionOrderId || null,
-      subscriptionPaidAt: inst.subscriptionPaidAt || null,
-      subscriptionPaidAmount: Number(inst.subscriptionPaidAmount || 0),
-      payoutApprovalStatus: inst.payoutApprovalStatus || "pending",
-      payoutApprovedAt: inst.payoutApprovedAt || null,
-      createdAt: inst.createdAt,
-    }));
+    const sanitized = filtered.map((inst) => sanitizeSalesInstitute(inst, req));
 
     return res.json(sanitized);
   } catch (error) {
@@ -1355,5 +1422,328 @@ export const updatePayoutConfig = async (req, res) => {
   } catch (error) {
     console.error("updatePayoutConfig error:", error);
     return res.status(500).json({ message: "Could not update payout criteria" });
+  }
+};
+
+// GET /api/sales/manager/dashboard
+// Sales Manager (sales_admin) comprehensive team & personal sales intelligence
+export const getSalesManagerDashboard = async (req, res) => {
+  try {
+    const requesterRole = req.user.role;
+    if (!["sales_admin", "super_admin", "tech_admin"].includes(requesterRole)) {
+      return res.status(403).json({ message: "Sales Manager access required." });
+    }
+
+    const myId = String(req.user._id || req.user.id);
+    const isAdminViewer = requesterRole === "super_admin" || requesterRole === "tech_admin";
+    const targetManagerId = isAdminViewer && req.query.managerId ? String(req.query.managerId) : myId;
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const [allStaffCandidates, allInstitutes, allLeads, allAssignments, allActivityLogs, managerConfig] =
+      await Promise.all([
+        User.find({ role: { $in: ["sales_person", "marketing_person"] } }).select("-password"),
+        Institute.find().sort({ createdAt: -1 }),
+        SalesLead.find().sort({ updatedAt: -1, createdAt: -1 }),
+        SalesTerritory.find(),
+        ActivityLog.find().sort({ createdAt: -1 }).limit(400),
+        getEffectivePayoutConfig(targetManagerId),
+      ]);
+
+    const assignedMembers = (allStaffCandidates || []).filter((member) => {
+      if (isAdminViewer && !req.query.managerId) return true;
+      const pId = String(member.parentAdmin?._id || member.parentAdmin || "");
+      return pId === targetManagerId;
+    });
+
+    const teamMemberIds = new Set(assignedMembers.map((m) => String(m._id || m.id)));
+    const staffNameById = new Map();
+    assignedMembers.forEach((m) => staffNameById.set(String(m._id || m.id), m.name));
+    staffNameById.set(targetManagerId, req.user?.name || "Sales Manager");
+
+    const teamStats = [];
+    const teamLeadMap = new Map();
+    const teamFollowups = [];
+    const teamInstituteMap = new Map();
+
+    const statusBreakdown = {
+      new: 0,
+      contacted: 0,
+      interested: 0,
+      demo_scheduled: 0,
+      follow_up: 0,
+      converted: 0,
+      lost: 0,
+    };
+
+    let teamCallsToday = 0;
+    let teamCallsThisMonth = 0;
+    let teamLeadsAddedToday = 0;
+    let teamSalesTodayCount = 0;
+    let teamSalesTodayVolume = 0;
+    let teamSalesMonthCount = 0;
+    let teamSalesMonthVolume = 0;
+    let teamPendingApprovalCount = 0;
+
+    for (const member of assignedMembers) {
+      const staffId = String(member._id || member.id);
+      const staffCfg = await getEffectivePayoutConfig(staffId);
+      const perf = computeStaffPerformance({
+        staffId,
+        staffName: member.name || "",
+        config: staffCfg,
+        allInstitutes,
+        allLeads,
+        assignments: allAssignments,
+        startOfMonth,
+        startOfToday,
+        endOfToday,
+        isAdminRole: false,
+      });
+
+      const convertedCount = perf.leadsByStatus.converted || 0;
+      const totalLeadsCount = perf.myLeads.length;
+      const conversionRate = totalLeadsCount > 0 ? Math.round((convertedCount / totalLeadsCount) * 100) : 0;
+
+      teamCallsToday += perf.dailyMetrics.callsToday;
+      teamCallsThisMonth += perf.dailyMetrics.callsThisMonth;
+      teamLeadsAddedToday += perf.dailyMetrics.leadsAddedToday;
+      teamSalesTodayCount += perf.dailyMetrics.todaySalesCount;
+      teamSalesTodayVolume += perf.dailyMetrics.todaySalesVolume;
+      teamSalesMonthCount += perf.payout.monthSalesCount;
+      teamSalesMonthVolume += perf.payout.monthSalesVolume;
+      teamPendingApprovalCount += perf.payout.pendingApprovalCount;
+
+      perf.myLeads.forEach((lead) => {
+        const lid = String(lead._id || lead.id);
+        if (!teamLeadMap.has(lid)) {
+          teamLeadMap.set(lid, {
+            ...(typeof lead.toObject === "function" ? lead.toObject() : lead),
+            ownerStaffId: staffId,
+            ownerStaffName: member.name,
+          });
+        }
+      });
+
+      perf.todayFollowups.forEach((lead) => {
+        teamFollowups.push({
+          ...(typeof lead.toObject === "function" ? lead.toObject() : lead),
+          ownerStaffId: staffId,
+          ownerStaffName: member.name,
+        });
+      });
+
+      perf.myInstitutes.forEach((inst) => {
+        const iid = String(inst._id || inst.id);
+        if (!teamInstituteMap.has(iid)) {
+          teamInstituteMap.set(iid, {
+            ...sanitizeSalesInstitute(inst, req),
+            ownerStaffId: staffId,
+            ownerStaffName: member.name,
+          });
+        }
+      });
+
+      teamStats.push({
+        _id: staffId,
+        name: member.name,
+        email: member.email,
+        role: member.role,
+        lastActiveAt: member.lastActiveAt || null,
+        territories: perf.territoryLookup.territories,
+        dailyWork: {
+          callsToday: perf.dailyMetrics.callsToday,
+          leadsAddedToday: perf.dailyMetrics.leadsAddedToday,
+          followupsDueToday: perf.dailyMetrics.followupsToday,
+          salesTodayCount: perf.dailyMetrics.todaySalesCount,
+          salesTodayVolume: perf.dailyMetrics.todaySalesVolume,
+        },
+        monthlyStats: {
+          callsThisMonth: perf.dailyMetrics.callsThisMonth,
+          totalLeads: totalLeadsCount,
+          leadsByStatus: perf.leadsByStatus,
+          monthSalesCount: perf.payout.monthSalesCount,
+          monthSalesVolume: perf.payout.monthSalesVolume,
+          totalTuitionsCount: perf.myInstitutes.length,
+          pendingApprovalCount: perf.payout.pendingApprovalCount,
+          unpaidCount: perf.payout.unpaidCount,
+          totalEstimatedPayout: perf.payout.totalEstimatedPayout,
+          conversionRate,
+        },
+      });
+    }
+
+    const teamLeads = Array.from(teamLeadMap.values());
+    teamLeads.forEach((lead) => {
+      const st = (lead.status || "new").toLowerCase();
+      if (statusBreakdown[st] !== undefined) statusBreakdown[st]++;
+    });
+
+    const teamInstitutes = Array.from(teamInstituteMap.values());
+
+    teamFollowups.sort((a, b) => new Date(a.nextFollowUpDate || 0) - new Date(b.nextFollowUpDate || 0));
+
+    // Build 7-day trend across assigned team leads & closed tuitions
+    const dailyTrend = [];
+    for (let offset = 6; offset >= 0; offset--) {
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
+      const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset, 23, 59, 59, 999);
+      const label = dayStart.toLocaleDateString("en-IN", { weekday: "short", day: "numeric" });
+      const dateKey = dayStart.toISOString().slice(0, 10);
+
+      let calls = 0;
+      let leadsAdded = 0;
+      teamLeads.forEach((lead) => {
+        if (lead.createdAt) {
+          const cAt = new Date(lead.createdAt);
+          if (cAt >= dayStart && cAt <= dayEnd && teamMemberIds.has(String(lead.addedBy || ""))) {
+            leadsAdded++;
+          }
+        }
+        (lead.callLogs || []).forEach((c) => {
+          const cd = new Date(c.date);
+          if (cd >= dayStart && cd <= dayEnd) calls++;
+        });
+      });
+
+      const salesClosed = teamInstitutes.filter((inst) => {
+        const d = new Date(inst.payoutApprovedAt || inst.subscriptionPaidAt || inst.subscriptionStart || inst.createdAt);
+        return (
+          inst.subscriptionPlan !== "trial" &&
+          inst.subscriptionPaymentStatus === "paid" &&
+          inst.payoutApprovalStatus === "approved" &&
+          d >= dayStart &&
+          d <= dayEnd
+        );
+      }).length;
+
+      dailyTrend.push({ dateKey, label, calls, leadsAdded, salesClosed });
+    }
+
+    // Build chronological unified team activity feed (Calls + Leads Added + Audit ActivityLogs)
+    const feedItems = [];
+    const seenKeys = new Set();
+
+    teamLeads.forEach((lead) => {
+      const ownerId = String(lead.addedBy || lead.salesPerson || lead.ownerStaffId || "");
+      const ownerName = lead.addedByName || staffNameById.get(ownerId) || lead.ownerStaffName || "Staff";
+
+      if (lead.createdAt && lead.source === "Self-Added" && (teamMemberIds.has(ownerId) || ownerId === targetManagerId)) {
+        const key = `lead:${lead._id || lead.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          feedItems.push({
+            id: key,
+            type: "lead",
+            staffId: ownerId,
+            staffName: ownerName,
+            action: "Added New Lead",
+            coachingName: lead.coachingName,
+            phone: lead.phone,
+            location: [lead.city || lead.district, lead.state].filter(Boolean).join(", "),
+            details: `Added ${lead.coachingName}${lead.city ? ` (${lead.city})` : ""}`,
+            date: lead.createdAt,
+          });
+        }
+      }
+
+      (lead.callLogs || []).forEach((call, idx) => {
+        const loggerId = String(call.loggedById || lead.ownerStaffId || "");
+        const loggerName = call.loggedBy || staffNameById.get(loggerId) || lead.ownerStaffName || "Staff";
+        const key = `call:${lead._id || lead.id}:${call.date}:${idx}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          feedItems.push({
+            id: key,
+            type: "call",
+            staffId: loggerId,
+            staffName: loggerName,
+            action: `Call: ${call.outcome || "Logged"}`,
+            coachingName: lead.coachingName,
+            phone: lead.phone,
+            outcome: call.outcome || "Connected",
+            duration: call.duration || "",
+            note: call.note || "",
+            details: `${call.outcome || "Call logged"} on ${lead.coachingName}${call.note ? ` — "${call.note}"` : ""}`,
+            date: call.date || lead.updatedAt,
+          });
+        }
+      });
+    });
+
+    (allActivityLogs || []).forEach((log) => {
+      const logUid = String(log.user?._id || log.user || "");
+      if (teamMemberIds.has(logUid) || logUid === targetManagerId) {
+        const key = `act:${log._id || log.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          feedItems.push({
+            id: key,
+            type: "activity",
+            staffId: logUid,
+            staffName: log.user?.name || staffNameById.get(logUid) || "Staff",
+            action: log.action || "Activity",
+            details: log.details || log.action,
+            date: log.createdAt,
+          });
+        }
+      }
+    });
+
+    feedItems.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+    // Manager's own personal sales & assigned territories so manager can do sales seamlessly
+    const managerPerf = computeStaffPerformance({
+      staffId: targetManagerId,
+      staffName: req.user?.name || "",
+      config: managerConfig,
+      allInstitutes,
+      allLeads,
+      assignments: allAssignments,
+      startOfMonth,
+      startOfToday,
+      endOfToday,
+      isAdminRole: false,
+    });
+
+    return res.json({
+      teamMembers: teamStats,
+      teamSummary: {
+        totalStaff: teamStats.length,
+        teamCallsToday,
+        teamCallsThisMonth,
+        teamFollowupsDueToday: teamFollowups.length,
+        teamLeadsAddedToday,
+        teamTotalLeads: teamLeads.length,
+        teamSalesTodayCount,
+        teamSalesTodayVolume,
+        teamSalesMonthCount,
+        teamSalesMonthVolume,
+        teamPendingApprovalCount,
+        teamTotalInstitutes: teamInstitutes.length,
+        statusBreakdown,
+        dailyTrend,
+      },
+      teamFollowups,
+      teamLeads,
+      teamInstitutes,
+      teamActivityFeed: feedItems.slice(0, 120),
+      managerPersonal: {
+        territories: managerPerf.territoryLookup.territories,
+        overview: {
+          payout: managerPerf.payout,
+          dailyMetrics: managerPerf.dailyMetrics,
+          todayFollowups: managerPerf.todayFollowups,
+        },
+        leads: managerPerf.myLeads,
+        institutes: managerPerf.myInstitutes.map((inst) => sanitizeSalesInstitute(inst, req)),
+      },
+    });
+  } catch (error) {
+    console.error("getSalesManagerDashboard error:", error);
+    return res.status(500).json({ message: "Could not load Sales Manager dashboard." });
   }
 };
