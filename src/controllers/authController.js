@@ -28,7 +28,7 @@ const buildInstituteState = async (user) => {
   if (instIdStr && mongoose.Types.ObjectId.isValid(instIdStr)) {
     try {
       institute = await Institute.findById(instIdStr).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration createdByName"
       );
     } catch (_) {}
   }
@@ -37,7 +37,7 @@ const buildInstituteState = async (user) => {
       institute = await Institute.findOne({
         $or: [{ _id: instIdStr }, { id: instIdStr }, { adminUser: instIdStr }]
       }).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration createdByName"
       );
     } catch (_) {}
   }
@@ -47,7 +47,7 @@ const buildInstituteState = async (user) => {
     try {
       const cleanPhone = String(user.phone).replace(/\D/g, "").slice(-10);
       institute = await Institute.findOne({ adminPhone: cleanPhone }).select(
-        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration"
+        "name subscriptionPlan subscriptionAmount trialDays subscriptionStart subscriptionEnd status tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories allowedTestSeries recordedLecturesFeatureEnabled releaseVideosFeatureEnabled brandingEnabled logoUrl themeColor allowedFeatures whatsappSettings studentCustomFields walletBalance perMessageCharge aiEnabled aiStudentEnabled aiWalletBalance aiCreditsPerRupee maxVideoStorageGb registrationSource isDirectRegistration createdByName"
       );
       if (institute) {
         user.institute = institute._id;
@@ -181,6 +181,12 @@ const buildInstituteState = async (user) => {
     maxVideoStorageGb: Number(institute.maxVideoStorageGb ?? institute.max_video_storage_gb ?? 50),
     registrationSource: institute.registrationSource || "admin",
     isDirectRegistration: Boolean(institute.isDirectRegistration),
+    isDirectTrial: Boolean(
+      institute.isDirectTrial ||
+        institute.isDirectRegistration ||
+        institute.registrationSource === "direct" ||
+        institute.createdByName === "direct_registration"
+    ),
   };
 };
 
@@ -318,6 +324,7 @@ export const loginUser = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isTrialRegistration: Boolean(user.isTrialRegistration || institute?.isDirectTrial),
         institute,
       },
     });
@@ -923,6 +930,7 @@ export const verifyLoginOtp = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        isTrialRegistration: Boolean(user.isTrialRegistration || institute?.isDirectTrial),
         institute,
       },
     });

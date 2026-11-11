@@ -12,13 +12,13 @@ export const getDashboard = async (req, res) => {
     if (instIdStr) {
       institute = await Institute.findById(instIdStr)
         .select(
-          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+          "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings registrationSource isDirectRegistration createdByName"
         );
     }
     if (!institute && req.user.phone) {
       const cleanPhone = String(req.user.phone).replace(/\D/g, "").slice(-10);
       institute = await Institute.findOne({ adminPhone: cleanPhone }).select(
-        "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings"
+        "name status subscriptionPlan subscriptionEnd adminUser tuitionType quizFeatureEnabled testSeriesFeatureEnabled allowedTestSeriesCategories recordedLecturesFeatureEnabled recorded_lectures_feature_enabled releaseVideosFeatureEnabled brandingEnabled themeColor logoUrl allowedFeatures whatsappSettings registrationSource isDirectRegistration createdByName"
       );
     }
 
@@ -132,6 +132,12 @@ export const getDashboard = async (req, res) => {
             : true);
       instObj.recorded_lectures_feature_enabled = isRecEnabled;
       instObj.recordedLecturesFeatureEnabled = isRecEnabled;
+      instObj.isDirectTrial = Boolean(
+        instObj.isDirectTrial ||
+          instObj.isDirectRegistration ||
+          instObj.registrationSource === "direct" ||
+          instObj.createdByName === "direct_registration"
+      );
 
       if (!instObj.allowedFeatures || instObj.allowedFeatures.length === 0) {
         instObj.allowedFeatures = [

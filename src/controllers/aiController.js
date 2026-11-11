@@ -291,37 +291,6 @@ export const getAiStatus = async (req, res) => {
       ? (!details.aiEnabled || !details.aiStudentEnabled)
       : (teacherAiDisabled || !details.aiEnabled);
 
-    let parentalGate = {
-      isMinor: false,
-      parentConsentStatus: "not_required",
-      requiresParentalConsent: false,
-      aiConsentGranted: true,
-    };
-
-    if (isStudent && (req.user._id || req.user.id)) {
-      const studentDoc = await Student.findById(req.user._id || req.user.id).catch(() => null);
-      if (studentDoc) {
-        let isMinor = studentDoc.isMinor !== undefined ? Boolean(studentDoc.isMinor) : true;
-        if (studentDoc.dateOfBirth) {
-          const dob = new Date(studentDoc.dateOfBirth);
-          if (!isNaN(dob.getTime())) {
-            const now = new Date();
-            let age = now.getFullYear() - dob.getFullYear();
-            const m = now.getMonth() - dob.getMonth();
-            if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
-            isMinor = age < 18;
-          }
-        }
-        const pStatus = studentDoc.parentConsentStatus || (isMinor ? "pending" : "not_required");
-        parentalGate = {
-          isMinor,
-          parentConsentStatus: pStatus,
-          requiresParentalConsent: isMinor && pStatus !== "verified",
-          aiConsentGranted: studentDoc.aiConsentGranted !== false,
-        };
-      }
-    }
-
     const availableBatches = await getInstituteBatches(req, instituteId);
     const studentCustomFields = await getInstituteStudentCustomFields(instituteId);
 
@@ -341,7 +310,6 @@ export const getAiStatus = async (req, res) => {
       userRole: req.user.role,
       batches: availableBatches,
       studentCustomFields,
-      ...parentalGate,
     });
   } catch (error) {
     console.error("getAiStatus error:", error);
@@ -385,37 +353,6 @@ export const chatWithAi = async (req, res) => {
         message: "AI Tutor has not been activated for students by your institute.",
         code: "STUDENT_AI_LOCKED",
       });
-    }
-
-    if (isStudent && (req.user._id || req.user.id)) {
-      const studentDoc = await Student.findById(req.user._id || req.user.id).catch(() => null);
-      if (studentDoc) {
-        if (studentDoc.aiConsentGranted === false) {
-          return res.status(403).json({
-            message: "AI processing consent was withdrawn in your Privacy Center. Re-enable it to use AI Tutor.",
-            code: "AI_CONSENT_WITHDRAWN",
-          });
-        }
-        let isMinor = studentDoc.isMinor !== undefined ? Boolean(studentDoc.isMinor) : true;
-        if (studentDoc.dateOfBirth) {
-          const dob = new Date(studentDoc.dateOfBirth);
-          if (!isNaN(dob.getTime())) {
-            const now = new Date();
-            let age = now.getFullYear() - dob.getFullYear();
-            const m = now.getMonth() - dob.getMonth();
-            if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
-            isMinor = age < 18;
-          }
-        }
-        const pStatus = studentDoc.parentConsentStatus || (isMinor ? "pending" : "not_required");
-        if (isMinor && pStatus !== "verified") {
-          return res.status(403).json({
-            message: "Verifiable Parental Consent (DPDP Section 9) is required before using Student AI Tutor.",
-            code: "PARENTAL_CONSENT_REQUIRED",
-            requiresParentalConsent: true,
-          });
-        }
-      }
     }
 
     const {

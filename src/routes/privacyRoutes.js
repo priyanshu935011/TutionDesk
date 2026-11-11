@@ -10,10 +10,8 @@ import {
   protectAnyPrincipal,
   requestDataCorrection,
   selfServiceDeleteAccount,
-  sendParentalConsentOtp,
   submitGrievance,
   updateConsents,
-  verifyParentalConsentOtp,
 } from "../controllers/privacyController.js";
 
 const router = express.Router();
@@ -30,8 +28,6 @@ router.get("/export", exportPersonalData);
 router.post("/correction", requestDataCorrection);
 router.get("/grievances", getPrivacyOverview);
 router.post("/grievances", submitGrievance);
-router.post("/parental-consent/send-otp", sendParentalConsentOtp);
-router.post("/parental-consent/verify-otp", verifyParentalConsentOtp);
 router.post("/delete-account", selfServiceDeleteAccount);
 
 // Super Admin Governance Routes

@@ -626,6 +626,7 @@ export const verifyOtpAndRegister = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        isTrialRegistration: true,
         institute: institutePayload,
       },
       trial: {

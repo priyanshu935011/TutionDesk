@@ -33,6 +33,7 @@ import SystemLog from "../models/SystemLog.js";
 import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
 import AiUsageLog from "../models/AiUsageLog.js";
+import SmsOtpLog from "../models/SmsOtpLog.js";
 import { getInstituteAiDetails } from "../services/aiService.js";
 import { getTextBeeConfig, sendCustomSMS, fetchTextBeeDevices } from "../utils/smsHelper.js";
 
@@ -307,12 +308,17 @@ export const getAdminOverview = async (req, res) => {
       }
     );
 
-    // Global WhatsApp message analytics
+    // Global WhatsApp & SMS OTP analytics
     let globalWhatsappAnalytics = {
       total: 0,
       daily: 0,
       weekly: 0,
       monthly: 0
+    };
+    let smsOtpAnalytics = {
+      total: 0,
+      daily: 0,
+      monthly: 0,
     };
     try {
       const nowTime = new Date();
@@ -320,20 +326,27 @@ export const getAdminOverview = async (req, res) => {
       const sevenDaysAgo = new Date(nowTime.getTime() - 7 * 24 * 60 * 60 * 1000);
       const thirtyDaysAgo = new Date(nowTime.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-      const total = await WhatsappLog.countDocuments({ status: "sent" });
-      const daily = await WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: oneDayAgo } });
-      const weekly = await WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: sevenDaysAgo } });
-      const monthly = await WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: thirtyDaysAgo } });
+      const [total, daily, weekly, monthly, otpTotal, otpDaily, otpMonthly] = await Promise.all([
+        WhatsappLog.countDocuments({ status: "sent" }),
+        WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: oneDayAgo } }),
+        WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: sevenDaysAgo } }),
+        WhatsappLog.countDocuments({ status: "sent", createdAt: { $gte: thirtyDaysAgo } }),
+        SmsOtpLog.countDocuments({ status: "sent" }),
+        SmsOtpLog.countDocuments({ status: "sent", createdAt: { $gte: oneDayAgo } }),
+        SmsOtpLog.countDocuments({ status: "sent", createdAt: { $gte: thirtyDaysAgo } }),
+      ]);
 
       globalWhatsappAnalytics = { total, daily, weekly, monthly };
+      smsOtpAnalytics = { total: otpTotal, daily: otpDaily, monthly: otpMonthly };
     } catch (e) {
-      console.error("Error computing globalWhatsappAnalytics:", e);
+      console.error("Error computing messaging analytics:", e);
     }
 
     return res.json({
       summary,
       institutes: hydrated,
       globalWhatsappAnalytics,
+      smsOtpAnalytics,
     });
   } catch (error) {
     console.error("getAdminOverview error:", error);

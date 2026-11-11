@@ -15,7 +15,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs"
+  "activity_logs", "activitylogs", "sms_otp_logs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -702,6 +702,36 @@ export function stripKnownMissingColumns(tableName, filterOrPayload) {
   return filterOrPayload;
 }
 
+const STUDENT_NON_COLUMN_KEYS = [
+  "custom_fields", "customFields",
+  "archived_individually", "archivedIndividually",
+  "archived_by_batch", "archivedByBatch",
+  "batch_ids", "batches",
+  "paid_amount", "paidAmount",
+  "pending_amount", "pendingAmount",
+  "payment_history", "paymentHistory",
+  "attendance_records", "attendanceRecords",
+  "attendance_summary", "attendanceSummary",
+  "ai_consent_granted", "aiConsentGranted",
+  "whatsapp_consent_granted", "whatsappConsentGranted",
+  "date_of_birth", "dateOfBirth",
+  "is_minor", "isMinor",
+  "parent_consent_status", "parentConsentStatus",
+  "parent_consent_phone", "parentConsentPhone",
+  "parent_consent_email", "parentConsentEmail",
+  "parent_consent_at", "parentConsentAt",
+  "parent_consent_method", "parentConsentMethod",
+  "parent_consent_version", "parentConsentVersion",
+];
+
+function stripStudentNonColumnFields(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  for (const key of STUDENT_NON_COLUMN_KEYS) {
+    delete payload[key];
+  }
+  return payload;
+}
+
 class SupabaseDocument {
   constructor(tableName, data, modelInstance) {
     Object.defineProperty(this, "_tableName", {
@@ -1202,25 +1232,7 @@ class SupabaseDocument {
     }
 
     if (this._tableName === "students") {
-      delete payload.custom_fields;
-      delete payload.customFields;
-      delete payload.archived_individually;
-      delete payload.archivedIndividually;
-      delete payload.archived_by_batch;
-      delete payload.archivedByBatch;
-      // batch_ids column does not exist in Supabase; store batches in metadata instead
-      delete payload.batch_ids;
-      delete payload.batches;
-      delete payload.paid_amount;
-      delete payload.paidAmount;
-      delete payload.pending_amount;
-      delete payload.pendingAmount;
-      delete payload.payment_history;
-      delete payload.paymentHistory;
-      delete payload.attendance_records;
-      delete payload.attendanceRecords;
-      delete payload.attendance_summary;
-      delete payload.attendanceSummary;
+      stripStudentNonColumnFields(payload);
     }
 
     if (this._tableName === "batches") {
@@ -1750,6 +1762,10 @@ class SupabaseQuery {
         if (key.startsWith("$")) continue;
         const dbKey = camelToSnake(key);
         dbPayload[dbKey] = val;
+      }
+
+      if (tableName === "students") {
+        stripStudentNonColumnFields(dbPayload);
       }
 
       const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
@@ -2836,8 +2852,7 @@ class SupabaseModel {
     }
 
     if (this.tableName === "students") {
-      delete payload.custom_fields;
-      delete payload.customFields;
+      stripStudentNonColumnFields(payload);
     }
 
     if (this.tableName === "video_playlist_items") {
@@ -3604,6 +3619,10 @@ class SupabaseModel {
       dbPayload[dbKey] = val;
     }
 
+    if (this.tableName === "students") {
+      stripStudentNonColumnFields(dbPayload);
+    }
+
     const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
     for (const key of uuidPayloadKeys) {
       if (key in dbPayload) {
@@ -3883,6 +3902,7 @@ const mockMongoose = {
     else if (modelName === "GrievanceTicket" || modelName === "GrievanceTickets") tableName = "grievance_tickets";
     else if (modelName === "DataAccessLog" || modelName === "DataAccessLogs") tableName = "data_access_logs";
     else if (modelName === "DpdpRetentionNotice" || modelName === "DpdpRetentionNotices") tableName = "dpdp_retention_notices";
+    else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";

@@ -1,5 +1,16 @@
 import axios from "axios";
 import SystemSetting from "../models/SystemSetting.js";
+import SmsOtpLog from "../models/SmsOtpLog.js";
+import { maskPhone } from "./piiSanitizer.js";
+
+const logSmsOtpSent = (phone, provider = "textbee") => {
+  SmsOtpLog.create({
+    phoneMasked: maskPhone(phone || ""),
+    provider,
+    status: "sent",
+    createdAt: new Date(),
+  }).catch(() => {});
+};
 
 const DEFAULT_BASE_URL = "https://api.textbee.dev/api/v1";
 const DEFAULT_OTP_TEMPLATE = "Your ClassTech verification code is {otp}. Valid for 5 minutes.";
@@ -189,11 +200,13 @@ export const sendSMSOTP = async (phoneNumber, otp, optionsOrTemplate = {}) => {
   // 1. Try sending via TextBee if configured
   if (config.isConfigured && config.enabled !== false) {
     try {
-      return await sendCustomSMS(phoneNumber, finalMessage, {
+      const res = await sendCustomSMS(phoneNumber, finalMessage, {
         apiKey: config.apiKey,
         deviceId: config.deviceId,
         baseUrl: config.baseUrl,
       });
+      logSmsOtpSent(mobileNumber, "textbee");
+      return res;
     } catch (textbeeErr) {
       console.error("[sendSMSOTP] TextBee gateway failed:", textbeeErr.message);
 
@@ -203,6 +216,7 @@ export const sendSMSOTP = async (phoneNumber, otp, optionsOrTemplate = {}) => {
         try {
           const hanuUrl = `https://api.hanuotp.in/sms-otp.php?number=${mobileNumber}&OTP=${otp}&apikey=${process.env.HANU_OTP_API_KEY}&templatesid=default`;
           const hanuRes = await axios.get(hanuUrl, { timeout: 10000 });
+          logSmsOtpSent(mobileNumber, "hanu");
           return hanuRes.data;
         } catch (_) {}
       }
@@ -217,6 +231,7 @@ export const sendSMSOTP = async (phoneNumber, otp, optionsOrTemplate = {}) => {
     const apiKey = process.env.HANU_OTP_API_KEY;
     const url = `https://api.hanuotp.in/sms-otp.php?number=${mobileNumber}&OTP=${otp}&apikey=${apiKey}&templatesid=default`;
     const response = await axios.get(url, { timeout: 10000 });
+    logSmsOtpSent(mobileNumber, "hanu");
     return response.data;
   }
 

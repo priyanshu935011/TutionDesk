@@ -677,11 +677,6 @@ export const createStudent = async (req, res) => {
       paymentHistory: initialPaymentHistory = [],
       attendanceRecords = [],
       feeStatus = "unpaid",
-      dateOfBirth = null,
-      isMinor,
-      parentConsentStatus,
-      aiConsentGranted = true,
-      whatsappConsentGranted = true,
     } = req.body;
 
     let paymentHistory = Array.isArray(initialPaymentHistory) ? [...initialPaymentHistory] : [];
@@ -851,20 +846,6 @@ export const createStudent = async (req, res) => {
       note: p.note || ""
     }));
 
-    const resolvedIsMinor = (() => {
-      if (dateOfBirth) {
-        const dob = new Date(dateOfBirth);
-        if (!isNaN(dob.getTime())) {
-          const now = new Date();
-          let age = now.getFullYear() - dob.getFullYear();
-          const m = now.getMonth() - dob.getMonth();
-          if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
-          return age < 18;
-        }
-      }
-      return isMinor !== undefined ? Boolean(isMinor) : true;
-    })();
-
     const student = await Student.create({
       user: ownerId,
       name,
@@ -884,13 +865,6 @@ export const createStudent = async (req, res) => {
       attendanceRecords,
       password: hashedPasswordToUse,
       customFields,
-      dateOfBirth: dateOfBirth || null,
-      isMinor: resolvedIsMinor,
-      parentConsentStatus:
-        parentConsentStatus || (resolvedIsMinor ? "pending" : "not_required"),
-      parentConsentPhone: parentPhone || "",
-      aiConsentGranted: Boolean(aiConsentGranted),
-      whatsappConsentGranted: Boolean(whatsappConsentGranted),
     });
 
     const populatedStudent = await populateStudent(Student.findById(student._id));
@@ -1031,11 +1005,6 @@ export const updateStudent = async (req, res) => {
       paymentHistory,
       attendanceRecords,
       customFields,
-      dateOfBirth,
-      isMinor,
-      parentConsentStatus,
-      aiConsentGranted,
-      whatsappConsentGranted,
     } = req.body;
 
     const safeParseDate = (val) => {
@@ -1204,22 +1173,6 @@ export const updateStudent = async (req, res) => {
       }
     }
     student.customFields = customFieldsObj;
-
-    if (dateOfBirth !== undefined) student.dateOfBirth = dateOfBirth || null;
-    if (isMinor !== undefined) student.isMinor = Boolean(isMinor);
-    if (dateOfBirth) {
-      const dob = new Date(dateOfBirth);
-      if (!isNaN(dob.getTime())) {
-        const now = new Date();
-        let age = now.getFullYear() - dob.getFullYear();
-        const m = now.getMonth() - dob.getMonth();
-        if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
-        student.isMinor = age < 18;
-      }
-    }
-    if (parentConsentStatus !== undefined) student.parentConsentStatus = parentConsentStatus;
-    if (aiConsentGranted !== undefined) student.aiConsentGranted = Boolean(aiConsentGranted);
-    if (whatsappConsentGranted !== undefined) student.whatsappConsentGranted = Boolean(whatsappConsentGranted);
 
     if (typeof student.markModified === "function") {
       student.markModified("batch");

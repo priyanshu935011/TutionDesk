@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import Institute from "../models/Institute.js";
@@ -22,32 +21,7 @@ import {
   cascadeDeleteStudent,
 } from "../utils/cascadeErasure.js";
 import { runDpdpRetentionSweep } from "../services/dpdpRetentionService.js";
-import { sendSMSOTP } from "../utils/smsHelper.js";
-import { sendOTPEmail } from "../utils/mailer.js";
-import { sendMessage } from "../services/whatsappService.js";
-import { maskEmail, maskIp, maskPhone } from "../utils/piiSanitizer.js";
-import redisClient from "../config/redis.js";
-
-const memoryParentalOtp = new Map();
-
-function computeIsMinor(dob, explicitFlag) {
-  if (dob) {
-    const parsed = new Date(dob);
-    if (!isNaN(parsed.getTime())) {
-      const now = new Date();
-      let age = now.getFullYear() - parsed.getFullYear();
-      const m = now.getMonth() - parsed.getMonth();
-      if (m < 0 || (m === 0 && now.getDate() < parsed.getDate())) {
-        age--;
-      }
-      return age < 18;
-    }
-  }
-  if (explicitFlag !== undefined && explicitFlag !== null) {
-    return Boolean(explicitFlag);
-  }
-  return true; // Default safe assumption for coaching portal learners until 18+ or DOB confirmed
-}
+import { maskIp } from "../utils/piiSanitizer.js";
 
 /**
  * Middleware: accepts valid User (teacher/admin/super_admin) OR Student JWT strictly via verifyJwtToken.
@@ -179,23 +153,6 @@ export const getPrivacyOverview = async (req, res) => {
       .sort({ createdAt: -1 })
       .catch(() => []);
 
-    let minorStatus = null;
-    if (p.type === "student" && p.doc) {
-      const isMinor = computeIsMinor(p.doc.dateOfBirth, p.doc.isMinor);
-      minorStatus = {
-        isMinor,
-        dateOfBirth: p.doc.dateOfBirth || null,
-        parentName: p.doc.parentName || "",
-        parentPhoneMasked: p.doc.parentPhone ? maskPhone(p.doc.parentPhone) : "",
-        parentEmailMasked: p.doc.email ? maskEmail(p.doc.email) : "",
-        hasParentPhone: Boolean(String(p.doc.parentPhone || "").trim()),
-        parentConsentStatus:
-          p.doc.parentConsentStatus || (isMinor ? "pending" : "not_required"),
-        parentConsentAt: p.doc.parentConsentAt || null,
-        parentConsentMethod: p.doc.parentConsentMethod || "",
-      };
-    }
-
     const instituteB2bDpa = p.instituteDoc
       ? {
           instituteName: p.instituteDoc.name || "",
@@ -207,12 +164,7 @@ export const getPrivacyOverview = async (req, res) => {
 
     const defaults = {
       core_service: latestByPurpose.core_service?.granted ?? true,
-      ai_processing:
-        latestByPurpose.ai_processing?.granted ??
-        (p.type === "student" ? p.doc?.aiConsentGranted !== false : true),
-      whatsapp_alerts:
-        latestByPurpose.whatsapp_alerts?.granted ??
-        (p.type === "student" ? p.doc?.whatsappConsentGranted !== false : true),
+      whatsapp_alerts: latestByPurpose.whatsapp_alerts?.granted ?? true,
       analytics_telemetry:
         p.type === "student"
           ? false
@@ -232,7 +184,6 @@ export const getPrivacyOverview = async (req, res) => {
       },
       consents: defaults,
       consentHistory: Object.values(latestByPurpose),
-      minorStatus,
       instituteB2bDpa,
       grievances: (grievances || []).map((g) => ({
         id: String(g._id || g.id),
@@ -262,7 +213,6 @@ export const updateConsents = async (req, res) => {
     const p = req.principal;
     const { purpose, granted, language = "en" } = req.body;
     const allowedPurposes = [
-      "ai_processing",
       "whatsapp_alerts",
       "analytics_telemetry",
       "b2b_dpa",
@@ -294,11 +244,7 @@ export const updateConsents = async (req, res) => {
       ipMasked: maskIp(req.ip || ""),
     });
 
-    if (p.type === "student" && p.doc) {
-      if (purpose === "ai_processing") p.doc.aiConsentGranted = granted;
-      if (purpose === "whatsapp_alerts") p.doc.whatsappConsentGranted = granted;
-      await p.doc.save().catch(() => {});
-    } else if (p.type === "user" && p.instituteDoc && p.role === "institute_admin") {
+    if (p.type === "user" && p.instituteDoc && p.role === "institute_admin") {
       if (purpose === "b2b_dpa") {
         p.instituteDoc.dpaAccepted = granted;
         p.instituteDoc.dpaAcceptedAt = granted ? new Date() : null;
@@ -371,9 +317,6 @@ export const exportPersonalData = async (req, res) => {
         parentName: s.parentName,
         parentPhone: s.parentPhone,
         address: s.address,
-        dateOfBirth: s.dateOfBirth || null,
-        isMinor: computeIsMinor(s.dateOfBirth, s.isMinor),
-        parentConsentStatus: s.parentConsentStatus || "pending",
         feePlanType: s.feePlanType,
         totalFees: s.totalFees,
         joinedOn: s.joinedOn,
@@ -530,153 +473,6 @@ export const submitGrievance = async (req, res) => {
   } catch (err) {
     console.error("submitGrievance error:", err);
     return res.status(500).json({ message: "Could not submit grievance." });
-  }
-};
-
-/**
- * DPDP Section 9 / Rule 10 Verifiable Parental Consent via Parent Phone / Email OTP
- */
-export const sendParentalConsentOtp = async (req, res) => {
-  try {
-    const p = req.principal;
-    if (p.type !== "student" || !p.doc) {
-      return res.status(403).json({ message: "Only student accounts use guardian verification." });
-    }
-
-    const s = p.doc;
-    const channel = String(req.body?.channel || "sms").toLowerCase();
-    const targetPhone = String(req.body?.parentPhone || s.parentPhone || "").trim();
-    const targetEmail = String(req.body?.parentEmail || s.email || "").trim().toLowerCase();
-
-    if (channel === "email") {
-      if (!targetEmail || !targetEmail.includes("@")) {
-        return res.status(400).json({ message: "Valid parent email address is required." });
-      }
-    } else {
-      const digits = targetPhone.replace(/\D/g, "");
-      if (digits.length < 10) {
-        return res.status(400).json({
-          message: "Valid 10-digit parent mobile number is required for Verifiable Parental Consent.",
-        });
-      }
-    }
-
-    const otp = String(crypto.randomInt(100000, 999999));
-    const key = `dpdp:parent_otp:${p.id}`;
-    const payload = JSON.stringify({
-      otp,
-      channel,
-      parentPhone: targetPhone,
-      parentEmail: targetEmail,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    });
-
-    if (redisClient?.isReady) {
-      await redisClient.set(key, payload, { EX: 600 }).catch(() => {});
-    }
-    memoryParentalOtp.set(key, JSON.parse(payload));
-
-    if (channel === "email") {
-      await sendOTPEmail(targetEmail, s.parentName || "Parent / Guardian", otp);
-    } else {
-      await sendSMSOTP(targetPhone, otp);
-      const wpMsg = `ClassTech Verifiable Parental Consent (DPDP Sec 9): Your OTP to verify guardian consent for student *${s.name}* is *${otp}* (valid for 10 mins). Share only if you authorize portal & AI learning access.`;
-      sendMessage(String(s.user || "admin_test"), targetPhone, wpMsg, "custom").catch(() => {});
-    }
-
-    return res.json({
-      success: true,
-      message:
-        channel === "email"
-          ? `Guardian consent OTP sent to ${maskEmail(targetEmail)}.`
-          : `Guardian consent OTP sent to ${maskPhone(targetPhone)}.`,
-      channel,
-    });
-  } catch (err) {
-    console.error("sendParentalConsentOtp error:", err);
-    return res.status(500).json({ message: "Failed to send parental consent OTP." });
-  }
-};
-
-export const verifyParentalConsentOtp = async (req, res) => {
-  try {
-    const p = req.principal;
-    if (p.type !== "student" || !p.doc) {
-      return res.status(403).json({ message: "Student account required." });
-    }
-
-    const otpInput = String(req.body?.otp || "").trim();
-    if (!otpInput) {
-      return res.status(400).json({ message: "6-digit OTP is required." });
-    }
-
-    const key = `dpdp:parent_otp:${p.id}`;
-    let stored = null;
-    if (redisClient?.isReady) {
-      try {
-        const raw = await redisClient.get(key);
-        if (raw) stored = JSON.parse(raw);
-      } catch (_) {}
-    }
-    if (!stored) stored = memoryParentalOtp.get(key) || null;
-
-    if (!stored || stored.expiresAt < Date.now()) {
-      return res.status(400).json({ message: "Verification OTP expired. Please request a new OTP." });
-    }
-    if (String(stored.otp) !== otpInput) {
-      return res.status(400).json({ message: "Incorrect verification code." });
-    }
-
-    if (redisClient?.isReady) await redisClient.del(key).catch(() => {});
-    memoryParentalOtp.delete(key);
-
-    const s = p.doc;
-    s.parentConsentStatus = "verified";
-    s.parentConsentAt = new Date();
-    s.parentConsentMethod =
-      stored.channel === "email" ? "parent_email_otp" : "parent_phone_otp";
-    if (stored.parentPhone) {
-      s.parentConsentPhone = stored.parentPhone;
-      if (!s.parentPhone) s.parentPhone = stored.parentPhone;
-    }
-    if (stored.parentEmail) s.parentConsentEmail = stored.parentEmail;
-    s.parentConsentVersion = DPDP_NOTICE_VERSION;
-    await s.save();
-
-    await ConsentRecord.create({
-      principalType: "parent",
-      principalId: p.id,
-      instituteId: p.instituteId,
-      purpose: "parental_child_processing",
-      granted: true,
-      noticeVersion: DPDP_NOTICE_VERSION,
-      method: s.parentConsentMethod,
-      parentIdentifier: stored.parentPhone
-        ? maskPhone(stored.parentPhone)
-        : maskEmail(stored.parentEmail),
-      ipMasked: maskIp(req.ip || ""),
-    }).catch(() => {});
-
-    await DataAccessLog.create({
-      actorId: p.id,
-      actorRole: "parent",
-      instituteId: p.instituteId,
-      action: "parental_consent_verified",
-      targetType: "student",
-      targetId: p.id,
-      ipMasked: maskIp(req.ip || ""),
-      details: `Method: ${s.parentConsentMethod}`,
-    }).catch(() => {});
-
-    return res.json({
-      success: true,
-      message: "Verifiable Parental Consent recorded successfully.",
-      parentConsentStatus: "verified",
-      parentConsentAt: s.parentConsentAt,
-    });
-  } catch (err) {
-    console.error("verifyParentalConsentOtp error:", err);
-    return res.status(500).json({ message: "Could not verify parental consent OTP." });
   }
 };
 
