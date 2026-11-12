@@ -44,8 +44,8 @@ const studentAuth = (req, res, next) => {
   });
 };
 
-// Public Webhook from Bunny Stream
-router.post("/bunny/webhook", express.json(), handleBunnyWebhook);
+// Public Webhook from Bunny Stream (Supports both POST notifications and GET verification pings)
+router.all("/bunny/webhook", express.json(), handleBunnyWebhook);
 
 // Student Released Lectures & Playback Authorization (Supports Student & Teacher Auth)
 router.get("/student/released", studentAuth, getStudentReleasedLectures);

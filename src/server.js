@@ -2,8 +2,6 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
-import { createServer } from "http";
-import { Server } from "socket.io";
 import compression from "compression";
 import connectDB from "./config/db.js";
 import protect, { initializeUptimeTracking } from "./middleware/authMiddleware.js";
@@ -30,10 +28,8 @@ import supportRoutes from "./routes/supportRoutes.js";
 import storeRoutes from "./routes/storeRoutes.js";
 import directRegistrationRoutes from "./routes/directRegistrationRoutes.js";
 import privacyRoutes from "./routes/privacyRoutes.js";
-import { reconnectAllSessions } from "./services/whatsappService.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
-import { startVideoProcessingWorker } from "./services/videoProcessingWorker.js";
 import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
 import { startDpdpRetentionScheduler } from "./services/dpdpRetentionService.js";
 import { flushMemoryCache, clearCachePattern } from "./utils/cache.js";
@@ -72,15 +68,6 @@ const checkOrigin = (origin, callback) => {
   }
   return callback(null, false);
 };
-
-const server = createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: checkOrigin,
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-});
 
 app.use(
   helmet({
@@ -198,27 +185,19 @@ app.use(globalErrorHandler);
 const PORT = process.env.PORT || 8080;
 
 initializeSupabaseStorage().then(() => {
-  server.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     flushMemoryCache();
     clearCachePattern("*").catch(() => {});
-    startVideoProcessingWorker();
     startAttendanceReminderScheduler();
     startDpdpRetentionScheduler();
-    reconnectAllSessions().catch((err) => {
-      console.error("Failed to auto-resume WhatsApp sessions:", err);
-    });
   });
 }).catch(err => {
   console.error("Failed to initialize Supabase storage sync:", err);
-  server.listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
-    startVideoProcessingWorker();
     startAttendanceReminderScheduler();
     startDpdpRetentionScheduler();
-    reconnectAllSessions().catch((err) => {
-      console.error("Failed to auto-resume WhatsApp sessions:", err);
-    });
   });
 });
 

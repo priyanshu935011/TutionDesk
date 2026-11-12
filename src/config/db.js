@@ -1,5 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-import ws from "ws";
 
 const connectDB = async () => {
   try {
@@ -10,9 +9,8 @@ const connectDB = async () => {
       throw new Error("Missing SUPABASE_URL or SUPABASE_KEY in environment.");
     }
 
-    const supabase = createClient(supabaseUrl, supabaseKey, {
+    createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false },
-      realtime: { transport: ws },
     });
     console.log("Supabase Client initialized successfully.");
   } catch (error) {

@@ -736,29 +736,99 @@ export const checkVideoStatus = async (req, res) => {
 };
 
 export const handleBunnyWebhook = async (req, res) => {
+  if (req.method === "GET") {
+    return res.status(200).json({ status: "active", message: "BunnyCDN webhook endpoint is reachable." });
+  }
+
   try {
-    const { VideoId, Status, LibraryId } = req.body;
-    if (!VideoId) {
-      return res.status(400).json({ message: "Missing VideoId" });
+    const videoId =
+      req.body.VideoGuid ||
+      req.body.VideoId ||
+      req.body.videoId ||
+      req.body.videoGuid ||
+      req.body.id ||
+      req.query?.videoId ||
+      req.query?.VideoId;
+    const rawStatus = req.body.Status !== undefined ? req.body.Status : req.body.status;
+
+    if (!videoId) {
+      console.warn("[Bunny Webhook] Received webhook without VideoId/VideoGuid:", req.body);
+      return res.status(200).json({ success: true, message: "Missing VideoId acknowledged" });
     }
 
-    const video = await VideoLecture.findOne({ bunnyVideoId: String(VideoId) });
+    const cleanVideoId = String(videoId).trim();
+    console.log(`[Bunny Webhook] Processing event for VideoGuid: ${cleanVideoId}, Status: ${rawStatus}`);
+
+    const video = await VideoLecture.findOne({
+      $or: [
+        { bunnyVideoId: cleanVideoId },
+        { _id: cleanVideoId },
+        { id: cleanVideoId }
+      ]
+    });
+
     if (!video) {
-      return res.status(404).json({ message: "Video lecture not found" });
+      console.log(`[Bunny Webhook] Video ${cleanVideoId} not found in DB (could be a test webhook ping). Acknowledged.`);
+      return res.status(200).json({ success: true, message: "Acknowledged" });
     }
 
-    if (Status === 4 || Status === 3 || Status === "Finished") {
+    // Bunny status codes:
+    // 3 = Finished (transcoding finished)
+    // 4 = ResolutionFinished (all resolutions 720p/1080p ready)
+    // 5 = Failed / Error
+    // 6 = PresignedUploadFailed
+    // 1 / 2 = Processing / Encoding
+    const isFinished =
+      rawStatus === 3 ||
+      rawStatus === 4 ||
+      rawStatus === "Finished" ||
+      rawStatus === "ResolutionFinished" ||
+      String(rawStatus).toLowerCase().includes("finish");
+
+    const isFailed =
+      rawStatus === 5 ||
+      rawStatus === 6 ||
+      rawStatus === "Failed" ||
+      rawStatus === "Error" ||
+      String(rawStatus).toLowerCase().includes("fail") ||
+      String(rawStatus).toLowerCase().includes("error");
+
+    if (isFinished) {
       video.status = "READY";
       video.processingProgress = 100;
       await video.save();
-    } else if (Status === 5 || Status === "Error") {
+    } else if (isFailed) {
       video.status = "FAILED";
+      await video.save();
+    } else {
+      video.status = "PROCESSING";
       await video.save();
     }
 
-    await clearCachePattern("*");
+    // Direct update to Supabase video_lectures table as well
+    try {
+      await supabase
+        .from("video_lectures")
+        .update({
+          status: video.status,
+          processing_progress: video.processingProgress || (isFinished ? 100 : 0)
+        })
+        .or(`bunny_video_id.eq.${cleanVideoId},id.eq.${cleanVideoId}`);
+    } catch (_) {}
 
-    return res.json({ message: "Webhook processed successfully" });
+    try {
+      syncVideoFallback(video);
+    } catch (_) {}
+
+    try {
+      await clearCachePattern("teacher:videos:*");
+      await clearCachePattern("student:videos:*");
+      await clearCachePattern("video:*");
+      await deleteCache(`video:status:${cleanVideoId}`);
+    } catch (_) {}
+
+    console.log(`[Bunny Webhook] Successfully updated video ${cleanVideoId} (${video.title || "Untitled"}) to ${video.status}`);
+    return res.status(200).json({ success: true, message: "Webhook processed successfully", status: video.status });
   } catch (error) {
     console.error("handleBunnyWebhook error:", error);
     return res.status(500).json({ message: "Webhook handler failed" });
