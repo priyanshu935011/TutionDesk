@@ -6,6 +6,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import { getPublicLeadForm, submitPublicLead, uploadLeadFile, getPublicLeadFormByShortId } from "../controllers/leadController.js";
 import { getPublicPages, getPublicPageBySlug } from "../controllers/pageController.js";
 import { submitContactMessage, getContactDetails } from "../controllers/contactController.js";
+import { contactLimiter } from "../middleware/rateLimiter.js";
 import { getPublicFestivalTheme } from "../controllers/adminController.js";
 import { getPublicPaymentOrder, verifyPublicPaymentOrder } from "../controllers/paymentController.js";
 import { getPublicDpdpNotice } from "../controllers/privacyController.js";
@@ -84,7 +85,7 @@ router.get("/pages", getPublicPages);
 router.get("/pages/:slug", getPublicPageBySlug);
 
 // Public contact submission
-router.post("/contact", submitContactMessage);
+router.post("/contact", contactLimiter, submitContactMessage);
 router.get("/contact-details", getContactDetails);
 
 // Public AdSense configuration

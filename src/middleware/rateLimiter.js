@@ -2,72 +2,53 @@ import { rateLimit } from "express-rate-limit";
 import RedisStore from "rate-limit-redis";
 import redisClient from "../config/redis.js";
 
-// Global limits: 200 requests per 1 minute
-const globalMemoryLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  skip: (req) => req.method === "OPTIONS",
-  message: {
-    message: "Too many requests from this IP, please try again after a minute",
-  },
-});
+/**
+ * Builds a Redis-backed limiter with an in-memory fallback when Redis is unavailable.
+ */
+const createDualLimiter = ({ windowMs, max, message, prefix }) => {
+  const baseOptions = {
+    windowMs,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    skip: (req) => req.method === "OPTIONS",
+    message: { message },
+  };
 
-const globalRedisLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  skip: (req) => req.method === "OPTIONS",
-  store: new RedisStore({
-    sendCommand: (...args) => redisClient.sendCommand(args),
-  }),
-  message: {
-    message: "Too many requests from this IP, please try again after a minute",
-  },
-});
+  const memoryLimiter = rateLimit(baseOptions);
+  const redisLimiter = rateLimit({
+    ...baseOptions,
+    store: new RedisStore({
+      prefix,
+      sendCommand: (...args) => redisClient.sendCommand(args),
+    }),
+  });
 
-export const globalLimiter = (req, res, next) => {
-  if (redisClient.isReady) {
-    return globalRedisLimiter(req, res, next);
-  }
-  return globalMemoryLimiter(req, res, next);
+  return (req, res, next) =>
+    redisClient.isReady ? redisLimiter(req, res, next) : memoryLimiter(req, res, next);
 };
+
+// Global limits: 200 requests per 1 minute
+export const globalLimiter = createDualLimiter({
+  windowMs: 1 * 60 * 1000,
+  max: 200,
+  prefix: "rl:global:",
+  message: "Too many requests from this IP, please try again after a minute",
+});
 
 // Auth limits: 20 requests per 15 minutes
-const authMemoryLimiter = rateLimit({
+export const authLimiter = createDualLimiter({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  skip: (req) => req.method === "OPTIONS",
-  message: {
-    message: "Too many authentication attempts from this IP, please try again after 15 minutes",
-  },
+  prefix: "rl:auth:",
+  message: "Too many authentication attempts from this IP, please try again after 15 minutes",
 });
 
-const authRedisLimiter = rateLimit({
+// Public contact form limits: 5 submissions per 15 minutes per IP
+export const contactLimiter = createDualLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  skip: (req) => req.method === "OPTIONS",
-  store: new RedisStore({
-    sendCommand: (...args) => redisClient.sendCommand(args),
-  }),
-  message: {
-    message: "Too many authentication attempts from this IP, please try again after 15 minutes",
-  },
+  max: 5,
+  prefix: "rl:contact:",
+  message: "Too many contact inquiries sent from this IP. Please wait 15 minutes before trying again.",
 });
-
-export const authLimiter = (req, res, next) => {
-  if (redisClient.isReady) {
-    return authRedisLimiter(req, res, next);
-  }
-  return authMemoryLimiter(req, res, next);
-};
