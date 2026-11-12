@@ -1761,12 +1761,20 @@ export const markBatchAttendance = async (req, res) => {
 
     let isUpdate = false;
     const absentStudents = [];
+    const presentStudentIds = [];
+    const absentStudentIds = [];
     const studentMap = new Map();
     for (const s of batchStudents) {
       studentMap.set(String(s._id), s);
       if (s.id) studentMap.set(String(s.id), s);
       if (s.enrollmentNumber) studentMap.set(String(s.enrollmentNumber), s);
     }
+
+    const validBatchUuid = toValidUUID(resolvedBatchIdStr);
+    const attendanceRowsToUpsert = [];
+    const statusMap = {};
+    let pCount = 0;
+    let aCount = 0;
 
     for (const item of records) {
       const sIdKey = String(item.studentId || item.id || item._id || "");
@@ -1777,6 +1785,7 @@ export const markBatchAttendance = async (req, res) => {
       if (!student) continue;
 
       const newStatus = item.status === "present" ? "present" : "absent";
+      const validStudentUuid = toValidUUID(student._id || student.id);
 
       const existingRecord = (student.attendanceRecords || []).find((r) => {
         if (!r.date) return false;
@@ -1802,61 +1811,40 @@ export const markBatchAttendance = async (req, res) => {
         student.attendanceRecords.unshift({ date: targetDateStr, status: newStatus, batchId: String(batchId) });
       }
 
-      // Also sync to Supabase attendance table directly
-      try {
-        const validBatchUuid = toValidUUID(resolvedBatchIdStr);
-        const validStudentUuid = toValidUUID(student._id || student.id);
+      attendanceRowsToUpsert.push({
+        student_id: validStudentUuid,
+        batch_id: validBatchUuid,
+        date: targetDateStr,
+        status: newStatus,
+      });
 
-        const { data: existingDbRec } = await supabase
-          .from("attendance")
-          .select("id")
-          .eq("student_id", validStudentUuid)
-          .eq("date", targetDateStr)
-          .eq("batch_id", validBatchUuid)
-          .maybeSingle();
-
-        if (existingDbRec && existingDbRec.id) {
-          isUpdate = true;
-          await supabase
-            .from("attendance")
-            .update({ status: newStatus, batch_id: validBatchUuid })
-            .eq("id", existingDbRec.id);
-        } else {
-          await supabase
-            .from("attendance")
-            .insert({ student_id: validStudentUuid, batch_id: validBatchUuid, date: targetDateStr, status: newStatus });
-        }
-      } catch (dbErr) {
-        console.error("Direct attendance table sync error:", dbErr.message);
+      statusMap[validStudentUuid] = newStatus;
+      statusMap[String(student._id || student.id)] = newStatus;
+      if (newStatus === "present") {
+        pCount++;
+        presentStudentIds.push(student._id || student.id);
+      } else {
+        aCount++;
+        absentStudentIds.push(student._id || student.id);
       }
-
-      try {
-        await student.save();
-        const formattedStatus = newStatus === "present" ? "Present" : "Absent";
-        sendStudentNotification({
-          studentIds: [student._id],
-          instituteId,
-          title: newStatus === "present" ? "Attendance Marked" : "Attendance Alert",
-          message: `Your attendance for ${targetDateStr} has been marked as ${formattedStatus}.`,
-          type: "attendance",
-          data: { status: newStatus, date: targetDateStr },
-        });
-      } catch (sErr) {}
     }
 
-    // Sync single aggregated document to Supabase batch_attendance_records table
-    try {
-      const validBatchUuid = toValidUUID(resolvedBatchIdStr);
-      const statusMap = {};
-      let pCount = 0;
-      let aCount = 0;
-      for (const rec of records) {
-        const sId = String(rec.studentId || rec.id || rec._id);
-        const st = String(rec.status || "unmarked").toLowerCase();
-        statusMap[sId] = st;
-        if (st === "present") pCount++;
-        else if (st === "absent") aCount++;
+    // 1. Bulk upsert all attendance rows in 1 single network call (<100ms)
+    if (attendanceRowsToUpsert.length > 0) {
+      try {
+        const { error: attUpsertErr } = await supabase
+          .from("attendance")
+          .upsert(attendanceRowsToUpsert, { onConflict: "student_id,batch_id,date" });
+        if (attUpsertErr) {
+          console.error("Bulk attendance upsert error:", attUpsertErr.message);
+        }
+      } catch (dbErr) {
+        console.error("Direct bulk attendance sync error:", dbErr.message);
       }
+    }
+
+    // 2. Sync single aggregated document to Supabase batch_attendance_records table in 1 call
+    try {
       await supabase.from("batch_attendance_records").upsert({
         batch_id: validBatchUuid,
         date: targetDateStr,
@@ -1877,12 +1865,6 @@ export const markBatchAttendance = async (req, res) => {
       await clearCachePattern("teacher:dashboard:*");
       await clearCachePattern("teacher:students:*");
       await clearCachePattern("attendance:batch:*");
-      for (const s of batchStudents) {
-        await invalidateStudentCache(s._id);
-        if (s.enrollmentNumber) {
-          await deleteCache(`student:dashboard:${s.enrollmentNumber}`);
-        }
-      }
     } catch (cErr) {}
 
     const updatedStudents = batchStudents;
@@ -1910,8 +1892,45 @@ export const markBatchAttendance = async (req, res) => {
       whatsappStatus: [{ sent: true, reason: "WhatsApp absent alerts dispatched in background." }]
     });
 
-    // Asynchronously dispatch WhatsApp absent alerts in the background without blocking HTTP response
+    // Asynchronously dispatch student push notifications and WhatsApp absent alerts in background
     setImmediate(async () => {
+      // 1. Bulk push notifications for present/absent students
+      try {
+        if (presentStudentIds.length > 0) {
+          sendStudentNotification({
+            studentIds: presentStudentIds,
+            instituteId,
+            title: "Attendance Marked",
+            message: `Your attendance for ${targetDateStr} has been marked as Present.`,
+            type: "attendance",
+            data: { status: "present", date: targetDateStr },
+          });
+        }
+        if (absentStudentIds.length > 0) {
+          sendStudentNotification({
+            studentIds: absentStudentIds,
+            instituteId,
+            title: "Attendance Alert",
+            message: `Your attendance for ${targetDateStr} has been marked as Absent.`,
+            type: "attendance",
+            data: { status: "absent", date: targetDateStr },
+          });
+        }
+      } catch (notifErr) {
+        console.error("Attendance push notification error:", notifErr.message);
+      }
+
+      // 2. Invalidate individual student cache
+      try {
+        await Promise.all(
+          batchStudents.map((s) =>
+            Promise.all([
+              invalidateStudentCache(s._id),
+              s.enrollmentNumber ? deleteCache(`student:dashboard:${s.enrollmentNumber}`) : Promise.resolve(),
+            ])
+          )
+        );
+      } catch (_) {}
       try {
         const actualInstId = req.user.institute?._id ? String(req.user.institute._id) : String(req.user.institute || "");
         let settings = await getCache(`institute:whatsapp_settings:${actualInstId}`);
