@@ -28,6 +28,7 @@ import supportRoutes from "./routes/supportRoutes.js";
 import storeRoutes from "./routes/storeRoutes.js";
 import directRegistrationRoutes from "./routes/directRegistrationRoutes.js";
 import privacyRoutes from "./routes/privacyRoutes.js";
+import marketingRoutes from "./routes/marketingRoutes.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
@@ -172,6 +173,7 @@ app.use(["/support", "/api/support"], supportRoutes);
 app.use(["/store", "/api/store"], storeRoutes);
 app.use(["/direct-registration", "/api/direct-registration"], directRegistrationRoutes);
 app.use(["/privacy", "/api/privacy"], privacyRoutes);
+app.use(["/marketing", "/api/marketing"], marketingRoutes);
 
 app.get("/debug-sentry", protect, function mainHandler(req, res) {
   if (process.env.NODE_ENV === "production" || req.user?.role !== "super_admin") {
