@@ -27,6 +27,72 @@ const marketingTemplateSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    storyImageUrl: {
+      type: String,
+      default: "",
+    },
+    brandingPositions: {
+      square: {
+        logo: {
+          x: { type: Number, default: 6 },
+          y: { type: Number, default: 6 },
+          width: { type: Number, default: 18 },
+          height: { type: Number, default: 18 },
+          isVisible: { type: Boolean, default: true },
+        },
+        instituteName: {
+          x: { type: Number, default: 26 },
+          y: { type: Number, default: 8 },
+          fontSize: { type: Number, default: 18 },
+          color: { type: String, default: "#FFFFFF" },
+          isVisible: { type: Boolean, default: true },
+        },
+        phone: {
+          x: { type: Number, default: 6 },
+          y: { type: Number, default: 88 },
+          fontSize: { type: Number, default: 14 },
+          color: { type: String, default: "#F59E0B" },
+          isVisible: { type: Boolean, default: true },
+        },
+        address: {
+          x: { type: Number, default: 6 },
+          y: { type: Number, default: 93 },
+          fontSize: { type: Number, default: 12 },
+          color: { type: String, default: "#E2E8F0" },
+          isVisible: { type: Boolean, default: true },
+        },
+      },
+      story: {
+        logo: {
+          x: { type: Number, default: 6 },
+          y: { type: Number, default: 5 },
+          width: { type: Number, default: 18 },
+          height: { type: Number, default: 12 },
+          isVisible: { type: Boolean, default: true },
+        },
+        instituteName: {
+          x: { type: Number, default: 26 },
+          y: { type: Number, default: 6 },
+          fontSize: { type: Number, default: 20 },
+          color: { type: String, default: "#FFFFFF" },
+          isVisible: { type: Boolean, default: true },
+        },
+        phone: {
+          x: { type: Number, default: 6 },
+          y: { type: Number, default: 90 },
+          fontSize: { type: Number, default: 15 },
+          color: { type: String, default: "#F59E0B" },
+          isVisible: { type: Boolean, default: true },
+        },
+        address: {
+          x: { type: Number, default: 6 },
+          y: { type: Number, default: 94 },
+          fontSize: { type: Number, default: 12 },
+          color: { type: String, default: "#E2E8F0" },
+          isVisible: { type: Boolean, default: true },
+        },
+      },
+    },
     brandingConfig: {
       preset: {
         type: String,

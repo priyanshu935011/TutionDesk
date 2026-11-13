@@ -14,8 +14,13 @@ import {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB poster image limit
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB poster image limit
 });
+
+const posterUpload = upload.fields([
+  { name: "image", maxCount: 1 },
+  { name: "storyImage", maxCount: 1 },
+]);
 
 const router = express.Router();
 
@@ -25,8 +30,8 @@ router.post("/templates/:id/track", protect, trackTemplateAction);
 
 // Super Admin management endpoints
 router.get("/admin/templates", protect, superAdminOnly, getAllTemplatesAdmin);
-router.post("/admin/templates", protect, superAdminOnly, upload.single("image"), createTemplateAdmin);
-router.put("/admin/templates/:id", protect, superAdminOnly, upload.single("image"), updateTemplateAdmin);
+router.post("/admin/templates", protect, superAdminOnly, posterUpload, createTemplateAdmin);
+router.put("/admin/templates/:id", protect, superAdminOnly, posterUpload, updateTemplateAdmin);
 router.delete("/admin/templates/:id", protect, superAdminOnly, deleteTemplateAdmin);
 router.get("/admin/stats", protect, superAdminOnly, getMarketingStatsAdmin);
 

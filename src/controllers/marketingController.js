@@ -300,8 +300,10 @@ export const createTemplateAdmin = async (req, res) => {
       category = "festival",
       aspectRatio = "1:1",
       imageUrl,
+      storyImageUrl,
       thumbnailUrl,
       brandingConfig,
+      brandingPositions,
       isActive = true,
       priority = 0,
       startDate,
@@ -313,7 +315,7 @@ export const createTemplateAdmin = async (req, res) => {
       return res.status(400).json({ message: "Poster title is required." });
     }
 
-    // Handle file upload if multipart image file is sent
+    // Handle primary square/main image file upload
     const imageFile = req.file || req.files?.image?.[0] || req.files?.templateFile?.[0];
     if (imageFile && imageFile.buffer) {
       try {
@@ -329,6 +331,21 @@ export const createTemplateAdmin = async (req, res) => {
       }
     }
 
+    // Handle optional 9:16 story image file upload
+    const storyFile = req.files?.storyImage?.[0];
+    if (storyFile && storyFile.buffer) {
+      try {
+        const b64 = `data:${storyFile.mimetype || "image/jpeg"};base64,${storyFile.buffer.toString("base64")}`;
+        const uploadRes = await cloudinary.uploader.upload(b64, {
+          resource_type: "image",
+          folder: "marketing_posters",
+        });
+        storyImageUrl = uploadRes.secure_url || uploadRes.url || storyImageUrl;
+      } catch (storyErr) {
+        console.warn("[Cloudinary] Story poster upload warning:", storyErr.message);
+      }
+    }
+
     if (!imageUrl || !imageUrl.trim()) {
       return res.status(400).json({ message: "Poster image URL or uploaded file is required." });
     }
@@ -341,13 +358,23 @@ export const createTemplateAdmin = async (req, res) => {
       }
     }
 
+    if (typeof brandingPositions === "string") {
+      try {
+        brandingPositions = JSON.parse(brandingPositions);
+      } catch (_) {
+        brandingPositions = null;
+      }
+    }
+
     const template = await MarketingTemplate.create({
       title: title.trim(),
       category,
       aspectRatio,
       imageUrl: imageUrl.trim(),
+      storyImageUrl: storyImageUrl ? storyImageUrl.trim() : "",
       thumbnailUrl: thumbnailUrl ? thumbnailUrl.trim() : imageUrl.trim(),
       brandingConfig: brandingConfig || {},
+      ...(brandingPositions ? { brandingPositions } : {}),
       isActive: isActive === true || isActive === "true",
       priority: parseInt(priority, 10) || 0,
       startDate: startDate ? new Date(startDate) : null,
@@ -403,6 +430,20 @@ export const updateTemplateAdmin = async (req, res) => {
       }
     }
 
+    const storyFile = req.files?.storyImage?.[0];
+    if (storyFile && storyFile.buffer) {
+      try {
+        const b64 = `data:${storyFile.mimetype || "image/jpeg"};base64,${storyFile.buffer.toString("base64")}`;
+        const uploadRes = await cloudinary.uploader.upload(b64, {
+          resource_type: "image",
+          folder: "marketing_posters",
+        });
+        storyImageUrl = uploadRes.secure_url || uploadRes.url || storyImageUrl;
+      } catch (storyErr) {
+        console.warn("[Cloudinary] Story poster update upload warning:", storyErr.message);
+      }
+    }
+
     if (title !== undefined) template.title = title.trim();
     if (category !== undefined) template.category = category;
     if (aspectRatio !== undefined) template.aspectRatio = aspectRatio;
@@ -410,6 +451,7 @@ export const updateTemplateAdmin = async (req, res) => {
       template.imageUrl = imageUrl.trim();
       if (!thumbnailUrl) template.thumbnailUrl = imageUrl.trim();
     }
+    if (storyImageUrl !== undefined) template.storyImageUrl = storyImageUrl.trim();
     if (thumbnailUrl !== undefined) template.thumbnailUrl = thumbnailUrl.trim();
 
     if (brandingConfig !== undefined) {
@@ -419,6 +461,16 @@ export const updateTemplateAdmin = async (req, res) => {
         } catch (_) {}
       }
       template.brandingConfig = { ...template.brandingConfig, ...brandingConfig };
+    }
+
+    if (req.body.brandingPositions !== undefined) {
+      let bPositions = req.body.brandingPositions;
+      if (typeof bPositions === "string") {
+        try {
+          bPositions = JSON.parse(bPositions);
+        } catch (_) {}
+      }
+      template.brandingPositions = bPositions;
     }
 
     if (isActive !== undefined) template.isActive = isActive === true || isActive === "true";
