@@ -88,6 +88,7 @@ import {
   createAdminLead,
   updateAdminLead,
   deleteAdminLead,
+  deleteDistrictLeads,
   assignTerritory,
   bulkImportAdminLeads,
   aiHuntAdminLeads,
@@ -215,6 +216,8 @@ router.get("/leads/folders", getLeadFolders);
 router.get("/leads", getAdminLeads);
 router.post("/leads", createAdminLead);
 router.put("/leads/:id", updateAdminLead);
+router.delete("/leads/district", deleteDistrictLeads);
+router.post("/leads/delete-district", deleteDistrictLeads);
 router.delete("/leads/:id", deleteAdminLead);
 router.post("/leads/assign-territory", assignTerritory);
 router.post("/leads/bulk-import", bulkImportAdminLeads);

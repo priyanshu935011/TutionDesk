@@ -374,6 +374,39 @@ export const deleteAdminLead = async (req, res) => {
   }
 };
 
+// DELETE /api/admin/leads/district - Delete all leads within a specific state & district
+export const deleteDistrictLeads = async (req, res) => {
+  try {
+    const state = req.query.state || req.body?.state;
+    const district = req.query.district || req.body?.district;
+
+    const cleanState = (state || "").trim();
+    const cleanDistrict = (district || "").trim();
+
+    if (!cleanState || !cleanDistrict) {
+      return res.status(400).json({ message: "State and District are required to delete district leads." });
+    }
+
+    const filter = {
+      state: new RegExp(`^${cleanState}$`, "i"),
+      $or: [
+        { district: new RegExp(`^${cleanDistrict}$`, "i") },
+        { city: new RegExp(`^${cleanDistrict}$`, "i") },
+      ],
+    };
+
+    const result = await SalesLead.deleteMany(filter);
+
+    return res.json({
+      message: `Successfully deleted all ${result.deletedCount || 0} leads in ${cleanDistrict}, ${cleanState}.`,
+      deletedCount: result.deletedCount || 0,
+    });
+  } catch (error) {
+    console.error("deleteDistrictLeads error:", error);
+    return res.status(500).json({ message: "Could not delete district leads." });
+  }
+};
+
 // POST /api/admin/leads/assign-territory - Assign a sales person to a state or district/city
 export const assignTerritory = async (req, res) => {
   try {
