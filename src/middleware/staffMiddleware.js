@@ -16,7 +16,7 @@ const staffMiddleware = (req, res, next) => {
     "owner",
   ];
 
-  if (staffRoles.includes(req.user.role) || req.user.isAdmin || req.user.institute) {
+  if (staffRoles.includes(req.user.role) || req.user.isAdmin || req.user.isSuperAdmin || req.user.institute) {
     return next();
   }
 

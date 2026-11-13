@@ -13,14 +13,14 @@ import ConsentRecord from "../models/ConsentRecord.js";
 import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
 import { maskIp } from "../utils/piiSanitizer.js";
 
-const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
-const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "";
+export const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
+export const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "";
 
-const generateToken = (payload) => signSessionToken(payload, "30d");
+export const generateToken = (payload) => signSessionToken(payload, "30d");
 
 import { getInstituteWalletBalance, getInstituteMessageCharge } from "../services/whatsappService.js";
 
-const buildInstituteState = async (user) => {
+export const buildInstituteState = async (user) => {
   const rawInst = user.institute;
   const instIdStr = String(rawInst?._id || rawInst?.id || rawInst || "").trim();
 
@@ -215,11 +215,13 @@ export const loginUser = async (req, res) => {
           id: "super-admin",
           email: SUPER_ADMIN_EMAIL,
           role: "super_admin",
+          isSuperAdmin: true,
         }),
         user: {
           id: "super-admin",
           email: SUPER_ADMIN_EMAIL,
           role: "super_admin",
+          isSuperAdmin: true,
         },
       });
     }
@@ -316,6 +318,7 @@ export const loginUser = async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
+        isSuperAdmin: user.role === "super_admin",
         sessionId,
       }),
       user: {
@@ -324,6 +327,7 @@ export const loginUser = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isSuperAdmin: user.role === "super_admin",
         isTrialRegistration: Boolean(user.isTrialRegistration || institute?.isDirectTrial),
         institute,
       },

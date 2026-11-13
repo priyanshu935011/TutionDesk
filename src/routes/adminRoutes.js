@@ -57,6 +57,8 @@ import {
   updateTextBeeSettings,
   sendTextBeeTestSms,
   getTextBeeDevices,
+  getSuperAdminTuitionsList,
+  switchSuperAdminInstitute,
 } from "../controllers/adminController.js";
 import {
   sendBroadcastNotification,
@@ -94,6 +96,10 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect, staffOnly);
+
+// Super Admin Tuition Switching Routes (Strictly Super Admin Only)
+router.get("/tuitions-list", getSuperAdminTuitionsList);
+router.post("/switch-institute/:id", switchSuperAdminInstitute);
 
 router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);

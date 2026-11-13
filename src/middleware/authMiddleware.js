@@ -33,6 +33,8 @@ const protect = async (req, res, next) => {
         _id: null,
         email: decoded.email,
         role: "super_admin",
+        isSuperAdmin: true,
+        superAdminEmail: decoded.email,
         institute: null,
       };
       return next();
@@ -169,9 +171,15 @@ const protect = async (req, res, next) => {
     }
 
     req.user = user;
+    if (decoded?.isSuperAdmin) {
+      req.user.isSuperAdmin = true;
+      req.user.superAdminEmail = decoded.superAdminEmail;
+    }
 
     const skipSubscriptionCheck =
       isStudentToken ||
+      req.user.isSuperAdmin ||
+      decoded?.isSuperAdmin ||
       req.user.role === "super_admin" ||
       req.user.role === "tech_admin" ||
       req.user.role === "sales_admin" ||

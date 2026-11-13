@@ -11,6 +11,8 @@ import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import TestResult from "../models/TestResult.js";
+import { signSessionToken } from "../utils/jwtHelper.js";
+import { buildInstituteState, SUPER_ADMIN_EMAIL } from "./authController.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import User from "../models/User.js";
@@ -3079,5 +3081,161 @@ export const getAiHarvestLogs = async (req, res) => {
   } catch (error) {
     console.error("getAiHarvestLogs error:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getSuperAdminTuitionsList = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) {
+      return res.status(403).json({ message: "Access denied. Exclusively for super admin." });
+    }
+
+    const institutes = await Institute.find({}).sort({ createdAt: -1 });
+
+    const [allBatches, allStudents] = await Promise.all([
+      Batch.find({ status: { $ne: "archived" } }).select("_id user"),
+      Student.find({ isDemoAccount: { $ne: true } }).select("_id user batch"),
+    ]);
+
+    const batchCountMap = {};
+    for (const b of allBatches) {
+      const uStr = String(b.user || "");
+      if (uStr) {
+        batchCountMap[uStr] = (batchCountMap[uStr] || 0) + 1;
+      }
+    }
+
+    const studentCountMap = {};
+    for (const s of allStudents) {
+      const uStr = String(s.user || "");
+      if (uStr) {
+        studentCountMap[uStr] = (studentCountMap[uStr] || 0) + 1;
+      }
+    }
+
+    const tuitions = institutes.map((inst) => {
+      const expired = isSubscriptionExpired(inst);
+      const instId = String(inst._id || inst.id);
+      const adminUserId = inst.adminUser ? String(inst.adminUser) : null;
+
+      const sCount = (adminUserId ? (studentCountMap[adminUserId] || 0) : 0) + (studentCountMap[instId] || 0);
+      const bCount = (adminUserId ? (batchCountMap[adminUserId] || 0) : 0) + (batchCountMap[instId] || 0);
+
+      return {
+        id: instId,
+        _id: instId,
+        name: inst.name || "Untitled Tuition",
+        adminName: inst.adminName || inst.name || "Tuition Admin",
+        adminPhone: inst.adminPhone || inst.phone || "",
+        adminEmail: inst.adminEmail || inst.email || "",
+        address: inst.address || inst.city || "",
+        city: inst.city || "",
+        tuitionType: inst.tuitionType || "solo",
+        logoUrl: inst.logoUrl || "",
+        subscriptionPlan: inst.subscriptionPlan || "trial",
+        subscriptionStart: inst.subscriptionStart,
+        subscriptionEnd: inst.subscriptionEnd,
+        status: inst.status || "active",
+        isExpired: expired,
+        subscriptionStatus: expired ? "expired" : "active",
+        studentCount: sCount,
+        batchCount: bCount,
+      };
+    });
+
+    return res.json({
+      success: true,
+      count: tuitions.length,
+      tuitions,
+    });
+  } catch (error) {
+    console.error("getSuperAdminTuitionsList error:", error);
+    return res.status(500).json({ message: "Failed to fetch tuitions list: " + error.message });
+  }
+};
+
+export const switchSuperAdminInstitute = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) {
+      return res.status(403).json({ message: "Access denied. Exclusively for super admin." });
+    }
+
+    const { id } = req.params;
+    let institute = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      institute = await Institute.findById(id);
+    }
+    if (!institute) {
+      institute = await Institute.findOne({
+        $or: [{ _id: id }, { id: id }, { adminUser: id }],
+      });
+    }
+
+    if (!institute) {
+      return res.status(404).json({ message: "Tuition institute not found." });
+    }
+
+    // Strictly enforce: if expired, do not allow switching
+    if (isSubscriptionExpired(institute)) {
+      return res.status(400).json({
+        success: false,
+        isExpired: true,
+        message: "This tuition subscription is expired. Switching into an expired tuition is not permitted.",
+      });
+    }
+
+    // Resolve associated admin user
+    let user = null;
+    if (institute.adminUser) {
+      user = await User.findById(institute.adminUser);
+    }
+    if (!user && institute.adminEmail) {
+      user = await User.findOne({ email: institute.adminEmail.toLowerCase().trim() });
+    }
+    if (!user && institute.adminPhone) {
+      const cleanPhone = String(institute.adminPhone).replace(/\D/g, "").slice(-10);
+      user = await User.findOne({
+        $or: [{ phone: cleanPhone }, { phone: `+91${cleanPhone}` }, { phone: institute.adminPhone }],
+      });
+    }
+
+    const userId = user ? user._id : (institute.adminUser || institute._id);
+    const userEmail = user ? user.email : (institute.adminEmail || "admin@classtech.local");
+    const userName = user ? user.name : (institute.name || "Tuition Admin");
+    const superAdminEmail = req.user.email || req.user.superAdminEmail || SUPER_ADMIN_EMAIL || "super_admin";
+
+    const token = signSessionToken({
+      id: userId,
+      email: userEmail,
+      name: userName,
+      role: "institute_admin",
+      institute: institute._id,
+      isSuperAdmin: true,
+      superAdminEmail,
+    }, "30d");
+
+    const instState = await buildInstituteState(user || { institute: institute._id, _id: userId, role: "institute_admin" });
+
+    return res.json({
+      success: true,
+      token,
+      user: {
+        id: userId,
+        _id: userId,
+        name: userName,
+        email: userEmail,
+        role: "institute_admin",
+        isSuperAdmin: true,
+        superAdminEmail,
+        isTrialRegistration: Boolean(instState?.isDirectTrial || institute?.subscriptionPlan === "trial"),
+        institute: instState,
+      },
+      institute: instState,
+    });
+  } catch (error) {
+    console.error("switchSuperAdminInstitute error:", error);
+    return res.status(500).json({ message: "Failed to switch tuition: " + error.message });
   }
 };
