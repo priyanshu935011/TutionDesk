@@ -3298,8 +3298,18 @@ export const updateHeroSduiConfig = async (req, res) => {
       });
     } else {
       setting.value = merged;
-      setting.markModified("value");
-      await setting.save();
+      if (typeof setting.markModified === "function") {
+        setting.markModified("value");
+      }
+      if (typeof setting.save === "function") {
+        await setting.save();
+      } else {
+        await SystemSetting.findOneAndUpdate(
+          { key: "dashboard_hero_sdui" },
+          { $set: { value: merged } },
+          { upsert: true, new: true }
+        );
+      }
     }
 
     try {

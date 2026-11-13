@@ -1055,6 +1055,11 @@ class SupabaseDocument {
     }
   }
 
+  markModified(path) {
+    // Mongoose compatibility stub: no-op since SupabaseDocument writes all fields on save
+    return this;
+  }
+
   async save() {
     if (MISSING_TABLES.has(this._tableName)) {
       const fallbackData = readFallbackData(this._tableName);
