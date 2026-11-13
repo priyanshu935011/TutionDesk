@@ -599,53 +599,53 @@ export const aiHuntAdminLeads = async (req, res) => {
 
     const requestedCount = Math.min(Math.max(parseInt(count, 10) || 20, 5), 50);
 
-    const prompt = `You are an educational business research intelligence agent for India.
-Identify and extract active, real LOCAL INDEPENDENT coaching institutes, tuition centers, private tutorial academies, or competitive exam preparation institutes physically located in:
+    const prompt = `You are an educational data intelligence auditor for India.
+Your mission is to find REAL, VERIFIED, CURRENTLY OPERATIONAL local independent coaching institutes and tuition centers in:
 District / City: ${cleanDistrict}
 State: ${cleanState}, India
 Category Focus: ${category}
 
-STRICT EXCLUSION RULES (CRITICAL):
-- Target ONLY independent, local, privately-owned coaching centers, regional tuition classes, home tutoring groups, and standalone tutorial academies.
-- DO NOT return national corporate chains or EdTech unicorns, including PhysicsWallah (PW), Byju's, Aakash Institute, Allen Career Institute, FIITJEE, Unacademy, Vidyamandir Classes (VMC), Cuemath, Khan Academy, Vedantu, Resonance, Sri Chaitanya, Narayana, Career Point, Motion, Toppr, Extramarks, or any national corporate franchise.
-- Only return independent local businesses whose primary decision maker is the local teacher/director in ${cleanDistrict}.
-
-Find exactly ${requestedCount} prominent, active LOCAL coaching centers or tutors in ${cleanDistrict}.
-For each one, provide:
-- coachingName: Official or popular business name of the coaching institute
-- contactPerson: Director, Center Head, Founder, or Manager name (e.g. "Director", "Center Head", or real name)
-- phone: Standard 10-digit Indian mobile or landline contact number (digits only, e.g. 98XXXXXXXX, 87XXXXXXXX, or local STD)
-- email: Admission or contact email if known, otherwise ""
-- address: Locality / landmark / street address in ${cleanDistrict}
-- category: Primary subject/exam category
-- studentCapacity: Estimated batch capacity (e.g. "50-100", "100-300", "300+")
-- notes: Brief 1-sentence note on specialties, subjects, or batch types
+ABSOLUTE REAL-WORLD ACCURACY RULES:
+1. NO SYNTHETIC OR HALLUCINATED NUMBERS: Every single phone number MUST be a real, public contact number found on their official website, Google Business Profile, Facebook page, or public directory listing. If you cannot find a real, verified contact number for an institute, DO NOT include that institute. NEVER invent, guess, or extrapolate phone numbers.
+2. PERMANENTLY CLOSED FILTER: Check if the institute is Permanently Closed or Temporarily Closed. DO NOT include any institute that has shut down, moved away, or is marked as permanently closed on Google Maps. Return ONLY institutes that are actively open and operational today.
+3. COUNT REALISM (CRITICAL): The requested maximum is ${requestedCount}. If there are only 12 or 18 real, verified, currently open independent institutes with public phone numbers in ${cleanDistrict}, return ONLY those 12 or 18. NEVER pad the list or invent fake institutes to meet the requested count of ${requestedCount}. Quality and real-world accuracy are mandatory.
+4. EXCLUDE CORPORATE EDTECH & GIANTS: Exclude all national corporate chains and edtech unicorns (PhysicsWallah, Byju's, Aakash, Allen, FIITJEE, Unacademy, Vidyamandir Classes, Cuemath, Khan Academy, Vedantu, Resonance, Sri Chaitanya, Narayana, Career Point, Motion, Toppr, Extramarks). Return ONLY independent, locally run coaching centers and private tutors.
+5. SOURCE & SOCIAL VERIFICATION: For each institute, provide their sourceUrl (link to their website, Google Maps profile, or Facebook page) confirming their active operational presence.
 
 Format strictly as a JSON array of objects with these exact keys:
 [
   {
-    "coachingName": "...",
-    "contactPerson": "...",
-    "phone": "...",
-    "email": "...",
-    "address": "...",
-    "category": "...",
-    "studentCapacity": "...",
-    "notes": "..."
+    "coachingName": "Official name on Google Maps / board",
+    "contactPerson": "Director / Founder / Manager name (or 'Director')",
+    "phone": "Real 10-digit Indian mobile/landline without spaces (e.g. 98XXXXXXXX)",
+    "email": "Official email if publicly listed, otherwise ''",
+    "address": "Exact street address & landmark in ${cleanDistrict}",
+    "category": "Primary subject / exam focus",
+    "studentCapacity": "Estimated capacity (e.g. '50-100', '100-300', '300+')",
+    "operationalStatus": "Operational",
+    "sourceUrl": "Link to their website, Google Maps, or Facebook page",
+    "notes": "Verified active coaching center"
   }
 ]
 Output ONLY the JSON array without any explanation or markdown formatting.`;
 
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: "You are a professional educational directory research specialist. You output strict JSON only. You strictly exclude corporate edtech brands and national franchise chains.",
+      systemInstruction: "You are an educational directory research auditor. You output strict JSON only. You strictly verify live public Google search data, exclude corporate chains, and eliminate permanently closed institutes.",
       temperature: 0.2,
+      tools: [{ google_search: {} }],
+      timeout: 60000,
     });
 
     const parsed = extractJsonFromText(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return res.status(502).json({ message: "AI did not return valid leads data. Please try again." });
+      return res.status(502).json({ message: "Could not find verified active institutes for this query. Please try with broader categories." });
     }
+
+    const dummyPhones = new Set([
+      "1234567890", "9876543210", "9999999999", "8888888888", "7777777777",
+      "0123456789", "1111111111", "0000000000", "0123456780"
+    ]);
 
     // Clean & normalize leads
     const normalizedLeads = parsed
@@ -660,8 +660,14 @@ Output ONLY the JSON array without any explanation or markdown formatting.`;
         }
 
         const address = String(item.address || "").trim();
+        const sourceUrl = String(item.sourceUrl || "").trim();
         const mapsQuery = encodeURIComponent(`${coachingName} ${address || cleanDistrict} ${cleanDistrict}`);
-        const googleBusinessLink = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
+        const googleBusinessLink = sourceUrl && (sourceUrl.includes("google.com/maps") || sourceUrl.includes("maps.app.goo.gl"))
+          ? sourceUrl
+          : `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
+
+        const opStatus = String(item.operationalStatus || "Operational").trim();
+        const isClosed = opStatus.toLowerCase().includes("closed");
 
         return {
           coachingName,
@@ -673,12 +679,22 @@ Output ONLY the JSON array without any explanation or markdown formatting.`;
           city: cleanDistrict,
           address,
           googleBusinessLink,
+          sourceUrl,
+          operationalStatus: isClosed ? "Permanently Closed" : "Operational",
+          isClosed,
           category: String(item.category || category).trim(),
           studentCapacity: String(item.studentCapacity || "50-150").trim(),
           notes: String(item.notes || "").trim(),
         };
       })
-      .filter((l) => l.coachingName && l.phone && !isCorporateEdtech(l.coachingName));
+      .filter((l) => {
+        if (!l.coachingName || !l.phone) return false;
+        if (l.isClosed) return false;
+        if (dummyPhones.has(l.phone)) return false;
+        if (l.phone.length < 7 || l.phone.length > 11) return false;
+        if (isCorporateEdtech(l.coachingName)) return false;
+        return true;
+      });
 
     // Deduplication check against existing SalesLead in DB
     const phoneList = normalizedLeads.map((l) => l.phone).filter(Boolean);

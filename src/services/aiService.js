@@ -380,8 +380,10 @@ async function callGeminiApiWithFallback({
   imageMimeType = "image/jpeg",
   temperature = 0.2,
   apiKey,
-  preferredModel = "gemini-3.5-flash",
+  preferredModel = "gemini-3.8-flash",
   history = [],
+  tools = [],
+  timeout = 45000,
 }) {
   const cleanBase64 = imageBase64
     ? imageBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "")
@@ -446,15 +448,17 @@ async function callGeminiApiWithFallback({
       parts: [{ text: systemInstruction }],
     };
   }
+  if (Array.isArray(tools) && tools.length > 0) {
+    payload.tools = tools;
+  }
 
   const cleanPref = (preferredModel || "").trim();
   const modelsToTry = [
     cleanPref,
-    "gemini-3.5-flash",
     "gemini-3.8-flash",
+    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
-    "gemini-2.5-flash",
     "gemini-flash-latest",
   ].filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
@@ -468,7 +472,7 @@ async function callGeminiApiWithFallback({
         try {
           response = await axios.post(url, payload, {
             headers: { "Content-Type": "application/json" },
-            timeout: 35000,
+            timeout: timeout || 45000,
           });
         } catch (postErr) {
           const postErrMsg = postErr.response?.data?.error?.message || "";
@@ -559,6 +563,8 @@ export async function callGeminiRaw({
   imageMimeType = "image/jpeg",
   temperature = 0.2,
   history = [],
+  tools = [],
+  timeout = 45000,
 }) {
   const globalSettings = await getAiGlobalSettings();
   const geminiKey = (
@@ -574,7 +580,7 @@ export async function callGeminiRaw({
   const chosenModel = (
     globalSettings.model ||
     globalSettings.defaultModel ||
-    "gemini-2.5-flash"
+    "gemini-3.8-flash"
   ).trim();
   const provider = (
     globalSettings.provider ||
@@ -615,9 +621,11 @@ export async function callGeminiRaw({
       temperature,
       apiKey: geminiKey,
       preferredModel: chosenModel.startsWith("gpt")
-        ? "gemini-2.5-flash"
+        ? "gemini-3.8-flash"
         : chosenModel,
       history,
+      tools,
+      timeout,
     });
   }
 
