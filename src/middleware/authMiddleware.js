@@ -232,7 +232,7 @@ const protect = async (req, res, next) => {
                 reg.status === "expired" ||
                 (reg.trialEndsAt && new Date(reg.trialEndsAt).getTime() < Date.now());
 
-              if (isExpired && !isPaymentRoute) {
+              if (isExpired && !isPaymentRoute && !skipSubscriptionCheck) {
                 return res.status(403).json({
                   message: "Your 7-day free trial has expired. Please contact support or upgrade to continue.",
                   trialExpired: true,
@@ -275,7 +275,7 @@ const protect = async (req, res, next) => {
             institute.status !== "active" ||
             (institute.subscriptionEnd && new Date(institute.subscriptionEnd).getTime() < Date.now());
 
-          if (isExpired && !isPaymentRoute) {
+          if (isExpired && !isPaymentRoute && !skipSubscriptionCheck) {
             return res.status(403).json({
               message:
                 "Your subscription has expired. Please renew to access the institute features.",
