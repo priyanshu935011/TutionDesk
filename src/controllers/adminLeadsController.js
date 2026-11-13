@@ -529,6 +529,62 @@ export const bulkImportAdminLeads = async (req, res) => {
   }
 };
 
+// National EdTech unicorns and giant corporate coaching chains to exclude from SMB lead generation
+export const CORPORATE_EDTECH_BLACKLIST = [
+  "physicswallah", "physics wallah", "pw vidyapeeth", "pw pathshala", "pw ",
+  "byju", "byjus", "byju's",
+  "aakash", "aesl", "aakash institute", "aakash byju",
+  "allen", "allen career", "allen institute",
+  "fiitjee", "fitjee",
+  "unacademy", "unacademy centre",
+  "vidyamandir", "vmc", "vidyamandir classes",
+  "cuemath",
+  "khan academy", "khanacademy",
+  "vedantu", "vedantu learning",
+  "resonance", "resonance edu",
+  "sri chaitanya", "srichaitanya", "chaitanya academy",
+  "narayana", "narayana educational", "narayana group",
+  "career point", "cp gurukul",
+  "motion education", "motion iit",
+  "pace iit", "pace academy",
+  "toppr",
+  "extramarks",
+  "whitehat jr", "whitehat",
+  "lead school",
+  "next education",
+  "tutorbin",
+  "chegg",
+  "meritnation",
+  "simplilearn",
+  "upgrad",
+  "great learning",
+  "doubtnut",
+  "bhanzu",
+  "adda247", "adda 247",
+  "testbook",
+  "gradeup",
+  "oliveboard",
+  "drishti ias", "drishtiias",
+  "vajiram and ravi", "vajiram & ravi", "vajiram",
+  "vision ias", "visionias",
+  "next ias", "nextias",
+  "made easy", "madeeasy",
+  "ace engineering academy",
+  "super 30", "super30",
+  "career launcher", "careerlauncher",
+  "clat possible",
+];
+
+// Helper: Check if an institute name belongs to a large corporate chain or edtech unicorn
+export function isCorporateEdtech(name = "") {
+  if (!name) return false;
+  const clean = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return CORPORATE_EDTECH_BLACKLIST.some((corp) => {
+    const cleanCorp = corp.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return clean.includes(cleanCorp);
+  });
+}
+
 // POST /api/admin/leads/ai-hunt - Hunt active coaching institute leads using AI intelligence
 export const aiHuntAdminLeads = async (req, res) => {
   try {
@@ -544,12 +600,17 @@ export const aiHuntAdminLeads = async (req, res) => {
     const requestedCount = Math.min(Math.max(parseInt(count, 10) || 20, 5), 50);
 
     const prompt = `You are an educational business research intelligence agent for India.
-Identify and extract active, real coaching institutes, tuition centers, private tutorial academies, or competitive exam preparation institutes physically located in:
+Identify and extract active, real LOCAL INDEPENDENT coaching institutes, tuition centers, private tutorial academies, or competitive exam preparation institutes physically located in:
 District / City: ${cleanDistrict}
 State: ${cleanState}, India
 Category Focus: ${category}
 
-Find exactly ${requestedCount} prominent, active coaching centers or tutors in ${cleanDistrict}.
+STRICT EXCLUSION RULES (CRITICAL):
+- Target ONLY independent, local, privately-owned coaching centers, regional tuition classes, home tutoring groups, and standalone tutorial academies.
+- DO NOT return national corporate chains or EdTech unicorns, including PhysicsWallah (PW), Byju's, Aakash Institute, Allen Career Institute, FIITJEE, Unacademy, Vidyamandir Classes (VMC), Cuemath, Khan Academy, Vedantu, Resonance, Sri Chaitanya, Narayana, Career Point, Motion, Toppr, Extramarks, or any national corporate franchise.
+- Only return independent local businesses whose primary decision maker is the local teacher/director in ${cleanDistrict}.
+
+Find exactly ${requestedCount} prominent, active LOCAL coaching centers or tutors in ${cleanDistrict}.
 For each one, provide:
 - coachingName: Official or popular business name of the coaching institute
 - contactPerson: Director, Center Head, Founder, or Manager name (e.g. "Director", "Center Head", or real name)
@@ -577,7 +638,7 @@ Output ONLY the JSON array without any explanation or markdown formatting.`;
 
     const raw = await callGeminiRaw({
       prompt,
-      systemInstruction: "You are a professional educational directory research specialist. You output strict JSON only.",
+      systemInstruction: "You are a professional educational directory research specialist. You output strict JSON only. You strictly exclude corporate edtech brands and national franchise chains.",
       temperature: 0.2,
     });
 
@@ -617,7 +678,7 @@ Output ONLY the JSON array without any explanation or markdown formatting.`;
           notes: String(item.notes || "").trim(),
         };
       })
-      .filter((l) => l.coachingName && l.phone);
+      .filter((l) => l.coachingName && l.phone && !isCorporateEdtech(l.coachingName));
 
     // Deduplication check against existing SalesLead in DB
     const phoneList = normalizedLeads.map((l) => l.phone).filter(Boolean);
@@ -714,7 +775,7 @@ export const aiImportAdminLeads = async (req, res) => {
     let skippedCount = 0;
 
     for (const item of leads) {
-      if (!item.coachingName || !item.phone) {
+      if (!item.coachingName || !item.phone || isCorporateEdtech(item.coachingName)) {
         skippedCount++;
         continue;
       }
