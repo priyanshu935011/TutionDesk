@@ -3239,3 +3239,83 @@ export const switchSuperAdminInstitute = async (req, res) => {
     return res.status(500).json({ message: "Failed to switch tuition: " + error.message });
   }
 };
+
+export const DEFAULT_HERO_SDUI_CONFIG = {
+  themePreset: "cosmic_purple",
+  gradientColors: ["#3B0764", "#6B21A8", "#4F46E5"], // Rich violet to purple to indigo (matches screenshot)
+  darkGradientColors: ["#180828", "#2E1065", "#1E1B4B"], // Deep night violet to indigo
+  waveHeight: 38,
+  greetingBadgeText: "", // Empty: auto compute "GOOD MORNING / AFTERNOON / NIGHT"
+  greetingBadgeIcon: "auto", // "auto", "moon", "sun", "sparkles", "star"
+  heroTitle: "", // Empty: auto compute "Hello, Somesh Kumar"
+  heroSubtitle: "Welcome back to Classtech. Here is your overview for today.",
+  showSignedInPill: true,
+  showGreetingBadge: true,
+  showCTLogo: true,
+  updatedAt: new Date().toISOString(),
+};
+
+export const getHeroSduiConfig = async (req, res) => {
+  try {
+    let setting = await SystemSetting.findOne({ key: "dashboard_hero_sdui" }).lean();
+    if (!setting || !setting.value) {
+      setting = await SystemSetting.create({
+        key: "dashboard_hero_sdui",
+        value: DEFAULT_HERO_SDUI_CONFIG,
+      });
+    }
+    return res.json({ success: true, config: setting.value || DEFAULT_HERO_SDUI_CONFIG });
+  } catch (err) {
+    console.error("getHeroSduiConfig error:", err);
+    return res.status(500).json({ success: false, message: err.message, config: DEFAULT_HERO_SDUI_CONFIG });
+  }
+};
+
+export const updateHeroSduiConfig = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) {
+      return res.status(403).json({ message: "Access denied. Exclusively for super admin." });
+    }
+
+    const { config } = req.body;
+    if (!config || typeof config !== "object") {
+      return res.status(400).json({ message: "Invalid SDUI configuration payload." });
+    }
+
+    const merged = {
+      ...DEFAULT_HERO_SDUI_CONFIG,
+      ...config,
+      updatedAt: new Date().toISOString(),
+      updatedBy: req.user.email || req.user.superAdminEmail || "super_admin",
+    };
+
+    let setting = await SystemSetting.findOne({ key: "dashboard_hero_sdui" });
+    if (!setting) {
+      setting = await SystemSetting.create({
+        key: "dashboard_hero_sdui",
+        value: merged,
+      });
+    } else {
+      setting.value = merged;
+      setting.markModified("value");
+      await setting.save();
+    }
+
+    try {
+      await clearCachePattern("teacher:dashboard:*");
+      await clearCachePattern("student:dashboard:*");
+    } catch (_) {}
+
+    console.log("[SDUI] Dashboard Hero SDUI config updated by Super Admin:", merged.themePreset);
+
+    return res.json({
+      success: true,
+      message: "Dashboard Hero SDUI configuration saved successfully.",
+      config: setting.value,
+    });
+  } catch (err) {
+    console.error("updateHeroSduiConfig error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};

@@ -1,6 +1,8 @@
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
+import SystemSetting from "../models/SystemSetting.js";
+import { DEFAULT_HERO_SDUI_CONFIG } from "./adminController.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
 
 export const getDashboard = async (req, res) => {
@@ -148,12 +150,21 @@ export const getDashboard = async (req, res) => {
       }
     }
 
+    let heroSdui = DEFAULT_HERO_SDUI_CONFIG;
+    try {
+      const heroSetting = await SystemSetting.findOne({ key: "dashboard_hero_sdui" }).lean();
+      if (heroSetting && heroSetting.value) {
+        heroSdui = heroSetting.value;
+      }
+    } catch (_) {}
+
     return res.json({
       summary,
       institute: instObj,
       user: {
         role: req.user.role,
       },
+      heroSdui,
     });
   } catch (error) {
     console.error("getDashboard error:", error);

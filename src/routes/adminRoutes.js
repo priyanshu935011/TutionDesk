@@ -59,6 +59,8 @@ import {
   getTextBeeDevices,
   getSuperAdminTuitionsList,
   switchSuperAdminInstitute,
+  getHeroSduiConfig,
+  updateHeroSduiConfig,
 } from "../controllers/adminController.js";
 import {
   sendBroadcastNotification,
@@ -100,6 +102,10 @@ router.use(protect, staffOnly);
 // Super Admin Tuition Switching Routes (Strictly Super Admin Only)
 router.get("/tuitions-list", getSuperAdminTuitionsList);
 router.post("/switch-institute/:id", switchSuperAdminInstitute);
+
+// Dashboard Hero SDUI Configuration
+router.get("/hero-sdui", getHeroSduiConfig);
+router.put("/hero-sdui", updateHeroSduiConfig);
 
 router.get("/overview", getAdminOverview);
 router.get("/uptime", getUptimeOverview);
