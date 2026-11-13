@@ -90,6 +90,8 @@ import {
   deleteAdminLead,
   assignTerritory,
   bulkImportAdminLeads,
+  aiHuntAdminLeads,
+  aiImportAdminLeads,
 } from "../controllers/adminLeadsController.js";
 
 const router = express.Router();
@@ -216,5 +218,7 @@ router.put("/leads/:id", updateAdminLead);
 router.delete("/leads/:id", deleteAdminLead);
 router.post("/leads/assign-territory", assignTerritory);
 router.post("/leads/bulk-import", bulkImportAdminLeads);
+router.post("/leads/ai-hunt", aiHuntAdminLeads);
+router.post("/leads/ai-import", aiImportAdminLeads);
 
 export default router;

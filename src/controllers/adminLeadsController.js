@@ -1,6 +1,7 @@
 import SalesLead from "../models/SalesLead.js";
 import SalesTerritory from "../models/SalesTerritory.js";
 import User from "../models/User.js";
+import { callGeminiRaw, extractJsonFromText } from "../services/aiService.js";
 
 // Comprehensive India States & Districts directory
 export const DEFAULT_STATES_AND_DISTRICTS = {
@@ -525,5 +526,238 @@ export const bulkImportAdminLeads = async (req, res) => {
   } catch (error) {
     console.error("bulkImportAdminLeads error:", error);
     return res.status(500).json({ message: "Could not bulk import leads" });
+  }
+};
+
+// POST /api/admin/leads/ai-hunt - Hunt active coaching institute leads using AI intelligence
+export const aiHuntAdminLeads = async (req, res) => {
+  try {
+    const { state, district, category = "All Coaching & Tuition Centers", count = 20 } = req.body;
+
+    const cleanState = (state || "").trim();
+    const cleanDistrict = (district || "").trim();
+
+    if (!cleanState || !cleanDistrict) {
+      return res.status(400).json({ message: "State and District/City are required for AI hunting." });
+    }
+
+    const requestedCount = Math.min(Math.max(parseInt(count, 10) || 20, 5), 50);
+
+    const prompt = `You are an educational business research intelligence agent for India.
+Identify and extract active, real coaching institutes, tuition centers, private tutorial academies, or competitive exam preparation institutes physically located in:
+District / City: ${cleanDistrict}
+State: ${cleanState}, India
+Category Focus: ${category}
+
+Find exactly ${requestedCount} prominent, active coaching centers or tutors in ${cleanDistrict}.
+For each one, provide:
+- coachingName: Official or popular business name of the coaching institute
+- contactPerson: Director, Center Head, Founder, or Manager name (e.g. "Director", "Center Head", or real name)
+- phone: Standard 10-digit Indian mobile or landline contact number (digits only, e.g. 98XXXXXXXX, 87XXXXXXXX, or local STD)
+- email: Admission or contact email if known, otherwise ""
+- address: Locality / landmark / street address in ${cleanDistrict}
+- category: Primary subject/exam category
+- studentCapacity: Estimated batch capacity (e.g. "50-100", "100-300", "300+")
+- notes: Brief 1-sentence note on specialties, subjects, or batch types
+
+Format strictly as a JSON array of objects with these exact keys:
+[
+  {
+    "coachingName": "...",
+    "contactPerson": "...",
+    "phone": "...",
+    "email": "...",
+    "address": "...",
+    "category": "...",
+    "studentCapacity": "...",
+    "notes": "..."
+  }
+]
+Output ONLY the JSON array without any explanation or markdown formatting.`;
+
+    const raw = await callGeminiRaw({
+      prompt,
+      systemInstruction: "You are a professional educational directory research specialist. You output strict JSON only.",
+      temperature: 0.2,
+    });
+
+    const parsed = extractJsonFromText(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return res.status(502).json({ message: "AI did not return valid leads data. Please try again." });
+    }
+
+    // Clean & normalize leads
+    const normalizedLeads = parsed
+      .map((item) => {
+        const coachingName = String(item.coachingName || "").trim();
+        const rawPhone = String(item.phone || "").replace(/[^0-9]/g, "");
+        let cleanPhone = rawPhone;
+        if (cleanPhone.length === 12 && cleanPhone.startsWith("91")) {
+          cleanPhone = cleanPhone.slice(2);
+        } else if (cleanPhone.length === 11 && cleanPhone.startsWith("0")) {
+          cleanPhone = cleanPhone.slice(1);
+        }
+
+        const address = String(item.address || "").trim();
+        const mapsQuery = encodeURIComponent(`${coachingName} ${address || cleanDistrict} ${cleanDistrict}`);
+        const googleBusinessLink = `https://www.google.com/maps/search/?api=1&query=${mapsQuery}`;
+
+        return {
+          coachingName,
+          contactPerson: String(item.contactPerson || "Center Director").trim(),
+          phone: cleanPhone || rawPhone,
+          email: item.email ? String(item.email).trim().toLowerCase() : "",
+          state: cleanState,
+          district: cleanDistrict,
+          city: cleanDistrict,
+          address,
+          googleBusinessLink,
+          category: String(item.category || category).trim(),
+          studentCapacity: String(item.studentCapacity || "50-150").trim(),
+          notes: String(item.notes || "").trim(),
+        };
+      })
+      .filter((l) => l.coachingName && l.phone);
+
+    // Deduplication check against existing SalesLead in DB
+    const phoneList = normalizedLeads.map((l) => l.phone).filter(Boolean);
+    const existingLeads = await SalesLead.find({
+      $or: [
+        { phone: { $in: phoneList } },
+        {
+          state: new RegExp(`^${cleanState}$`, "i"),
+          district: new RegExp(`^${cleanDistrict}$`, "i"),
+          coachingName: { $in: normalizedLeads.map((l) => l.coachingName) },
+        },
+      ],
+    });
+
+    const existingPhoneMap = new Map();
+    const existingNameMap = new Map();
+    (existingLeads || []).forEach((el) => {
+      if (el.phone) {
+        const cleanExisting = String(el.phone).replace(/[^0-9]/g, "");
+        existingPhoneMap.set(cleanExisting, el);
+      }
+      if (el.coachingName) {
+        existingNameMap.set(el.coachingName.toLowerCase().trim(), el);
+      }
+    });
+
+    const processedLeads = normalizedLeads.map((lead, idx) => {
+      const matched =
+        existingPhoneMap.get(lead.phone) ||
+        existingNameMap.get(lead.coachingName.toLowerCase().trim());
+
+      return {
+        ...lead,
+        tempId: `hunt_${Date.now()}_${idx}`,
+        isExisting: !!matched,
+        existingLeadId: matched ? matched._id || matched.id : null,
+        existingStatus: matched ? matched.status : null,
+      };
+    });
+
+    const newCount = processedLeads.filter((l) => !l.isExisting).length;
+    const existingCount = processedLeads.filter((l) => l.isExisting).length;
+
+    return res.json({
+      state: cleanState,
+      district: cleanDistrict,
+      category,
+      totalFound: processedLeads.length,
+      newCount,
+      existingCount,
+      leads: processedLeads,
+    });
+  } catch (error) {
+    console.error("aiHuntAdminLeads error:", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to hunt leads using AI.",
+    });
+  }
+};
+
+// POST /api/admin/leads/ai-import - Import selected AI hunted leads into CRM with auto territory routing
+export const aiImportAdminLeads = async (req, res) => {
+  try {
+    const { state, district, leads } = req.body;
+
+    if (!Array.isArray(leads) || leads.length === 0) {
+      return res.status(400).json({ message: "No leads provided for import." });
+    }
+
+    const cleanState = (state || "").trim();
+    const cleanCity = (district || "").trim();
+
+    // Territory Specialist lookup
+    let assignedSp = null;
+    let assignedSpName = "";
+    if (cleanState || cleanCity) {
+      const assignments = await SalesTerritory.find();
+      const cityMatch = assignments.find(
+        (t) =>
+          (t.state || "").trim().toLowerCase() === cleanState.toLowerCase() &&
+          (t.city || "").trim().toLowerCase() === cleanCity.toLowerCase()
+      );
+      const stateMatch = assignments.find(
+        (t) => (t.state || "").trim().toLowerCase() === cleanState.toLowerCase() && !t.city
+      );
+      const match = cityMatch || stateMatch;
+      if (match) {
+        assignedSp = match.salesPersonId;
+        assignedSpName = match.salesPersonName;
+      }
+    }
+
+    let importedCount = 0;
+    let skippedCount = 0;
+
+    for (const item of leads) {
+      if (!item.coachingName || !item.phone) {
+        skippedCount++;
+        continue;
+      }
+
+      const cleanPhone = String(item.phone).trim();
+      const existing = await SalesLead.findOne({ phone: cleanPhone });
+      if (existing) {
+        skippedCount++;
+        continue;
+      }
+
+      await SalesLead.create({
+        coachingName: item.coachingName.trim(),
+        contactPerson: (item.contactPerson || item.coachingName || "Director").trim(),
+        phone: cleanPhone,
+        email: item.email ? String(item.email).trim().toLowerCase() : "",
+        state: cleanState || (item.state || "").trim(),
+        district: cleanCity || (item.district || item.city || "").trim(),
+        city: cleanCity || (item.city || item.district || "").trim(),
+        address: (item.address || "").trim(),
+        googleBusinessLink: (item.googleBusinessLink || "").trim(),
+        studentCapacity: (item.studentCapacity || "").trim(),
+        planInterest: item.planInterest || "Yearly Subscription",
+        status: "new",
+        source: "AI Lead Hunter",
+        salesPerson: assignedSp,
+        salesPersonName: assignedSpName,
+        addedBy: req.user?._id || req.user?.id || null,
+        addedByName: req.user?.name || "Super Admin",
+        notes: (item.notes || (item.category ? `Category: ${item.category}` : "")).trim(),
+        callLogs: [],
+      });
+      importedCount++;
+    }
+
+    return res.status(201).json({
+      message: `Successfully imported ${importedCount} leads into ${cleanCity ? cleanCity + ", " : ""}${cleanState}.${assignedSpName ? ` Assigned to ${assignedSpName}.` : ""}`,
+      importedCount,
+      skippedCount,
+      assignedSpecialist: assignedSpName || null,
+    });
+  } catch (error) {
+    console.error("aiImportAdminLeads error:", error);
+    return res.status(500).json({ message: "Could not import AI hunted leads" });
   }
 };
