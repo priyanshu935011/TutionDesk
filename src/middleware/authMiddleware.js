@@ -309,6 +309,55 @@ const protect = async (req, res, next) => {
   }
 };
 
+export const optionalAuth = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    let token = authHeader.substring(7).trim().replace(/^["']+|["']+$|\\"/g, "");
+    if (!token || token === "null" || token === "undefined") {
+      req.user = null;
+      return next();
+    }
+
+    const decoded = verifyJwtToken(token);
+    if (!decoded || typeof decoded !== "object") {
+      req.user = null;
+      return next();
+    }
+
+    if (decoded.role === "super_admin" || decoded.id === "super-admin") {
+      req.user = {
+        _id: null,
+        email: decoded.email,
+        role: "super_admin",
+        isSuperAdmin: true,
+        superAdminEmail: decoded.email,
+        institute: null,
+      };
+      return next();
+    }
+
+    const userId = decoded.id || decoded._id || decoded.userId || decoded.sub;
+    let user = null;
+    if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+      user = await User.findById(userId).select("-password").lean().catch(() => null);
+    }
+    if (!user && decoded.email) {
+      user = await User.findOne({ email: decoded.email.toLowerCase().trim() }).select("-password").lean().catch(() => null);
+    }
+
+    req.user = user || null;
+    return next();
+  } catch (_) {
+    req.user = null;
+    return next();
+  }
+};
+
 export default protect;
 
 let uptimeHandlersRegistered = false;

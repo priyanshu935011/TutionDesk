@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import protect from "../middleware/authMiddleware.js";
+import protect, { optionalAuth } from "../middleware/authMiddleware.js";
 import superAdminOnly from "../middleware/superAdminMiddleware.js";
 import {
   getMarketingTemplates,
@@ -24,9 +24,9 @@ const posterUpload = upload.fields([
 
 const router = express.Router();
 
-// Educator / App endpoints
-router.get("/templates", protect, getMarketingTemplates);
-router.post("/templates/:id/track", protect, trackTemplateAction);
+// Educator / App endpoints (optionalAuth allows unauthenticated fallback & enriches when logged in)
+router.get("/templates", optionalAuth, getMarketingTemplates);
+router.post("/templates/:id/track", optionalAuth, trackTemplateAction);
 
 // Super Admin management endpoints
 router.get("/admin/templates", protect, superAdminOnly, getAllTemplatesAdmin);

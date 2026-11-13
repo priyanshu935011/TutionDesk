@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import MarketingTemplate from "../models/MarketingTemplate.js";
 import Institute from "../models/Institute.js";
 import cloudinary from "../utils/cloudinary.js";
@@ -244,6 +245,11 @@ export const trackTemplateAction = async (req, res) => {
 
     if (!["share", "download", "view"].includes(action)) {
       return res.status(400).json({ message: "Invalid action. Must be share, download, or view." });
+    }
+
+    // Gracefully handle fallback or custom string IDs without throwing CastError
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.json({ success: true, message: `Action ${action} tracked for ${id}.` });
     }
 
     const field = action === "share" ? "stats.shares" : action === "download" ? "stats.downloads" : "stats.views";
