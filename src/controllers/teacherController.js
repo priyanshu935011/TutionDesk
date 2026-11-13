@@ -10,8 +10,6 @@ import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
 import StaffAttendance from "../models/StaffAttendance.js";
 import WhatsappLog from "../models/WhatsappLog.js";
-import SystemSetting from "../models/SystemSetting.js";
-import { DEFAULT_HERO_SDUI_CONFIG, getFestivalThemeHelper } from "./adminController.js";
 import cloudinary from "../utils/cloudinary.js";
 import {
   buildNoteDownloadFilename,
@@ -495,19 +493,6 @@ export const getTeacherDashboard = async (req, res) => {
       };
     });
 
-    let heroSdui = DEFAULT_HERO_SDUI_CONFIG;
-    try {
-      const heroSetting = await SystemSetting.findOne({ key: "dashboard_hero_sdui" }).lean();
-      if (heroSetting && heroSetting.value) {
-        heroSdui = typeof heroSetting.value === "string" ? JSON.parse(heroSetting.value) : heroSetting.value;
-      }
-    } catch (_) {}
-
-    let festivalTheme = null;
-    try {
-      festivalTheme = await getFestivalThemeHelper();
-    } catch (_) {}
-
     const responsePayload = {
       summary,
       students: [],
@@ -522,8 +507,6 @@ export const getTeacherDashboard = async (req, res) => {
         name: req.user.name,
         email: req.user.email,
       },
-      heroSdui,
-      festivalTheme,
       diagnostics: req.query.debug === "true" ? steps : undefined,
     };
 
@@ -547,8 +530,6 @@ export const getTeacherDashboard = async (req, res) => {
       testResults: [],
       institute: null,
       user: { id: req.user._id, role: req.user.role, name: req.user.name, email: req.user.email },
-      heroSdui: DEFAULT_HERO_SDUI_CONFIG,
-      festivalTheme: null,
       diagnostics: steps,
     });
   }
