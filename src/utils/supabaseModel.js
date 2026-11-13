@@ -2705,10 +2705,14 @@ class SupabaseModel {
       return { acknowledged: true, deletedCount: fallbackData.length - filtered.length };
     }
 
+    let deletedRowsCount = 0;
     try {
       let query = this.supabase.from(this.tableName).delete();
       query = this.applyFilters(query, filter);
       const { data, error } = await query.select();
+      if (data && Array.isArray(data)) {
+        deletedRowsCount = data.length;
+      }
       if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
         MISSING_TABLES.add(this.tableName);
         const fallbackData = readFallbackData(this.tableName);
@@ -2728,9 +2732,12 @@ class SupabaseModel {
       const fallbackData = readFallbackData(this.tableName);
       const filtered = fallbackData.filter((doc) => !matchFilter(doc, filter));
       writeFallbackData(this.tableName, filtered);
+      if (!deletedRowsCount) {
+        deletedRowsCount = fallbackData.length - filtered.length;
+      }
     } catch (_) {}
 
-    return { acknowledged: true };
+    return { acknowledged: true, deletedCount: deletedRowsCount };
   }
 
   async create(doc) {

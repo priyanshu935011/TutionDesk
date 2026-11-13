@@ -380,26 +380,35 @@ export const deleteDistrictLeads = async (req, res) => {
     const state = req.query.state || req.body?.state;
     const district = req.query.district || req.body?.district;
 
-    const cleanState = (state || "").trim();
-    const cleanDistrict = (district || "").trim();
+    const cleanState = (state || "").trim().toLowerCase();
+    const cleanDistrict = (district || "").trim().toLowerCase();
 
     if (!cleanState || !cleanDistrict) {
       return res.status(400).json({ message: "State and District are required to delete district leads." });
     }
 
-    const filter = {
-      state: new RegExp(`^${cleanState}$`, "i"),
-      $or: [
-        { district: new RegExp(`^${cleanDistrict}$`, "i") },
-        { city: new RegExp(`^${cleanDistrict}$`, "i") },
-      ],
-    };
+    const allLeads = await SalesLead.find();
+    const matchingLeads = (allLeads || []).filter((l) => {
+      const sMatch = (l.state || "").trim().toLowerCase() === cleanState;
+      const dMatch = (l.district || l.city || "").trim().toLowerCase() === cleanDistrict;
+      return sMatch && dMatch;
+    });
 
-    const result = await SalesLead.deleteMany(filter);
+    let deletedCount = 0;
+    for (const lead of matchingLeads) {
+      const leadId = lead._id || lead.id;
+      if (leadId) {
+        await SalesLead.findByIdAndDelete(leadId);
+        deletedCount++;
+      }
+    }
+
+    const displayDistrict = (district || "").trim();
+    const displayState = (state || "").trim();
 
     return res.json({
-      message: `Successfully deleted all ${result.deletedCount || 0} leads in ${cleanDistrict}, ${cleanState}.`,
-      deletedCount: result.deletedCount || 0,
+      message: `Successfully deleted all ${deletedCount} leads in ${displayDistrict}, ${displayState}.`,
+      deletedCount,
     });
   } catch (error) {
     console.error("deleteDistrictLeads error:", error);
