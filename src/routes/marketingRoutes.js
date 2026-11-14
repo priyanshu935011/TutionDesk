@@ -11,6 +11,9 @@ import {
   deleteTemplateAdmin,
   getMarketingStatsAdmin,
   aiDetectAndCleanBrandingAdmin,
+  getAdminMarketingMedia,
+  uploadAdminMarketingMedia,
+  deleteAdminMarketingMedia,
 } from "../controllers/marketingController.js";
 
 const upload = multer({
@@ -36,5 +39,10 @@ router.put("/admin/templates/:id", protect, superAdminOnly, posterUpload, update
 router.delete("/admin/templates/:id", protect, superAdminOnly, deleteTemplateAdmin);
 router.get("/admin/stats", protect, superAdminOnly, getMarketingStatsAdmin);
 router.post("/admin/ai-detect-and-clean", protect, superAdminOnly, posterUpload, aiDetectAndCleanBrandingAdmin);
+
+// Super Admin Media Library Endpoints
+router.get("/admin/media", protect, superAdminOnly, getAdminMarketingMedia);
+router.post("/admin/media", protect, superAdminOnly, upload.single("file"), uploadAdminMarketingMedia);
+router.delete("/admin/media/:id", protect, superAdminOnly, deleteAdminMarketingMedia);
 
 export default router;

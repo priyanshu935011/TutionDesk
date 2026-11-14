@@ -3094,7 +3094,7 @@ class SupabaseModel {
     }
 
     const uuidPayloadKeys = ["id", "institute_id", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
-    if (this.tableName !== "marketing_templates") {
+    if (this.tableName !== "marketing_templates" && this.tableName !== "marketing_media") {
       uuidPayloadKeys.push("created_by");
     }
     for (const key of uuidPayloadKeys) {
@@ -3131,7 +3131,7 @@ class SupabaseModel {
           "test_series_folders", "institute_test_series", "test_series_categories",
           "test_series_attempts", "support_tickets", "support_faqs", "support_tutorials",
           "institute_expenses", "institute_incomes", "staff_salaries", "staff_attendances",
-          "marketing_templates"
+          "marketing_templates", "marketing_media"
         ];
         const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
 
@@ -3937,9 +3937,11 @@ const mockMongoose = {
     else if (modelName === "DpdpRetentionNotice" || modelName === "DpdpRetentionNotices") tableName = "dpdp_retention_notices";
     else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
     else if (modelName === "MarketingTemplate" || modelName === "MarketingTemplates") tableName = "marketing_templates";
+    else if (modelName === "MarketingMedia" || modelName === "MarketingMedias") tableName = "marketing_media";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "marketingtemplates" || tableName === "marketingtemplate") tableName = "marketing_templates";
+    if (tableName === "marketingmedias" || tableName === "marketingmedia") tableName = "marketing_media";
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
     if (tableName === "contact_messages") tableName = "contactmessages";
     if (tableName === "cashfreepayments" || tableName === "cashfreepayment") tableName = "cashfree_payments";

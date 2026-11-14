@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import axios from "axios";
 import sharp from "sharp";
 import MarketingTemplate from "../models/MarketingTemplate.js";
+import MarketingMedia from "../models/MarketingMedia.js";
 import Institute from "../models/Institute.js";
 import cloudinary from "../utils/cloudinary.js";
 import { callGeminiRaw, extractJsonFromText } from "../services/aiService.js";
@@ -804,5 +805,73 @@ Respond ONLY with a valid JSON object matching this exact structure:
   } catch (error) {
     console.error("aiDetectAndCleanBrandingAdmin error:", error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Super Admin Media Library Endpoints
+ */
+
+// GET /marketing/admin/media
+export const getAdminMarketingMedia = async (req, res) => {
+  try {
+    const list = await MarketingMedia.find({}).sort({ createdAt: -1 });
+    return res.json({ success: true, media: list || [] });
+  } catch (err) {
+    console.error("getAdminMarketingMedia error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// POST /marketing/admin/media
+export const uploadAdminMarketingMedia = async (req, res) => {
+  try {
+    const file = req.file || req.files?.file?.[0] || req.files?.image?.[0];
+    if (!file || !file.buffer) {
+      return res.status(400).json({ success: false, message: "No file provided for upload." });
+    }
+
+    const mimeType = file.mimetype || "image/jpeg";
+    const b64 = `data:${mimeType};base64,${file.buffer.toString("base64")}`;
+    let url = "";
+
+    try {
+      const up = await cloudinary.uploader.upload(b64, {
+        resource_type: "image",
+        folder: "marketing_media",
+      });
+      url = up.secure_url || up.url;
+    } catch (cloudErr) {
+      console.warn("[Cloudinary] marketing media upload fallback to data URI:", cloudErr.message);
+      url = b64;
+    }
+
+    const created = await MarketingMedia.create({
+      url,
+      filename: file.originalname || `media_${Date.now()}`,
+      mimeType,
+      sizeBytes: file.size || file.buffer.length || 0,
+      createdBy: req.user?.email || "super_admin",
+    });
+
+    return res.status(201).json({ success: true, media: created });
+  } catch (err) {
+    console.error("uploadAdminMarketingMedia error:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// DELETE /marketing/admin/media/:id
+export const deleteAdminMarketingMedia = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Media ID is required." });
+    }
+    await MarketingMedia.findByIdAndDelete(id);
+    return res.json({ success: true, message: "Media deleted successfully." });
+  } catch (err) {
+    console.error("deleteAdminMarketingMedia error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

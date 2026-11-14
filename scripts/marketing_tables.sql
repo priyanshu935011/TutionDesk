@@ -32,7 +32,30 @@ CREATE INDEX IF NOT EXISTS idx_marketing_templates_is_active ON marketing_templa
 CREATE INDEX IF NOT EXISTS idx_marketing_templates_priority ON marketing_templates(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_marketing_templates_created_at ON marketing_templates(created_at DESC);
 
+-- ============================================================
+-- Table: marketing_media (Uploaded Images & Graphics Library)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS marketing_media (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    url TEXT NOT NULL,
+    filename VARCHAR(255) DEFAULT 'media_file',
+    mime_type VARCHAR(100) DEFAULT 'image/png',
+    size_bytes BIGINT DEFAULT 0,
+    width INT,
+    height INT,
+    created_by VARCHAR(255) DEFAULT 'super_admin',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Performance Indexes for Media
+CREATE INDEX IF NOT EXISTS idx_marketing_media_created_at ON marketing_media(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_marketing_media_created_by ON marketing_media(created_by);
+
 -- Optional Row Level Security (RLS) Configuration:
 -- ALTER TABLE marketing_templates ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "Public read for active templates" ON marketing_templates FOR SELECT USING (true);
 -- CREATE POLICY "Service role full access" ON marketing_templates FOR ALL USING (true);
+-- ALTER TABLE marketing_media ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "Service role full access media" ON marketing_media FOR ALL USING (true);
