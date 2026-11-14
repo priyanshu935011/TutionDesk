@@ -9,7 +9,7 @@ const marketingTemplateSchema = new mongoose.Schema(
     },
     category: {
       type: String,
-      enum: ["festival", "admission", "achievement", "quote", "holiday", "announcement"],
+      enum: ["festival", "admission", "achievement", "quote", "holiday", "announcement", "poster", "pamphlet", "admission_form"],
       default: "festival",
       index: true,
     },
