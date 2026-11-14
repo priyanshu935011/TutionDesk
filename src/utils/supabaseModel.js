@@ -15,7 +15,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 const MISSING_TABLES = new Set([
   "leads", "quizzes", "quiz_attempts", "notices", "lead_forms", "custom_pages", "custompages",
-  "activity_logs", "activitylogs", "sms_otp_logs", "marketing_templates", "marketingtemplates"
+  "activity_logs", "activitylogs", "sms_otp_logs"
 ]);
 const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
 const METADATA_FILE = path.join(FALLBACK_DIR, "institutes_metadata.json");
@@ -3072,7 +3072,31 @@ class SupabaseModel {
       }
     }
 
-    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
+    if (this.tableName === "marketing_templates") {
+      if (payload.is_active !== undefined) payload.is_active = payload.is_active === true || payload.is_active === "true";
+      if (payload.priority !== undefined) payload.priority = parseInt(payload.priority, 10) || 0;
+      if (typeof payload.branding_positions === "string") {
+        try { payload.branding_positions = JSON.parse(payload.branding_positions); } catch (_) {}
+      }
+      if (typeof payload.branding_config === "string") {
+        try { payload.branding_config = JSON.parse(payload.branding_config); } catch (_) {}
+      }
+      if (typeof payload.canvas_data === "string") {
+        try { payload.canvas_data = JSON.parse(payload.canvas_data); } catch (_) {}
+      }
+      if (typeof payload.stats === "string") {
+        try { payload.stats = JSON.parse(payload.stats); } catch (_) {}
+      }
+      if (typeof payload.target_tiers === "string") {
+        try { payload.target_tiers = JSON.parse(payload.target_tiers); } catch (_) {}
+      }
+      if (!payload.id) delete payload.id;
+    }
+
+    const uuidPayloadKeys = ["id", "institute_id", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id"];
+    if (this.tableName !== "marketing_templates") {
+      uuidPayloadKeys.push("created_by");
+    }
     for (const key of uuidPayloadKeys) {
       if (key in payload) {
         if (payload[key] === "" || payload[key] === undefined) {
@@ -3106,7 +3130,8 @@ class SupabaseModel {
           "notes", "institutes", "students", "batches", "test_series",
           "test_series_folders", "institute_test_series", "test_series_categories",
           "test_series_attempts", "support_tickets", "support_faqs", "support_tutorials",
-          "institute_expenses", "institute_incomes", "staff_salaries", "staff_attendances"
+          "institute_expenses", "institute_incomes", "staff_salaries", "staff_attendances",
+          "marketing_templates"
         ];
         const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
 
@@ -3911,8 +3936,10 @@ const mockMongoose = {
     else if (modelName === "DataAccessLog" || modelName === "DataAccessLogs") tableName = "data_access_logs";
     else if (modelName === "DpdpRetentionNotice" || modelName === "DpdpRetentionNotices") tableName = "dpdp_retention_notices";
     else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
+    else if (modelName === "MarketingTemplate" || modelName === "MarketingTemplates") tableName = "marketing_templates";
     else tableName = modelName.toLowerCase() + "s";
 
+    if (tableName === "marketingtemplates" || tableName === "marketingtemplate") tableName = "marketing_templates";
     if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
     if (tableName === "contact_messages") tableName = "contactmessages";
     if (tableName === "cashfreepayments" || tableName === "cashfreepayment") tableName = "cashfree_payments";

@@ -15,7 +15,7 @@ const marketingTemplateSchema = new mongoose.Schema(
     },
     aspectRatio: {
       type: String,
-      enum: ["1:1", "9:16", "16:9"],
+      enum: ["1:1", "9:16", "16:9", "4:5"],
       default: "1:1",
     },
     imageUrl: {
@@ -169,6 +169,10 @@ const marketingTemplateSchema = new mongoose.Schema(
     createdBy: {
       type: String,
       default: "super_admin",
+    },
+    canvasData: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
     },
   },
   { timestamps: true }

@@ -1,7 +1,10 @@
 import mongoose from "mongoose";
+import axios from "axios";
+import sharp from "sharp";
 import MarketingTemplate from "../models/MarketingTemplate.js";
 import Institute from "../models/Institute.js";
 import cloudinary from "../utils/cloudinary.js";
+import { callGeminiRaw, extractJsonFromText } from "../services/aiService.js";
 
 // Starter presets seeded if no templates exist
 const DEFAULT_SEED_TEMPLATES = [
@@ -389,6 +392,13 @@ export const createTemplateAdmin = async (req, res) => {
       }
     }
 
+    let canvasData = req.body.canvasData;
+    if (typeof canvasData === "string") {
+      try {
+        canvasData = JSON.parse(canvasData);
+      } catch (_) {}
+    }
+
     const template = await MarketingTemplate.create({
       title: title.trim(),
       category,
@@ -398,6 +408,7 @@ export const createTemplateAdmin = async (req, res) => {
       thumbnailUrl: thumbnailUrl ? thumbnailUrl.trim() : imageUrl.trim(),
       brandingConfig: brandingConfig || {},
       ...(brandingPositions ? { brandingPositions } : {}),
+      canvasData: canvasData || null,
       isActive: isActive === true || isActive === "true",
       priority: parseInt(priority, 10) || 0,
       startDate: startDate ? new Date(startDate) : null,
@@ -497,6 +508,16 @@ export const updateTemplateAdmin = async (req, res) => {
       template.brandingPositions = bPositions;
     }
 
+    if (req.body.canvasData !== undefined) {
+      let cData = req.body.canvasData;
+      if (typeof cData === "string") {
+        try {
+          cData = JSON.parse(cData);
+        } catch (_) {}
+      }
+      template.canvasData = cData;
+    }
+
     if (isActive !== undefined) template.isActive = isActive === true || isActive === "true";
     if (priority !== undefined) template.priority = parseInt(priority, 10) || 0;
     if (startDate !== undefined) template.startDate = startDate ? new Date(startDate) : null;
@@ -575,6 +596,213 @@ export const getMarketingStatsAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("getMarketingStatsAdmin error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * AI Auto-Detect & Clean Branding Zones
+ * Analyzes uploaded image with Gemini Vision to detect existing Logo, Institute Name, Phone, and Address,
+ * inpaints/removes the old elements using Sharp, and returns cleaned image URL with dynamic field coordinates.
+ */
+export const aiDetectAndCleanBrandingAdmin = async (req, res) => {
+  try {
+    let imageBuffer = null;
+    let mimeType = "image/jpeg";
+    let originalUrl = "";
+
+    // 1. Get image from file or body
+    const imageFile = req.file || req.files?.image?.[0];
+    if (imageFile && imageFile.buffer) {
+      imageBuffer = imageFile.buffer;
+      mimeType = imageFile.mimetype || "image/jpeg";
+    } else if (req.body.imageBase64) {
+      const match = req.body.imageBase64.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        mimeType = match[1];
+        imageBuffer = Buffer.from(match[2], "base64");
+      } else {
+        imageBuffer = Buffer.from(req.body.imageBase64, "base64");
+      }
+    } else if (req.body.imageUrl) {
+      originalUrl = req.body.imageUrl;
+      const resp = await axios.get(originalUrl, { responseType: "arraybuffer", timeout: 15000 });
+      imageBuffer = Buffer.from(resp.data);
+      mimeType = resp.headers["content-type"] || "image/jpeg";
+    }
+
+    if (!imageBuffer) {
+      return res.status(400).json({ success: false, message: "No image provided for AI analysis." });
+    }
+
+    // 2. Upload original to Cloudinary if not already a Cloudinary/remote URL
+    if (!originalUrl) {
+      try {
+        const origB64 = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+        const up = await cloudinary.uploader.upload(origB64, {
+          resource_type: "image",
+          folder: "marketing_posters_ai_original",
+        });
+        originalUrl = up.secure_url || up.url;
+      } catch (e) {
+        console.warn("[Cloudinary] original upload failed, continuing:", e.message);
+      }
+    }
+
+    // 3. Call Gemini Vision to detect existing branding elements & coordinates
+    const prompt = `You are an expert graphic designer and computer vision AI specialized in marketing flyers, posters, and educational banners.
+Analyze this marketing poster / pamphlet.
+Your task is to detect any existing branding or contact details on this poster that should be removed and replaced with dynamic fields for coaching institutes:
+1. "logo": Existing emblem, crest, institute logo or mascot graphic.
+2. "instituteName": Existing institute/academy title, tuition name, or brand headline.
+3. "phone": Existing phone number, mobile number, "Call: ...", WhatsApp number, etc.
+4. "address": Existing physical address, branch location, city, website, or social handles at the bottom.
+
+For each detected element:
+- State if it is found (true/false)
+- What text is written there
+- The bounding box in exact percentage (0 to 100) of the total image dimensions:
+  - x: left edge percentage (0-100)
+  - y: top edge percentage (0-100)
+  - width: width percentage (0-100)
+  - height: height percentage (0-100)
+- The dominant background color directly behind or surrounding this text (Hex code, e.g. "#1E1B4B" or "#FFFFFF")
+- The text color (Hex code) and estimated font size in pt/px.
+
+Respond ONLY with a valid JSON object matching this exact structure:
+{
+  "detected": {
+    "logo": { "found": boolean, "text": string, "x": number, "y": number, "width": number, "height": number, "fillColor": string },
+    "instituteName": { "found": boolean, "text": string, "x": number, "y": number, "width": number, "height": number, "fontSize": number, "color": string, "fillColor": string },
+    "phone": { "found": boolean, "text": string, "x": number, "y": number, "width": number, "height": number, "fontSize": number, "color": string, "fillColor": string },
+    "address": { "found": boolean, "text": string, "x": number, "y": number, "width": number, "height": number, "fontSize": number, "color": string, "fillColor": string }
+  },
+  "suggestedBrandingPositions": {
+    "square": {
+      "logo": { "x": number, "y": number, "width": number, "height": number, "isVisible": boolean },
+      "instituteName": { "x": number, "y": number, "fontSize": number, "color": string, "isVisible": boolean },
+      "phone": { "x": number, "y": number, "fontSize": number, "color": string, "isVisible": boolean },
+      "address": { "x": number, "y": number, "fontSize": number, "color": string, "isVisible": boolean }
+    },
+    "story": {
+      "logo": { "x": number, "y": number, "width": number, "height": number, "isVisible": boolean },
+      "instituteName": { "x": number, "y": number, "fontSize": number, "color": string, "isVisible": boolean },
+      "phone": { "x": number, "y": number, "fontSize": number, "color": string, "isVisible": boolean },
+      "address": { "x": number, "y": number, "fontSize": number, "color": string, "isVisible": boolean }
+    }
+  },
+  "inpaintBoxes": [
+    { "label": string, "x": number, "y": number, "width": number, "height": number, "fillColor": string }
+  ]
+}`;
+
+    let aiResult = null;
+    try {
+      const geminiResp = await callGeminiRaw({
+        prompt,
+        imageBase64: imageBuffer.toString("base64"),
+        imageMimeType: mimeType,
+        temperature: 0.1,
+      });
+
+      aiResult = extractJsonFromText(geminiResp);
+    } catch (aiErr) {
+      console.warn("[AI Vision] Gemini detect failed:", aiErr.message);
+    }
+
+    // Default fallback positions if AI unavailable or no branding found
+    const fallbackPositions = {
+      square: {
+        logo: { x: 6, y: 6, width: 18, height: 18, isVisible: true },
+        instituteName: { x: 26, y: 8, fontSize: 18, color: "#FFFFFF", isVisible: true },
+        phone: { x: 6, y: 88, fontSize: 14, color: "#F59E0B", isVisible: true },
+        address: { x: 6, y: 93, fontSize: 12, color: "#E2E8F0", isVisible: true },
+      },
+      story: {
+        logo: { x: 6, y: 5, width: 18, height: 12, isVisible: true },
+        instituteName: { x: 26, y: 6, fontSize: 20, color: "#FFFFFF", isVisible: true },
+        phone: { x: 6, y: 90, fontSize: 15, color: "#F59E0B", isVisible: true },
+        address: { x: 6, y: 94, fontSize: 12, color: "#E2E8F0", isVisible: true },
+      },
+    };
+
+    const finalPositions = aiResult?.suggestedBrandingPositions || fallbackPositions;
+    const detected = aiResult?.detected || {};
+    const inpaintBoxes = aiResult?.inpaintBoxes || [];
+
+    // Also populate inpaintBoxes from detected if empty
+    if (inpaintBoxes.length === 0) {
+      for (const [key, val] of Object.entries(detected)) {
+        if (val && val.found) {
+          inpaintBoxes.push({
+            label: key,
+            x: val.x,
+            y: val.y,
+            width: val.width,
+            height: val.height,
+            fillColor: val.fillColor || "#0F172A",
+          });
+        }
+      }
+    }
+
+    // 4. Inpaint / Clean the image using sharp
+    let cleanedBuffer = imageBuffer;
+    let cleanedImageUrl = originalUrl;
+
+    if (inpaintBoxes.length > 0) {
+      try {
+        const metadata = await sharp(imageBuffer).metadata();
+        const imgW = metadata.width || 1080;
+        const imgH = metadata.height || 1080;
+
+        // Composite inpaint patches over each detected box
+        const compositeOverlays = inpaintBoxes.map((box) => {
+          const left = Math.max(0, Math.round(((box.x - 0.5) / 100) * imgW));
+          const top = Math.max(0, Math.round(((box.y - 0.5) / 100) * imgH));
+          const w = Math.max(4, Math.min(imgW - left, Math.round(((box.width + 1.2) / 100) * imgW)));
+          const h = Math.max(4, Math.min(imgH - top, Math.round(((box.height + 1.2) / 100) * imgH)));
+          const fill = box.fillColor && box.fillColor.startsWith("#") ? box.fillColor : "#0F172A";
+
+          // Generate an SVG patch with subtle corner radius
+          const svgRect = Buffer.from(
+            `<svg width="${w}" height="${h}">
+              <rect width="${w}" height="${h}" rx="6" ry="6" fill="${fill}" />
+            </svg>`
+          );
+
+          return {
+            input: svgRect,
+            top,
+            left,
+          };
+        });
+
+        cleanedBuffer = await sharp(imageBuffer).composite(compositeOverlays).toBuffer();
+
+        // Upload cleaned buffer to Cloudinary
+        const cleanedB64 = `data:${mimeType};base64,${cleanedBuffer.toString("base64")}`;
+        const upClean = await cloudinary.uploader.upload(cleanedB64, {
+          resource_type: "image",
+          folder: "marketing_posters_ai_cleaned",
+        });
+        cleanedImageUrl = upClean.secure_url || upClean.url || originalUrl;
+      } catch (inpaintErr) {
+        console.warn("[Sharp inpaint error]:", inpaintErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      cleanedImageUrl,
+      originalImageUrl: originalUrl || cleanedImageUrl,
+      detected,
+      inpaintBoxes,
+      brandingPositions: finalPositions,
+      message: `AI detected and cleaned ${inpaintBoxes.length} branding zones (logo, phone, institute name, address).`,
+    });
+  } catch (error) {
+    console.error("aiDetectAndCleanBrandingAdmin error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

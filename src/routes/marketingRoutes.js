@@ -10,6 +10,7 @@ import {
   updateTemplateAdmin,
   deleteTemplateAdmin,
   getMarketingStatsAdmin,
+  aiDetectAndCleanBrandingAdmin,
 } from "../controllers/marketingController.js";
 
 const upload = multer({
@@ -34,5 +35,6 @@ router.post("/admin/templates", protect, superAdminOnly, posterUpload, createTem
 router.put("/admin/templates/:id", protect, superAdminOnly, posterUpload, updateTemplateAdmin);
 router.delete("/admin/templates/:id", protect, superAdminOnly, deleteTemplateAdmin);
 router.get("/admin/stats", protect, superAdminOnly, getMarketingStatsAdmin);
+router.post("/admin/ai-detect-and-clean", protect, superAdminOnly, posterUpload, aiDetectAndCleanBrandingAdmin);
 
 export default router;
