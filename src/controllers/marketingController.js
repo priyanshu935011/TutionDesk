@@ -12,6 +12,7 @@ const DEFAULT_SEED_TEMPLATES = [
     imageUrl: "https://images.unsplash.com/photo-1605647540924-852290f6b0d5?auto=format&fit=crop&w=1200&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1605647540924-852290f6b0d5?auto=format&fit=crop&w=400&q=80",
     priority: 10,
+    isActive: true,
     brandingConfig: {
       preset: "bottom_strip",
       backgroundColor: "#180828",
@@ -31,6 +32,7 @@ const DEFAULT_SEED_TEMPLATES = [
     imageUrl: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1200&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=400&q=80",
     priority: 9,
+    isActive: true,
     brandingConfig: {
       preset: "bottom_strip",
       backgroundColor: "#0F172A",
@@ -50,6 +52,7 @@ const DEFAULT_SEED_TEMPLATES = [
     imageUrl: "https://images.unsplash.com/photo-1532375810709-75b1da00537c?auto=format&fit=crop&w=1200&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1532375810709-75b1da00537c?auto=format&fit=crop&w=400&q=80",
     priority: 8,
+    isActive: true,
     brandingConfig: {
       preset: "bottom_strip",
       backgroundColor: "#064E3B",
@@ -69,6 +72,7 @@ const DEFAULT_SEED_TEMPLATES = [
     imageUrl: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=1200&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=400&q=80",
     priority: 7,
+    isActive: true,
     brandingConfig: {
       preset: "bottom_strip",
       backgroundColor: "#1E293B",
@@ -88,6 +92,7 @@ const DEFAULT_SEED_TEMPLATES = [
     imageUrl: "https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=1200&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1577495508048-b635879837f1?auto=format&fit=crop&w=400&q=80",
     priority: 6,
+    isActive: true,
     brandingConfig: {
       preset: "bottom_strip",
       backgroundColor: "#312E81",
@@ -107,6 +112,7 @@ const DEFAULT_SEED_TEMPLATES = [
     imageUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=1200&q=80",
     thumbnailUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=400&q=80",
     priority: 5,
+    isActive: true,
     brandingConfig: {
       preset: "bottom_strip",
       backgroundColor: "#1E1B4B",
@@ -123,10 +129,18 @@ const DEFAULT_SEED_TEMPLATES = [
 
 const ensureSeedTemplates = async () => {
   try {
-    const count = await MarketingTemplate.countDocuments();
-    if (count === 0) {
-      await MarketingTemplate.insertMany(DEFAULT_SEED_TEMPLATES);
+    const all = await MarketingTemplate.find();
+    if (!all || all.length === 0) {
+      const seeded = DEFAULT_SEED_TEMPLATES.map((t) => ({ ...t, isActive: true }));
+      await MarketingTemplate.insertMany(seeded);
       console.log("[Marketing] Seeded initial default marketing templates.");
+    } else {
+      // Ensure all templates have isActive explicitly true if not set to false
+      for (const t of all) {
+        if (t.isActive === undefined || t.isActive === null) {
+          await MarketingTemplate.findByIdAndUpdate(t._id || t.id, { isActive: true });
+        }
+      }
     }
   } catch (err) {
     console.warn("[Marketing] Seed templates skipped or failed:", err.message);
@@ -144,37 +158,32 @@ export const getMarketingTemplates = async (req, res) => {
     const { category, aspectRatio, search } = req.query;
     const now = new Date();
 
-    const query = { isActive: true };
+    const rawTemplates = await MarketingTemplate.find();
+    let templates = (rawTemplates || []).map((t) => (t && typeof t.toObject === "function" ? t.toObject() : t));
+
+    // Sort by priority desc, createdAt desc
+    templates.sort((a, b) => (b.priority || 0) - (a.priority || 0) || new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+    // Filter active (treat undefined/null as true by default so all templates are visible)
+    templates = templates.filter((t) => t.isActive !== false && t.isActive !== "false");
 
     if (category && category !== "all") {
-      query.category = category;
+      templates = templates.filter((t) => (t.category || "").toLowerCase() === category.toLowerCase());
     }
     if (aspectRatio && aspectRatio !== "all") {
-      query.aspectRatio = aspectRatio;
+      templates = templates.filter((t) => t.aspectRatio === aspectRatio);
     }
     if (search && search.trim()) {
-      query.title = { $regex: search.trim(), $options: "i" };
+      const q = search.trim().toLowerCase();
+      templates = templates.filter((t) => (t.title || "").toLowerCase().includes(q));
     }
 
     // Date range filter: include if startDate <= now and (endDate >= now or endDate is null)
-    query.$and = [
-      {
-        $or: [
-          { startDate: null },
-          { startDate: { $lte: now } },
-        ],
-      },
-      {
-        $or: [
-          { endDate: null },
-          { endDate: { $gte: now } },
-        ],
-      },
-    ];
-
-    const templates = await MarketingTemplate.find(query)
-      .sort({ priority: -1, createdAt: -1 })
-      .lean();
+    templates = templates.filter((t) => {
+      if (t.startDate && new Date(t.startDate) > now) return false;
+      if (t.endDate && new Date(t.endDate) < now) return false;
+      return true;
+    });
 
     // Fetch Institute info for caption interpolation and dynamic branding preview
     let instituteInfo = {
@@ -271,27 +280,32 @@ export const getAllTemplatesAdmin = async (req, res) => {
     await ensureSeedTemplates();
 
     const { category, search, page = 1, limit = 50 } = req.query;
-    const query = {};
+    const rawTemplates = await MarketingTemplate.find();
+    let templates = (rawTemplates || []).map((t) => (t && typeof t.toObject === "function" ? t.toObject() : t));
+
+    // Sort by priority desc, createdAt desc
+    templates.sort((a, b) => (b.priority || 0) - (a.priority || 0) || new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
     if (category && category !== "all") {
-      query.category = category;
+      templates = templates.filter((t) => (t.category || "").toLowerCase() === category.toLowerCase());
     }
     if (search && search.trim()) {
-      query.title = { $regex: search.trim(), $options: "i" };
+      const q = search.trim().toLowerCase();
+      templates = templates.filter((t) => (t.title || "").toLowerCase().includes(q));
     }
 
-    const skip = (Math.max(1, parseInt(page, 10)) - 1) * parseInt(limit, 10);
-    const [templates, total] = await Promise.all([
-      MarketingTemplate.find(query).sort({ priority: -1, createdAt: -1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
-      MarketingTemplate.countDocuments(query),
-    ]);
+    const total = templates.length;
+    const p = Math.max(1, parseInt(page, 10));
+    const lim = Math.max(1, parseInt(limit, 10));
+    const skip = (p - 1) * lim;
+    const pagedTemplates = templates.slice(skip, skip + lim);
 
     return res.json({
       success: true,
-      templates,
+      templates: pagedTemplates,
       total,
-      page: parseInt(page, 10),
-      totalPages: Math.ceil(total / parseInt(limit, 10)) || 1,
+      page: p,
+      totalPages: Math.ceil(total / lim) || 1,
     });
   } catch (error) {
     console.error("getAllTemplatesAdmin error:", error);
@@ -408,6 +422,7 @@ export const updateTemplateAdmin = async (req, res) => {
       category,
       aspectRatio,
       imageUrl,
+      storyImageUrl,
       thumbnailUrl,
       brandingConfig,
       isActive,
