@@ -377,6 +377,11 @@ export const createTemplateAdmin = async (req, res) => {
       return res.status(400).json({ message: "Poster image URL or uploaded file is required." });
     }
 
+    // Ensure storyImageUrl is synced if aspectRatio is 9:16
+    if (aspectRatio === "9:16" && (!storyImageUrl || !storyImageUrl.trim())) {
+      storyImageUrl = imageUrl;
+    }
+
     if (typeof brandingConfig === "string") {
       try {
         brandingConfig = JSON.parse(brandingConfig);
@@ -487,7 +492,11 @@ export const updateTemplateAdmin = async (req, res) => {
       template.imageUrl = imageUrl.trim();
       if (!thumbnailUrl) template.thumbnailUrl = imageUrl.trim();
     }
-    if (storyImageUrl !== undefined) template.storyImageUrl = storyImageUrl.trim();
+    if (storyImageUrl !== undefined) {
+      template.storyImageUrl = storyImageUrl.trim();
+    } else if (template.aspectRatio === "9:16" && template.imageUrl && (!template.storyImageUrl || !template.storyImageUrl.trim())) {
+      template.storyImageUrl = template.imageUrl;
+    }
     if (thumbnailUrl !== undefined) template.thumbnailUrl = thumbnailUrl.trim();
 
     if (brandingConfig !== undefined) {
