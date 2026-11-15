@@ -875,3 +875,118 @@ export const deleteAdminMarketingMedia = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// POST /marketing/admin/ai-generate-poster
+export const aiGeneratePosterAdmin = async (req, res) => {
+  try {
+    const { prompt, category = "pamphlet", aspectRatio = "1:1", style = "modern" } = req.body;
+    if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+      return res.status(400).json({ success: false, message: "Text prompt is required for AI generation." });
+    }
+
+    // Determine dimensions based on aspect ratio
+    let width = 1024;
+    let height = 1024;
+    if (aspectRatio === "9:16") {
+      width = 720;
+      height = 1280;
+    } else if (aspectRatio === "4:5") {
+      width = 864;
+      height = 1080;
+    } else if (aspectRatio === "16:9") {
+      width = 1280;
+      height = 720;
+    }
+
+    const enhancedPrompt = `High resolution commercial marketing poster background, ${style} aesthetic, clean tuition coaching education theme, ${prompt.trim()}, vibrant colors, professional graphic design, 8k, photorealistic, clean composition without messy unreadable text`.trim();
+
+    // 1. Generate image using Pollinations AI (FLUX / SDXL engine)
+    const seed = Math.floor(Math.random() * 1000000);
+    const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(enhancedPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true&enhance=true`;
+
+    let finalImageUrl = pollinationsUrl;
+
+    // Fetch and persist to Cloudinary so it never expires
+    try {
+      const imgResp = await axios.get(pollinationsUrl, {
+        responseType: "arraybuffer",
+        timeout: 30000,
+      });
+
+      const buffer = Buffer.from(imgResp.data);
+      const b64 = `data:image/jpeg;base64,${buffer.toString("base64")}`;
+
+      const uploadResult = await cloudinary.uploader.upload(b64, {
+        folder: "marketing_ai_generated",
+        resource_type: "image",
+      });
+
+      if (uploadResult?.secure_url) {
+        finalImageUrl = uploadResult.secure_url;
+
+        // Also save to MarketingMedia repository
+        await MarketingMedia.create({
+          url: finalImageUrl,
+          filename: `AI_${category}_${Date.now()}`,
+          mimeType: "image/jpeg",
+          sizeBytes: buffer.length,
+          createdBy: req.user?.email || "super_admin",
+        }).catch(() => {});
+      }
+    } catch (fetchErr) {
+      console.warn("[aiGeneratePosterAdmin] Cloudinary persistence fallback to direct URL:", fetchErr.message);
+    }
+
+    // 2. Use Gemini to generate smart copy & headlines for the canvas elements
+    let aiCopy = {
+      title: prompt.trim().slice(0, 50),
+      heading: "ADMISSIONS OPEN",
+      subheading: "Comprehensive Coaching & Target Batches",
+      badge: "★ TOPPER RANK 1",
+      defaultCaption: `New batch announcement! Enroll today at {instituteName}. Quality coaching with proven results. Contact: {phone}`,
+    };
+
+    try {
+      const geminiPrompt = `You are an expert marketing graphic designer for coaching institutes, tuition centers, and schools.
+Given the user prompt: "${prompt}", category: "${category}", and style: "${style}".
+Generate catchy promotional text elements in JSON format:
+{
+  "title": "A short 3-6 word title for this template",
+  "heading": "Catchy 2-4 word main uppercase headline (e.g. ADMISSIONS OPEN 2026, CRASH COURSE BATCH)",
+  "subheading": "Informative 4-8 word subheadline describing courses or grades",
+  "badge": "Short badge sticker text (e.g. ★ UP TO 50% SCHOLARSHIP, LIMITED SEATS)",
+  "defaultCaption": "A compelling 1-2 sentence WhatsApp caption with placeholders {instituteName} and {phone}"
+}
+Return ONLY pure JSON.`;
+
+      const aiText = await callGeminiRaw({
+        prompt: geminiPrompt,
+        temperature: 0.3,
+      });
+
+      const parsed = extractJsonFromText(aiText);
+      if (parsed) {
+        aiCopy = {
+          title: parsed.title || aiCopy.title,
+          heading: parsed.heading || aiCopy.heading,
+          subheading: parsed.subheading || aiCopy.subheading,
+          badge: parsed.badge || aiCopy.badge,
+          defaultCaption: parsed.defaultCaption || aiCopy.defaultCaption,
+        };
+      }
+    } catch (geminiErr) {
+      console.warn("[aiGeneratePosterAdmin] Gemini copy generation fallback:", geminiErr.message);
+    }
+
+    return res.json({
+      success: true,
+      imageUrl: finalImageUrl,
+      copy: aiCopy,
+      aspectRatio,
+      category,
+    });
+  } catch (err) {
+    console.error("aiGeneratePosterAdmin error:", err);
+    return res.status(500).json({ success: false, message: err.message || "Failed to generate AI poster" });
+  }
+};

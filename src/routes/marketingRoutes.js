@@ -14,6 +14,7 @@ import {
   getAdminMarketingMedia,
   uploadAdminMarketingMedia,
   deleteAdminMarketingMedia,
+  aiGeneratePosterAdmin,
 } from "../controllers/marketingController.js";
 
 const upload = multer({
@@ -44,5 +45,8 @@ router.post("/admin/ai-detect-and-clean", protect, superAdminOnly, posterUpload,
 router.get("/admin/media", protect, superAdminOnly, getAdminMarketingMedia);
 router.post("/admin/media", protect, superAdminOnly, upload.single("file"), uploadAdminMarketingMedia);
 router.delete("/admin/media/:id", protect, superAdminOnly, deleteAdminMarketingMedia);
+
+// Super Admin AI Generation Endpoint
+router.post("/admin/ai-generate-poster", protect, superAdminOnly, aiGeneratePosterAdmin);
 
 export default router;
