@@ -1,6 +1,11 @@
 import express from "express";
 import multer from "multer";
 import {
+  getAdminStoragePacks,
+  updateAdminStoragePacks,
+  deleteAdminStoragePack,
+  getInstituteStoragePacks,
+  purchaseInstituteStoragePack,
   createInstitute,
   deleteInstitute,
   getAdminOverview,
@@ -182,6 +187,14 @@ router.get("/ai-settings", getAdminAiSettings);
 router.post("/ai-settings", updateAdminAiSettings);
 router.put("/ai-settings", updateAdminAiSettings);
 router.get("/festival-theme", getAdminFestivalTheme);
+
+// Storage Increase Packs Routes (Super Admin & Institute Topup)
+router.get("/storage-packs", getAdminStoragePacks);
+router.post("/storage-packs", updateAdminStoragePacks);
+router.put("/storage-packs", updateAdminStoragePacks);
+router.delete("/storage-packs/:id", deleteAdminStoragePack);
+router.get("/institute/storage-packs", getInstituteStoragePacks);
+router.post("/institute/storage-packs/purchase", purchaseInstituteStoragePack);
 router.post("/festival-theme", updateAdminFestivalTheme);
 router.put("/festival-theme", updateAdminFestivalTheme);
 router.post("/flush-cache", flushSystemCache);

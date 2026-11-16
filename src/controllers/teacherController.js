@@ -2166,7 +2166,7 @@ export const createTestResultsBulk = async (req, res) => {
 
 export const createHiredTeacher = async (req, res) => {
   try {
-    const { name, email, phone, password, salary, staffRole, assignedBatches } = req.body;
+    const { name, email, phone, password, salary, staffRole, assignedBatches, allowedFeatures } = req.body;
 
     if (req.user.role !== "institute_admin") {
       return res.status(403).json({ message: "Access denied. Only institute admins can add staff." });
@@ -2251,6 +2251,7 @@ export const createHiredTeacher = async (req, res) => {
       institute: instituteId,
       salary: Number(salary || 0),
       staffRole: staffRole ? String(staffRole).trim() : "Teacher",
+      allowedFeatures: Array.isArray(allowedFeatures) ? allowedFeatures : [],
       assignedBatches: batchIdList,
       aiAccessEnabled: isAiAccess,
     });
@@ -2261,6 +2262,7 @@ export const createHiredTeacher = async (req, res) => {
       ...(userMeta[tId] || {}),
       salary: Number(salary || 0),
       staffRole: staffRole ? String(staffRole).trim() : "Teacher",
+      allowedFeatures: Array.isArray(allowedFeatures) ? allowedFeatures : [],
       assignedBatches: batchIdList,
       aiAccessEnabled: isAiAccess,
     };
@@ -2288,6 +2290,7 @@ export const createHiredTeacher = async (req, res) => {
       phone: newTeacher.phone,
       role: newTeacher.role,
       staffRole: newTeacher.staffRole || "Teacher",
+      allowedFeatures: newTeacher.allowedFeatures || [],
       salary: Number(newTeacher.salary || 0),
       assignedBatches: batchIdList,
       aiAccessEnabled: isAiAccess,
@@ -2311,7 +2314,7 @@ export const getHiredTeachers = async (req, res) => {
     const teachers = await User.find({
       institute: instituteId,
       role: "teacher",
-    }).select("name email phone role createdAt aiAccessEnabled activity salary staffRole assignedBatches");
+    }).select("name email phone role createdAt aiAccessEnabled activity salary staffRole assignedBatches allowedFeatures");
 
     const userMeta = readUserMetadata();
 
@@ -2371,6 +2374,7 @@ export const getHiredTeachers = async (req, res) => {
         role: t.role,
         staffRole: roleVal,
         salary: salaryVal,
+        allowedFeatures: t.allowedFeatures || meta.allowedFeatures || [],
         assignedBatches: teacherBatches,
         assignedBatchIds: teacherBatches.map(b => b._id),
         todayAttendance: todayAtt ? todayAtt.status : "unmarked",
@@ -2519,7 +2523,7 @@ export const updateHiredTeacher = async (req, res) => {
       return res.status(403).json({ message: "Access denied. Only institute admins can edit staff." });
     }
 
-    const { name, email, phone, password, aiAccessEnabled, salary, staffRole, assignedBatches } = req.body;
+    const { name, email, phone, password, aiAccessEnabled, salary, staffRole, assignedBatches, allowedFeatures } = req.body;
     const instituteId = req.user.institute?._id || req.user.institute;
 
     const teacher = await User.findOne({
@@ -2567,6 +2571,9 @@ export const updateHiredTeacher = async (req, res) => {
     if (staffRole !== undefined) {
       teacher.staffRole = String(staffRole).trim();
     }
+    if (allowedFeatures !== undefined && Array.isArray(allowedFeatures)) {
+      teacher.allowedFeatures = allowedFeatures;
+    }
 
     const tId = String(teacher._id || teacher.id);
     const meta = readUserMetadata();
@@ -2574,6 +2581,7 @@ export const updateHiredTeacher = async (req, res) => {
       ...(meta[tId] || {}),
       salary: teacher.salary !== undefined ? teacher.salary : (meta[tId]?.salary || 0),
       staffRole: teacher.staffRole || meta[tId]?.staffRole || "Teacher",
+      allowedFeatures: teacher.allowedFeatures || meta[tId]?.allowedFeatures || [],
       aiAccessEnabled: teacher.aiAccessEnabled,
     };
 
@@ -2612,6 +2620,7 @@ export const updateHiredTeacher = async (req, res) => {
       phone: teacher.phone,
       role: teacher.role,
       staffRole: teacher.staffRole || meta[tId]?.staffRole || "Teacher",
+      allowedFeatures: teacher.allowedFeatures || meta[tId]?.allowedFeatures || [],
       salary: Number(teacher.salary !== undefined ? teacher.salary : (meta[tId]?.salary || 0)),
       assignedBatches: teacher.assignedBatches || meta[tId]?.assignedBatches || [],
       aiAccessEnabled: teacher.aiAccessEnabled,

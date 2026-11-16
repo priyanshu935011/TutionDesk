@@ -83,6 +83,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "Teacher",
     },
+    allowedFeatures: {
+      type: [String],
+      default: [],
+    },
     assignedBatches: [
       {
         type: mongoose.Schema.Types.ObjectId,

@@ -15,9 +15,14 @@ import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Role check middleware: only institute_admin can access lead management
+// Role check middleware: only institute_admin or authorized receptionist can access lead management
 const requireInstituteAdmin = (req, res, next) => {
   if (req.user && req.user.role === "teacher") {
+    const staffRole = (req.user.staffRole || "").toLowerCase();
+    const allowed = req.user.allowedFeatures || [];
+    if (staffRole === "receptionist" && (allowed.length === 0 || allowed.includes("leads") || allowed.includes("enquiries_leads"))) {
+      return next();
+    }
     return res.status(403).json({ message: "Access denied. Hired teachers cannot access lead management." });
   }
   next();

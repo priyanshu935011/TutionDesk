@@ -3239,3 +3239,211 @@ export const switchSuperAdminInstitute = async (req, res) => {
     return res.status(500).json({ message: "Failed to switch tuition: " + error.message });
   }
 };
+
+// ── Storage Increase Packs ──────────────────────────────────────────────
+export const DEFAULT_STORAGE_PACKS = [
+  // Monthly Packs
+  {
+    id: "pack_monthly_10gb",
+    name: "10 GB Storage Boost",
+    storageGb: 10,
+    price: 149,
+    billingCycle: "monthly",
+    description: "Additional 10 GB high-speed cloud storage for videos, PDFs & test series",
+    isActive: true,
+  },
+  {
+    id: "pack_monthly_25gb",
+    name: "25 GB Pro Storage Boost",
+    storageGb: 25,
+    price: 299,
+    billingCycle: "monthly",
+    description: "Additional 25 GB high-speed cloud storage for videos, PDFs & test series",
+    isActive: true,
+  },
+  {
+    id: "pack_monthly_50gb",
+    name: "50 GB Enterprise Boost",
+    storageGb: 50,
+    price: 499,
+    billingCycle: "monthly",
+    description: "Additional 50 GB high-speed cloud storage for videos, PDFs & test series",
+    isActive: true,
+  },
+  // Yearly Packs
+  {
+    id: "pack_yearly_25gb",
+    name: "25 GB Annual Storage Boost",
+    storageGb: 25,
+    price: 1499,
+    billingCycle: "yearly",
+    description: "1 Year additional 25 GB high-speed storage quota",
+    isActive: true,
+  },
+  {
+    id: "pack_yearly_50gb",
+    name: "50 GB Pro Annual Boost",
+    storageGb: 50,
+    price: 2499,
+    billingCycle: "yearly",
+    description: "1 Year additional 50 GB high-speed storage quota",
+    isActive: true,
+  },
+  {
+    id: "pack_yearly_100gb",
+    name: "100 GB Ultra Annual Boost",
+    storageGb: 100,
+    price: 4499,
+    billingCycle: "yearly",
+    description: "1 Year additional 100 GB ultra cloud capacity",
+    isActive: true,
+  },
+];
+
+export const getAdminStoragePacks = async (req, res) => {
+  try {
+    let setting = await SystemSetting.findOne({ key: "storage_packs" });
+    let packs = setting && Array.isArray(setting.value) && setting.value.length > 0
+      ? setting.value
+      : DEFAULT_STORAGE_PACKS;
+    return res.json({ success: true, packs });
+  } catch (error) {
+    console.error("getAdminStoragePacks error:", error);
+    return res.status(500).json({ message: "Failed to fetch storage packs" });
+  }
+};
+
+export const updateAdminStoragePacks = async (req, res) => {
+  try {
+    const { packs } = req.body;
+    if (!Array.isArray(packs)) {
+      return res.status(400).json({ message: "packs must be an array" });
+    }
+    let setting = await SystemSetting.findOne({ key: "storage_packs" });
+    if (setting) {
+      setting.value = packs;
+      if (typeof setting.markModified === "function") setting.markModified("value");
+      await setting.save();
+    } else {
+      setting = await SystemSetting.create({
+        key: "storage_packs",
+        value: packs,
+        description: "Configured cloud storage boost top-up packages",
+      });
+    }
+    return res.json({ success: true, packs: setting.value });
+  } catch (error) {
+    console.error("updateAdminStoragePacks error:", error);
+    return res.status(500).json({ message: "Failed to save storage packs" });
+  }
+};
+
+export const deleteAdminStoragePack = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let setting = await SystemSetting.findOne({ key: "storage_packs" });
+    let packs = setting && Array.isArray(setting.value) ? setting.value : DEFAULT_STORAGE_PACKS;
+    packs = packs.filter((p) => p.id !== id);
+    if (setting) {
+      setting.value = packs;
+      if (typeof setting.markModified === "function") setting.markModified("value");
+      await setting.save();
+    }
+    return res.json({ success: true, packs });
+  } catch (error) {
+    console.error("deleteAdminStoragePack error:", error);
+    return res.status(500).json({ message: "Failed to delete storage pack" });
+  }
+};
+
+export const getInstituteStoragePacks = async (req, res) => {
+  try {
+    // Resolve user institute plan
+    const rawInst = req.user?.institute;
+    let instituteId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
+    if (!instituteId) instituteId = req.user?._id;
+
+    let institute = null;
+    if (instituteId && isValidEntityId(String(instituteId))) {
+      institute = await Institute.findById(instituteId);
+    }
+
+    const subPlan = (institute?.subscriptionPlan || req.query.cycle || "monthly").toLowerCase();
+    const effectiveCycle = subPlan === "yearly" ? "yearly" : "monthly";
+
+    let setting = await SystemSetting.findOne({ key: "storage_packs" });
+    let allPacks = setting && Array.isArray(setting.value) && setting.value.length > 0
+      ? setting.value
+      : DEFAULT_STORAGE_PACKS;
+
+    // Filter strictly to the institute's billing cycle!
+    // If monthly -> show only monthly packages. If yearly -> show only yearly packages.
+    const filteredPacks = allPacks.filter((p) => {
+      const pCycle = (p.billingCycle || "monthly").toLowerCase();
+      const isActive = p.isActive !== false;
+      return isActive && pCycle === effectiveCycle;
+    });
+
+    return res.json({
+      success: true,
+      billingCycle: effectiveCycle,
+      subscriptionPlan: subPlan,
+      currentMaxStorageGb: institute?.maxVideoStorageGb || 50,
+      packs: filteredPacks,
+    });
+  } catch (error) {
+    console.error("getInstituteStoragePacks error:", error);
+    return res.status(500).json({ message: "Failed to fetch storage packs: " + error.message });
+  }
+};
+
+export const purchaseInstituteStoragePack = async (req, res) => {
+  try {
+    const { packId } = req.body;
+    if (!packId) {
+      return res.status(400).json({ message: "packId is required" });
+    }
+
+    const rawInst = req.user?.institute;
+    let instituteId = (rawInst && typeof rawInst === "object") ? (rawInst._id || rawInst.id) : rawInst;
+    if (!instituteId) instituteId = req.user?._id;
+
+    let institute = null;
+    if (instituteId && isValidEntityId(String(instituteId))) {
+      institute = await Institute.findById(instituteId);
+    }
+    if (!institute) {
+      return res.status(404).json({ message: "Institute not found" });
+    }
+
+    let setting = await SystemSetting.findOne({ key: "storage_packs" });
+    let allPacks = setting && Array.isArray(setting.value) && setting.value.length > 0
+      ? setting.value
+      : DEFAULT_STORAGE_PACKS;
+
+    const pack = allPacks.find((p) => p.id === packId);
+    if (!pack) {
+      return res.status(404).json({ message: "Storage pack not found" });
+    }
+
+    const addGb = Number(pack.storageGb || 0);
+    const prevGb = Number(institute.maxVideoStorageGb || 50);
+    const newGb = prevGb + addGb;
+
+    institute.maxVideoStorageGb = newGb;
+    await institute.save();
+
+    // Invalidate user dashboard cache
+    await invalidateUserDashboard(req);
+
+    return res.json({
+      success: true,
+      message: `Successfully upgraded storage quota by +${addGb} GB! New limit: ${newGb} GB.`,
+      addedGb: addGb,
+      maxVideoStorageGb: newGb,
+    });
+  } catch (error) {
+    console.error("purchaseInstituteStoragePack error:", error);
+    return res.status(500).json({ message: "Storage pack purchase failed: " + error.message });
+  }
+};
