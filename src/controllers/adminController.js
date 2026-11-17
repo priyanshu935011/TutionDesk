@@ -3364,7 +3364,7 @@ export const getInstituteStoragePacks = async (req, res) => {
     if (!instituteId) instituteId = req.user?._id;
 
     let institute = null;
-    if (instituteId && isValidEntityId(String(instituteId))) {
+    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
       institute = await Institute.findById(instituteId);
     }
 
@@ -3409,7 +3409,7 @@ export const purchaseInstituteStoragePack = async (req, res) => {
     if (!instituteId) instituteId = req.user?._id;
 
     let institute = null;
-    if (instituteId && isValidEntityId(String(instituteId))) {
+    if (instituteId && mongoose.Types.ObjectId.isValid(String(instituteId))) {
       institute = await Institute.findById(instituteId);
     }
     if (!institute) {
