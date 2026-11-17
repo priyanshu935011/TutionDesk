@@ -4175,6 +4175,20 @@ export const markNotificationRead = async (req, res) => {
 
 export const updateStudentFcmToken = async (req, res) => {
   try {
+    const isSuperAdmin =
+      req.user?.role === "super_admin" ||
+      req.user?.isSuperAdmin === true ||
+      req.user?.id === "super-admin" ||
+      req.user?._id === "super-admin";
+
+    if (isSuperAdmin) {
+      return res.status(200).json({
+        success: true,
+        message: "Super admin FCM token update skipped",
+        deviceCount: 0,
+      });
+    }
+
     const studentId = req.student?._id || req.student?.id || req.user?._id || req.user?.id;
     const { fcmToken } = req.body;
     if (!fcmToken || !String(fcmToken).trim()) {
@@ -4240,6 +4254,20 @@ export const updateStudentFcmToken = async (req, res) => {
  */
 export const unregisterStudentFcmToken = async (req, res) => {
   try {
+    const isSuperAdmin =
+      req.user?.role === "super_admin" ||
+      req.user?.isSuperAdmin === true ||
+      req.user?.id === "super-admin" ||
+      req.user?._id === "super-admin";
+
+    if (isSuperAdmin) {
+      return res.status(200).json({
+        success: true,
+        message: "Super admin FCM token unregister skipped",
+        deviceCount: 0,
+      });
+    }
+
     const studentId = req.student?._id || req.student?.id || req.user?._id || req.user?.id;
     const { fcmToken } = req.body;
     const cleanToken = fcmToken ? String(fcmToken).trim() : "";

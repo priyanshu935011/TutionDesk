@@ -398,6 +398,20 @@ export const testPushNotification = async (req, res) => {
  */
 export const registerUserFcmToken = async (req, res) => {
   try {
+    const isSuperAdmin =
+      req.user?.role === "super_admin" ||
+      req.user?.isSuperAdmin === true ||
+      req.user?.id === "super-admin" ||
+      req.user?._id === "super-admin";
+
+    if (isSuperAdmin) {
+      return res.status(200).json({
+        success: true,
+        message: "Super admin FCM token update skipped",
+        deviceCount: 0,
+      });
+    }
+
     const userId = req.user?._id || req.user?.id;
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -458,6 +472,20 @@ export const registerUserFcmToken = async (req, res) => {
  */
 export const unregisterUserFcmToken = async (req, res) => {
   try {
+    const isSuperAdmin =
+      req.user?.role === "super_admin" ||
+      req.user?.isSuperAdmin === true ||
+      req.user?.id === "super-admin" ||
+      req.user?._id === "super-admin";
+
+    if (isSuperAdmin) {
+      return res.status(200).json({
+        success: true,
+        message: "Super admin FCM token unregister skipped",
+        deviceCount: 0,
+      });
+    }
+
     const userId = req.user?._id || req.user?.id;
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
