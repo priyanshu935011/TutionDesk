@@ -268,6 +268,7 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
+    let myActiveBatches = [];
 
     if (isReceptionist(req.user)) {
       const canViewStudents = isReceptionistFeatureAllowed(req.user, "students");
@@ -279,7 +280,7 @@ export const getTeacherDashboard = async (req, res) => {
         batchQuery.user = null;
       }
     } else if (isHiredTeacher(req.user)) {
-      const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+      myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
       const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
       const myBatchObjectIds = myActiveBatches.map(b => b._id || b.id).filter(Boolean);
@@ -375,7 +376,7 @@ export const getTeacherDashboard = async (req, res) => {
     try {
       if (req.user.role === "teacher") {
         const allResults = await TestResult.find({ institute: instituteId }).lean();
-        const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
+        myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
         const myBatchIds = new Set();
         myActiveBatches.forEach((b) => {
           const bIdStr = String(b._id || b.id || "");
@@ -445,7 +446,9 @@ export const getTeacherDashboard = async (req, res) => {
 
     const summary = {
       totalStudents: students.length,
-      totalBatches: req.user.role === "teacher" ? myActiveBatches.length : (batches || []).filter((b) => b.status !== "archived").length,
+      totalBatches: req.user.role === "teacher"
+        ? (Array.isArray(myActiveBatches) && myActiveBatches.length > 0 ? myActiveBatches.length : (batches || []).filter((b) => b.status !== "archived").length)
+        : (batches || []).filter((b) => b.status !== "archived").length,
       totalQuizzes: 0,
       totalNotes: totalNotesCount,
       totalTestResults: totalTestResultsCount,

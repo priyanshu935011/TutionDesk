@@ -5,6 +5,7 @@ import TestResult from "../models/TestResult.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import { readUserMetadata } from "../utils/supabaseModel.js";
+import { getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
 

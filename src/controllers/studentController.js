@@ -13,6 +13,7 @@ import VideoRelease from "../models/VideoRelease.js";
 import VideoReleaseStudent from "../models/VideoReleaseStudent.js";
 import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
 import { supabase, readFallbackData, toValidUUID } from "../utils/supabaseModel.js";
+import { isTeacherOfBatch, getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
