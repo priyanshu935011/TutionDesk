@@ -10,7 +10,7 @@ import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
 import StaffAttendance from "../models/StaffAttendance.js";
 import StaffSalary from "../models/StaffSalary.js";
-import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher, getTodayISTDateString } from "../utils/staffPermissionHelper.js";
+import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher, isInstituteAdmin, getTodayISTDateString } from "../utils/staffPermissionHelper.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import cloudinary from "../utils/cloudinary.js";
 import {
@@ -228,10 +228,19 @@ export const getTeacherDashboard = async (req, res) => {
       try {
         const cachedData = await getCache(cacheKey);
         if (cachedData) {
-          if (institute) {
-            cachedData.institute = institute;
+          const cachedBatches = Array.isArray(cachedData.batches) ? cachedData.batches : [];
+          const cachedTotalBatches = Number(cachedData.summary?.totalBatches || 0);
+          const hasAssignedBatches = Array.isArray(req.user.assignedBatches) && req.user.assignedBatches.length > 0;
+
+          // If cached payload has 0 batches, but user is a hired teacher or has assigned batches, don't serve stale empty cache
+          const isStaleEmpty = cachedBatches.length === 0 && cachedTotalBatches === 0 && (isHiredTeacher(req.user) || hasAssignedBatches);
+
+          if (!isStaleEmpty) {
+            if (institute) {
+              cachedData.institute = institute;
+            }
+            return res.json(cachedData);
           }
-          return res.json(cachedData);
         }
       } catch (_) {}
     }
@@ -508,19 +517,6 @@ export const getTeacherDashboard = async (req, res) => {
       }
     }
 
-    const summary = {
-      totalStudents: students.length,
-      totalBatches: isHiredTeacher(req.user)
-        ? (Array.isArray(myActiveBatches) && myActiveBatches.length > 0 ? myActiveBatches.length : (batches || []).filter((b) => b.status !== "archived").length)
-        : (batches || []).filter((b) => b.status !== "archived").length,
-      totalQuizzes: 0,
-      totalNotes: totalNotesCount,
-      totalTestResults: totalTestResultsCount,
-      liveQuiz: null,
-      totalCollectedFees: isInstituteAdmin(req.user) ? totalCollectedFees : undefined,
-      totalPendingFees: isInstituteAdmin(req.user) ? totalPendingFees : undefined,
-    };
-
     const processedBatches = (batches || []).map((batch) => {
       const bIdStr = String(batch._id || batch.id);
       const bNameStr = String(batch.name || "").trim().toLowerCase();
@@ -551,6 +547,26 @@ export const getTeacherDashboard = async (req, res) => {
       };
     });
 
+    const activeProcessedBatches = processedBatches.filter((b) => b.status !== "archived");
+    const activeBatchCount = activeProcessedBatches.length > 0
+      ? activeProcessedBatches.length
+      : (Array.isArray(myActiveBatches) && myActiveBatches.length > 0
+          ? myActiveBatches.length
+          : (batches || []).filter((b) => b.status !== "archived").length);
+
+    const summary = {
+      totalStudents: students.length,
+      totalBatches: isHiredTeacher(req.user)
+        ? activeBatchCount
+        : (batches || []).filter((b) => b.status !== "archived").length,
+      totalQuizzes: 0,
+      totalNotes: totalNotesCount,
+      totalTestResults: totalTestResultsCount,
+      liveQuiz: null,
+      totalCollectedFees: isInstituteAdmin(req.user) ? totalCollectedFees : undefined,
+      totalPendingFees: isInstituteAdmin(req.user) ? totalPendingFees : undefined,
+    };
+
     const responsePayload = {
       summary,
       students: [],
@@ -568,7 +584,7 @@ export const getTeacherDashboard = async (req, res) => {
       diagnostics: req.query.debug === "true" ? steps : undefined,
     };
 
-    await setCache(cacheKey, responsePayload, 86400).catch(() => {});
+    await setCache(cacheKey, responsePayload, 300).catch(() => {});
 
     return res.json(responsePayload);
   } catch (error) {
