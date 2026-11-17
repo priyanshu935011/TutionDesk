@@ -9,6 +9,7 @@ import {
   createInstitute,
   deleteInstitute,
   getAdminOverview,
+  getActiveTodayUsers,
   getInstituteDetail,
   getUptimeOverview,
   renewInstituteSubscription,
@@ -114,6 +115,7 @@ router.post("/switch-staff/:id", switchSuperAdminStaff);
 router.post("/switch-student/:id", switchSuperAdminStudent);
 
 router.get("/overview", getAdminOverview);
+router.get("/active-today-users", getActiveTodayUsers);
 router.get("/uptime", getUptimeOverview);
 router.get("/system-logs", getSystemLogs);
 router.get("/ai-harvest-logs", getAiHarvestLogs);

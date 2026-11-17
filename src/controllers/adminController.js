@@ -3613,3 +3613,174 @@ export const purchaseInstituteStoragePack = async (req, res) => {
     return res.status(500).json({ message: "Storage pack purchase failed: " + error.message });
   }
 };
+
+/**
+ * Get list of all users active today, categorized by teachers, staff, and students
+ */
+export const getActiveTodayUsers = async (req, res) => {
+  try {
+    const adminEmails = await getAdminEmails();
+
+    // Start of today in IST (UTC+5:30) and local midnight
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istNow = new Date(now.getTime() + istOffset);
+    istNow.setUTCHours(0, 0, 0, 0);
+    const startOfTodayIST = new Date(istNow.getTime() - istOffset);
+
+    const localStartOfToday = new Date();
+    localStartOfToday.setHours(0, 0, 0, 0);
+
+    const startThreshold = startOfTodayIST < localStartOfToday ? startOfTodayIST : localStartOfToday;
+
+    // Load institutes map for quick O(1) lookup
+    const allInstitutes = await Institute.find().select("_id name adminUser isDemoAccount adminEmail").lean();
+    const instNameMap = {};
+    const instByAdminUser = {};
+    const demoAdminIds = new Set();
+    const demoInstIds = new Set();
+
+    for (const inst of allInstitutes) {
+      const isDemo = Boolean(inst.isDemoAccount) || (inst.adminEmail && inst.adminEmail.toLowerCase().includes("demo"));
+      const instId = String(inst._id);
+      instNameMap[instId] = inst.name || "ClassTech Institute";
+      if (inst.adminUser) {
+        const adminId = String(inst.adminUser);
+        instByAdminUser[adminId] = inst.name || "ClassTech Institute";
+        if (isDemo) demoAdminIds.add(adminId);
+      }
+      if (isDemo) demoInstIds.add(instId);
+    }
+
+    // 1. Fetch active Users (Teachers & Staff)
+    const activeUsers = await User.find({
+      lastActiveAt: { $gte: startThreshold },
+      isDemoAccount: { $ne: true },
+      email: { $nin: adminEmails },
+    })
+      .select("_id id name email phone role staffRole institute parentAdmin lastActiveAt createdAt")
+      .sort({ lastActiveAt: -1 })
+      .lean();
+
+    // 2. Fetch active Students
+    const activeStudents = await Student.find({
+      lastActiveAt: { $gte: startThreshold },
+      email: { $nin: adminEmails },
+      isDemoAccount: { $ne: true },
+    })
+      .select("_id id name email phone enrollmentNumber batch batches user lastActiveAt createdAt")
+      .populate("batch", "name")
+      .populate("batches", "name")
+      .sort({ lastActiveAt: -1 })
+      .lean();
+
+    const teachers = [];
+    const staff = [];
+
+    for (const u of activeUsers) {
+      if (u.role === "super_admin" || u.isSuperAdmin) continue;
+
+      const instId = u.institute ? String(u.institute._id || u.institute) : null;
+      if (instId && demoInstIds.has(instId)) continue;
+      if (u.parentAdmin && demoAdminIds.has(String(u.parentAdmin))) continue;
+
+      const roleStr = String(u.role || "").toLowerCase().trim();
+      const staffRoleStr = String(u.staffRole || "").toLowerCase().trim();
+
+      const isTeacher =
+        roleStr === "teacher" ||
+        staffRoleStr === "teacher" ||
+        (roleStr === "staff" && staffRoleStr !== "receptionist");
+
+      const instituteName =
+        (instId && instNameMap[instId]) ||
+        (u.parentAdmin && (instByAdminUser[String(u.parentAdmin)] || instNameMap[String(u.parentAdmin)])) ||
+        (instByAdminUser[String(u._id || u.id)]) ||
+        "Direct / Independent";
+
+      let displayRole = "Teacher";
+      if (!isTeacher) {
+        if (staffRoleStr === "receptionist" || roleStr === "receptionist") {
+          displayRole = "Receptionist";
+        } else if (roleStr === "institute_admin") {
+          displayRole = "Institute Admin";
+        } else if (roleStr) {
+          displayRole = roleStr.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        } else {
+          displayRole = "Staff";
+        }
+      }
+
+      const item = {
+        id: String(u._id || u.id),
+        name: u.name || "Unnamed",
+        email: u.email || "",
+        phone: u.phone || "",
+        role: u.role,
+        staffRole: u.staffRole,
+        displayRole,
+        instituteName,
+        lastActiveAt: u.lastActiveAt,
+        createdAt: u.createdAt,
+      };
+
+      if (isTeacher) {
+        teachers.push(item);
+      } else {
+        staff.push(item);
+      }
+    }
+
+    // Deduplicate students by enrollmentNumber / id
+    const studentMap = new Map();
+    for (const s of activeStudents) {
+      if (s.user && demoAdminIds.has(String(s.user))) continue;
+
+      const key = s.enrollmentNumber || String(s.phone || s.email || s._id || s.id);
+      if (studentMap.has(key)) {
+        const existing = studentMap.get(key);
+        if (new Date(s.lastActiveAt) > new Date(existing.lastActiveAt)) {
+          studentMap.set(key, s);
+        }
+      } else {
+        studentMap.set(key, s);
+      }
+    }
+
+    const students = Array.from(studentMap.values()).map((s) => {
+      const instName = instByAdminUser[String(s.user)] || "ClassTech Institute";
+      const batchName =
+        s.batch?.name ||
+        (Array.isArray(s.batches) && s.batches[0]?.name) ||
+        "General Batch";
+
+      return {
+        id: String(s._id || s.id),
+        name: s.name || "Unnamed Student",
+        email: s.email || "",
+        phone: s.phone || "",
+        enrollmentNumber: s.enrollmentNumber || "-",
+        batchName,
+        instituteName: instName,
+        lastActiveAt: s.lastActiveAt,
+        createdAt: s.createdAt,
+      };
+    });
+
+    return res.json({
+      success: true,
+      summary: {
+        total: teachers.length + staff.length + students.length,
+        teachersCount: teachers.length,
+        staffCount: staff.length,
+        studentsCount: students.length,
+      },
+      teachers,
+      staff,
+      students,
+    });
+  } catch (error) {
+    console.error("getActiveTodayUsers error:", error);
+    return res.status(500).json({ success: false, message: "Could not fetch active users list", error: error.message });
+  }
+};
