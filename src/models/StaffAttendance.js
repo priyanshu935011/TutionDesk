@@ -43,6 +43,8 @@ const staffAttendanceSchema = new mongoose.Schema(
   }
 );
 
+staffAttendanceSchema.index({ institute: 1, staff: 1, date: 1 }, { unique: true });
+
 const StaffAttendance = mongoose.model("StaffAttendance", staffAttendanceSchema);
 
 export default StaffAttendance;

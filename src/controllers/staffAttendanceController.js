@@ -1,18 +1,13 @@
 import StaffAttendance from "../models/StaffAttendance.js";
 import User from "../models/User.js";
+import { getTodayISTDateString, isReceptionist } from "../utils/staffPermissionHelper.js";
 
 // Helper for Indian today's date formatted as YYYY-MM-DD
-export const getTodayDateString = () => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+export const getTodayDateString = getTodayISTDateString;
 
 export const markStaffAttendance = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
       return res.status(403).json({ message: "Access denied. Only institute admins can mark staff attendance." });
     }
 
@@ -27,11 +22,19 @@ export const markStaffAttendance = async (req, res) => {
     }
 
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
-    const targetDate = date ? String(date).split("T")[0] : getTodayDateString();
+    let targetDate = date ? String(date).split("T")[0].trim() : getTodayDateString();
+    if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(targetDate)) {
+      targetDate = getTodayDateString();
+    }
 
-    const staffUser = await User.findById(staffId);
+    // Verify staff exists AND belongs to the current institute (strict IDOR protection)
+    const staffUser = await User.findOne({
+      _id: staffId,
+      institute: instituteId,
+      role: { $in: ["teacher", "receptionist"] },
+    });
     if (!staffUser) {
-      return res.status(404).json({ message: "Staff member not found." });
+      return res.status(404).json({ message: "Staff member not found in your institute." });
     }
 
     const attendance = await StaffAttendance.findOneAndUpdate(
@@ -67,9 +70,19 @@ export const getStaffAttendanceHistory = async (req, res) => {
     const { staffId } = req.params;
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
 
-    // A hired teacher can view their own, an admin can view any
-    if (req.user.role === "teacher" && String(req.user._id) !== String(staffId)) {
+    // A hired staff member can view their own, an admin can view any
+    const isStaff = req.user.role === "teacher" || isReceptionist(req.user);
+    if (isStaff && String(req.user._id) !== String(staffId)) {
       return res.status(403).json({ message: "Access denied." });
+    }
+
+    // Tenant check: ensure staffId belongs to this institute
+    const staffUser = await User.findOne({
+      _id: staffId,
+      institute: instituteId,
+    });
+    if (!staffUser && !isStaff) {
+      return res.status(404).json({ message: "Staff member not found in your institute." });
     }
 
     const query = {
@@ -78,7 +91,11 @@ export const getStaffAttendanceHistory = async (req, res) => {
     };
 
     if (req.query.month) {
-      query.date = { $regex: `^${String(req.query.month).trim()}` };
+      const cleanMonth = String(req.query.month).trim();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(cleanMonth)) {
+        return res.status(400).json({ message: "Invalid month format. Expected YYYY-MM." });
+      }
+      query.date = { $regex: `^${cleanMonth}` };
     }
 
     const records = await StaffAttendance.find(query).sort({ date: -1 });
@@ -123,7 +140,11 @@ export const getMyStaffAttendance = async (req, res) => {
     };
 
     if (req.query.month) {
-      query.date = { $regex: `^${String(req.query.month).trim()}` };
+      const cleanMonth = String(req.query.month).trim();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(cleanMonth)) {
+        return res.status(400).json({ message: "Invalid month format. Expected YYYY-MM." });
+      }
+      query.date = { $regex: `^${cleanMonth}` };
     }
 
     const records = await StaffAttendance.find(query).sort({ date: -1 });

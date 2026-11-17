@@ -870,7 +870,7 @@ export const getUptimeOverview = async (req, res) => {
 export const getAdminTeachers = async (req, res) => {
   try {
     const adminEmails = await getAdminEmails();
-    const teachers = await User.find({ role: "teacher" })
+    const teachers = await User.find({ role: { $in: ["teacher", "receptionist"] } })
       .populate("institute", "name")
       .sort({ lastActiveAt: -1, createdAt: -1 });
 
@@ -954,7 +954,7 @@ export const getAdminStudents = async (req, res) => {
 export const updateAdminTeacher = async (req, res) => {
   try {
     const { name, email, password } = req.body;
-    const teacher = await User.findOne({ _id: req.params.id, role: "teacher" });
+    const teacher = await User.findOne({ _id: req.params.id, role: { $in: ["teacher", "receptionist"] } });
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
     }
@@ -984,7 +984,7 @@ export const updateAdminTeacher = async (req, res) => {
 
 export const deleteAdminTeacher = async (req, res) => {
   try {
-    const teacher = await User.findOneAndDelete({ _id: req.params.id, role: "teacher" });
+    const teacher = await User.findOneAndDelete({ _id: req.params.id, role: { $in: ["teacher", "receptionist"] } });
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
     }
@@ -1115,7 +1115,7 @@ export const getDemoAccounts = async (req, res) => {
     const demoAccounts = await Promise.all(
       demoInstitutes.map(async (inst) => {
         const adminUser = inst.adminUser ? await User.findById(inst.adminUser).select("_id email name role") : null;
-        const teachers = await User.find({ institute: inst._id, role: "teacher" }).select("_id name email");
+        const teachers = await User.find({ institute: inst._id, role: { $in: ["teacher", "receptionist"] } }).select("_id name email");
         const students = await Student.find({ user: inst.adminUser }).select("_id name phone email enrollmentNumber");
         return {
           institute: inst,
@@ -1304,7 +1304,7 @@ export const getInstituteFullAnalytics = async (req, res) => {
     const adminUser = institute.adminUser ? await User.findById(institute.adminUser).select("_id email name role lastActiveAt createdAt") : null;
     
     // Find all teachers under this institute
-    const teachers = await User.find({ institute: institute._id, role: "teacher" }).select("_id name email lastActiveAt createdAt");
+    const teachers = await User.find({ institute: institute._id, role: { $in: ["teacher", "receptionist"] } }).select("_id name email lastActiveAt createdAt");
 
     // Find all batches under this institute
     const batches = await Batch.find({ user: institute.adminUser }).select("_id name scheduleDays startTime endTime teacher");
@@ -3253,7 +3253,7 @@ export const switchSuperAdminStaff = async (req, res) => {
       staff = await User.findById(id);
     }
     if (!staff) {
-      staff = await User.findOne({ _id: id, role: "teacher" });
+      staff = await User.findOne({ _id: id, role: { $in: ["teacher", "receptionist"] } });
     }
     if (!staff) {
       return res.status(404).json({ message: "Staff account not found." });

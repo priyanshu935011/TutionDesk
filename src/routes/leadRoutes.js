@@ -12,18 +12,29 @@ import {
   deleteLeadForm,
 } from "../controllers/leadController.js";
 import protect from "../middleware/authMiddleware.js";
+import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
 
 const router = express.Router();
 
-// Role check middleware: only institute_admin or authorized receptionist can access lead management
-const requireInstituteAdmin = (req, res, next) => {
-  if (req.user && req.user.role === "teacher") {
-    const staffRole = (req.user.staffRole || "").toLowerCase();
-    const allowed = req.user.allowedFeatures || [];
-    if (staffRole === "receptionist" && (allowed.length === 0 || allowed.includes("leads") || allowed.includes("enquiries_leads"))) {
-      return next();
-    }
+// Role check middleware: institute_admin, or authorized receptionist with "leads" feature allowed
+const requireLeadAccess = (req, res, next) => {
+  if (isHiredTeacher(req.user)) {
     return res.status(403).json({ message: "Access denied. Hired teachers cannot access lead management." });
+  }
+
+  if (isReceptionist(req.user)) {
+    if (!isReceptionistFeatureAllowed(req.user, "leads")) {
+      return res.status(403).json({ message: "Access denied. Enquiries & Leads feature is not enabled for your account." });
+    }
+  }
+
+  next();
+};
+
+// Admin-only middleware for destructive or configuration operations (e.g. API keys, deleting forms)
+const requireInstituteAdminOnly = (req, res, next) => {
+  if (req.user && (req.user.role === "teacher" || isReceptionist(req.user))) {
+    return res.status(403).json({ message: "Access denied. Only institute administrators can manage API keys and delete forms." });
   }
   next();
 };
@@ -33,18 +44,21 @@ router.post("/submit", submitLead);
 
 // Protected endpoints for dashboard lead management
 router.use(protect);
-router.use(requireInstituteAdmin);
+router.use(requireLeadAccess);
+
 router.get("/", getLeads);
-router.get("/api-key", getLeadApiKey);
-router.post("/api-key/regenerate", regenerateLeadApiKey);
+router.route("/:id").put(updateLead).delete(deleteLead);
 
 router.route("/forms")
   .get(getLeadForms)
   .post(createLeadForm);
+
 router.route("/forms/:id")
   .put(updateLeadForm)
-  .delete(deleteLeadForm);
+  .delete(requireInstituteAdminOnly, deleteLeadForm);
 
-router.route("/:id").put(updateLead).delete(deleteLead);
+// Sensitive API key management is strictly institute admin only
+router.get("/api-key", requireInstituteAdminOnly, getLeadApiKey);
+router.post("/api-key/regenerate", requireInstituteAdminOnly, regenerateLeadApiKey);
 
 export default router;

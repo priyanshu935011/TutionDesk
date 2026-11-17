@@ -9,6 +9,8 @@ import Student from "../models/Student.js";
 import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
 import StaffAttendance from "../models/StaffAttendance.js";
+import StaffSalary from "../models/StaffSalary.js";
+import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher, getTodayISTDateString } from "../utils/staffPermissionHelper.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import cloudinary from "../utils/cloudinary.js";
 import {
@@ -258,7 +260,7 @@ export const getTeacherDashboard = async (req, res) => {
       } catch (_) {}
     }
 
-    const ownerId = req.user.role === "teacher" ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
+    const ownerId = (req.user.role === "teacher" || isReceptionist(req.user)) ? (institute?.adminUser || rawInst?.adminUser || req.user._id) : req.user._id;
     const rawUserIds = [
       ownerId,
       req.user._id,
@@ -291,7 +293,16 @@ export const getTeacherDashboard = async (req, res) => {
 
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
 
-    if (req.user.role === "teacher") {
+    if (isReceptionist(req.user)) {
+      const canViewStudents = isReceptionistFeatureAllowed(req.user, "students");
+      const canViewBatches = isReceptionistFeatureAllowed(req.user, "batches");
+      if (!canViewStudents) {
+        studentQuery.batch = null;
+      }
+      if (!canViewBatches) {
+        batchQuery.user = null;
+      }
+    } else if (isHiredTeacher(req.user)) {
       const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
       const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
@@ -2199,30 +2210,25 @@ export const createHiredTeacher = async (req, res) => {
 
     const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
 
-    // Fetch active teachers in this institute to do exact duplicate checks
-    const existingTeachers = await User.find({
-      institute: instituteId,
-      role: "teacher",
-    });
-
+    // Global duplicate checks to guarantee unique login identities
     if (cleanEmail) {
-      const duplicateEmail = existingTeachers.find(
-        (t) => (t.email || "").toLowerCase().trim() === cleanEmail
-      );
-      if (duplicateEmail) {
-        return res.status(400).json({ message: "A staff member with this email already exists." });
+      const duplicateUser = await User.findOne({ email: cleanEmail });
+      if (duplicateUser) {
+        return res.status(400).json({ message: "A user with this email already exists." });
       }
     }
 
     if (cleanPhone && last10.length >= 10) {
-      const duplicatePhone = existingTeachers.find((t) => {
-        const rawP = (t.phone || "").replace(/\D/g, "");
-        if (!rawP) return false;
-        const tLast10 = rawP.length >= 10 ? rawP.slice(-10) : rawP;
-        return tLast10.length >= 10 && tLast10 === last10;
+      const duplicatePhoneUser = await User.findOne({
+        $or: [
+          { phone: cleanPhone },
+          { phone: last10 },
+          { phone: `+91${last10}` },
+          { phone: `91${last10}` },
+        ]
       });
-      if (duplicatePhone) {
-        return res.status(400).json({ message: "A staff member with this phone number already exists in your institute." });
+      if (duplicatePhoneUser) {
+        return res.status(400).json({ message: "A user with this phone number already exists." });
       }
     }
 
@@ -2240,19 +2246,45 @@ export const createHiredTeacher = async (req, res) => {
       ? assignedBatches.map(b => String(b._id || b)).filter(Boolean)
       : [];
 
+    // Verify batches belong to this institute (prevent cross-tenant IDOR)
+    const validBatches = batchIdList.length > 0
+      ? await Batch.find({
+          _id: { $in: batchIdList },
+          user: { $in: [instituteId, req.user._id, institute?.adminUser].filter(Boolean) }
+        }).select("_id teacher")
+      : [];
+    const validBatchIds = validBatches.map(b => String(b._id));
+
+    // Remove these batches from any previously assigned teachers
+    const prevTeacherIds = Array.from(new Set(validBatches.map(b => b.teacher ? String(b.teacher._id || b.teacher) : null).filter(Boolean)));
+    if (prevTeacherIds.length > 0) {
+      await User.updateMany(
+        { _id: { $in: prevTeacherIds } },
+        { $pull: { assignedBatches: { $in: validBatchIds } } }
+      );
+      for (const ptId of prevTeacherIds) {
+        await clearCachePattern(`teacher:dashboard:${ptId}`);
+        await clearCachePattern(`teacher:students:${ptId}*`);
+      }
+    }
+
+    const isRec = staffRole && String(staffRole).toLowerCase().trim() === "receptionist";
+    const assignedRole = isRec ? "receptionist" : "teacher";
+    const assignedStaffRole = isRec ? "Receptionist" : (staffRole ? String(staffRole).trim() : "Teacher");
+
     const hashedPassword = await bcrypt.hash(password, 10);
-    const isAiAccess = req.body.aiAccessEnabled === true || req.body.aiAccessEnabled === "true"; // Defaults to false
+    const isAiAccess = req.body.aiAccessEnabled === true || req.body.aiAccessEnabled === "true";
     const newTeacher = await User.create({
       name: name.trim(),
       email: finalEmail,
       phone: cleanPhone,
       password: hashedPassword,
-      role: "teacher",
+      role: assignedRole,
       institute: instituteId,
       salary: Number(salary || 0),
-      staffRole: staffRole ? String(staffRole).trim() : "Teacher",
+      staffRole: assignedStaffRole,
       allowedFeatures: Array.isArray(allowedFeatures) ? allowedFeatures : [],
-      assignedBatches: batchIdList,
+      assignedBatches: validBatchIds,
       aiAccessEnabled: isAiAccess,
     });
 
@@ -2261,18 +2293,18 @@ export const createHiredTeacher = async (req, res) => {
     userMeta[tId] = {
       ...(userMeta[tId] || {}),
       salary: Number(salary || 0),
-      staffRole: staffRole ? String(staffRole).trim() : "Teacher",
+      staffRole: assignedStaffRole,
       allowedFeatures: Array.isArray(allowedFeatures) ? allowedFeatures : [],
-      assignedBatches: batchIdList,
+      assignedBatches: validBatchIds,
       aiAccessEnabled: isAiAccess,
     };
     writeUserMetadata(userMeta);
 
     // Sync batches if specified
-    if (batchIdList.length > 0) {
+    if (validBatchIds.length > 0) {
       try {
         await Batch.updateMany(
-          { _id: { $in: batchIdList } },
+          { _id: { $in: validBatchIds } },
           { teacher: newTeacher._id }
         );
         await clearCachePattern("teacher:batches:*");
@@ -2303,7 +2335,7 @@ export const createHiredTeacher = async (req, res) => {
 
 export const getHiredTeachers = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
       return res.json([]);
     }
     if (req.user.role !== "institute_admin") {
@@ -2313,7 +2345,7 @@ export const getHiredTeachers = async (req, res) => {
     const instituteId = req.user.institute?._id || req.user.institute;
     const teachers = await User.find({
       institute: instituteId,
-      role: "teacher",
+      role: { $in: ["teacher", "receptionist"] },
     }).select("name email phone role createdAt aiAccessEnabled activity salary staffRole assignedBatches allowedFeatures");
 
     const userMeta = readUserMetadata();
@@ -2323,9 +2355,8 @@ export const getHiredTeachers = async (req, res) => {
       $or: [{ user: instituteId }, { user: req.user._id }],
     }).select("name teacher");
 
-    // Fetch today's attendance for these staff members
-    const d = new Date();
-    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    // Fetch today's attendance for these staff members using IST timezone
+    const todayStr = getTodayISTDateString();
     const todayAttendances = await StaffAttendance.find({
       institute: instituteId,
       date: todayStr,
@@ -2399,10 +2430,10 @@ export const getHiredTeacherActivity = async (req, res) => {
     let teacher = await User.findOne({
       _id: teacherId,
       institute: instituteId,
-      role: "teacher",
+      role: { $in: ["teacher", "receptionist"] },
     });
     if (!teacher) {
-      teacher = await User.findOne({ id: teacherId, institute: instituteId, role: "teacher" });
+      teacher = await User.findOne({ id: teacherId, institute: instituteId, role: { $in: ["teacher", "receptionist"] } });
     }
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
@@ -2434,10 +2465,10 @@ export const toggleTeacherAiAccess = async (req, res) => {
     let teacher = await User.findOne({
       _id: teacherId,
       institute: instituteId,
-      role: "teacher",
+      role: { $in: ["teacher", "receptionist"] },
     });
     if (!teacher) {
-      teacher = await User.findOne({ id: teacherId, institute: instituteId, role: "teacher" });
+      teacher = await User.findOne({ id: teacherId, institute: instituteId, role: { $in: ["teacher", "receptionist"] } });
     }
     if (!teacher) {
       return res.status(404).json({ message: "Teacher not found" });
@@ -2483,15 +2514,19 @@ export const deleteHiredTeacher = async (req, res) => {
     let teacher = await User.findOneAndDelete({
       _id: teacherId,
       institute: instituteId,
-      role: "teacher",
+      role: { $in: ["teacher", "receptionist"] },
     });
 
     if (!teacher) {
       teacher = await User.findOneAndDelete({
         id: teacherId,
         institute: instituteId,
-        role: "teacher",
+        role: { $in: ["teacher", "receptionist"] },
       });
+    }
+
+    if (!teacher) {
+      return res.status(404).json({ message: "Staff member not found" });
     }
 
     // Unassign from all batches
@@ -2503,6 +2538,21 @@ export const deleteHiredTeacher = async (req, res) => {
       await clearCachePattern("teacher:batches:*");
     } catch (_) {}
 
+    // Cascade clean attendance and salary records
+    try {
+      await StaffAttendance.deleteMany({ staff: teacherId });
+      await StaffSalary.deleteMany({ staff: teacherId });
+    } catch (_) {}
+
+    // Clean user metadata
+    try {
+      const userMeta = readUserMetadata();
+      if (userMeta[teacherId]) {
+        delete userMeta[teacherId];
+        writeUserMetadata(userMeta);
+      }
+    } catch (_) {}
+
     try {
       const { supabase: sb } = await import("../utils/supabase.js");
       await sb.from("users").delete().or(`id.eq.${teacherId},_id.eq.${teacherId}`);
@@ -2510,8 +2560,10 @@ export const deleteHiredTeacher = async (req, res) => {
 
     await invalidateUserDashboard(req);
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern(`teacher:dashboard:${teacherId}`);
+    await clearCachePattern(`teacher:students:${teacherId}*`);
 
-    return res.json({ message: "Staff member deleted successfully" });
+    return res.json({ message: "Staff member and associated records deleted successfully" });
   } catch (error) {
     return res.status(500).json({ message: "Could not delete staff member" });
   }
@@ -2529,7 +2581,7 @@ export const updateHiredTeacher = async (req, res) => {
     const teacher = await User.findOne({
       _id: req.params.id,
       institute: instituteId,
-      role: "teacher",
+      role: { $in: ["teacher", "receptionist"] },
     });
 
     if (!teacher) {
@@ -2551,12 +2603,25 @@ export const updateHiredTeacher = async (req, res) => {
     }
     if (phone !== undefined) {
       const cleanPhone = phone.trim().replace(/\D/g, "");
+      const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
       if (cleanPhone && cleanPhone !== teacher.phone) {
-        const existingPhoneUser = await User.findOne({ phone: cleanPhone });
+        const existingPhoneUser = await User.findOne({
+          $or: [
+            { phone: cleanPhone },
+            { phone: last10 },
+            { phone: `+91${last10}` },
+            { phone: `91${last10}` },
+          ]
+        });
         if (existingPhoneUser && String(existingPhoneUser._id) !== String(teacher._id)) {
           return res.status(400).json({ message: "Phone number already exists" });
         }
         teacher.phone = cleanPhone;
+
+        // If teacher was using a synthetic email, keep it in sync with the new phone
+        if (teacher.email && teacher.email.includes("@classtech.local")) {
+          teacher.email = `teacher_${last10 || cleanPhone}@classtech.local`;
+        }
       }
     }
     if (password && password.trim() !== "") {
@@ -2569,7 +2634,13 @@ export const updateHiredTeacher = async (req, res) => {
       teacher.salary = Number(salary || 0);
     }
     if (staffRole !== undefined) {
-      teacher.staffRole = String(staffRole).trim();
+      const cleanRole = String(staffRole).trim();
+      teacher.staffRole = cleanRole;
+      if (cleanRole.toLowerCase() === "receptionist") {
+        teacher.role = "receptionist";
+      } else {
+        teacher.role = "teacher";
+      }
     }
     if (allowedFeatures !== undefined && Array.isArray(allowedFeatures)) {
       teacher.allowedFeatures = allowedFeatures;
@@ -2586,9 +2657,33 @@ export const updateHiredTeacher = async (req, res) => {
     };
 
     if (assignedBatches !== undefined && Array.isArray(assignedBatches)) {
-      const newBatchIds = assignedBatches.map(b => String(b._id || b)).filter(Boolean);
+      const rawNewBatchIds = assignedBatches.map(b => String(b._id || b)).filter(Boolean);
+      // Validate batches belong to this institute
+      const validBatches = rawNewBatchIds.length > 0
+        ? await Batch.find({
+            _id: { $in: rawNewBatchIds },
+            user: { $in: [instituteId, req.user._id].filter(Boolean) }
+          }).select("_id teacher")
+        : [];
+      const newBatchIds = validBatches.map(b => String(b._id));
+
       teacher.assignedBatches = newBatchIds;
       meta[tId].assignedBatches = newBatchIds;
+
+      // Unassign these batches from previous teachers
+      const prevTeachers = Array.from(new Set(validBatches
+        .map(b => b.teacher ? String(b.teacher._id || b.teacher) : null)
+        .filter(t => t && t !== String(teacher._id))));
+      if (prevTeachers.length > 0) {
+        await User.updateMany(
+          { _id: { $in: prevTeachers } },
+          { $pull: { assignedBatches: { $in: newBatchIds } } }
+        );
+        for (const ptId of prevTeachers) {
+          await clearCachePattern(`teacher:dashboard:${ptId}`);
+          await clearCachePattern(`teacher:students:${ptId}*`);
+        }
+      }
 
       // Sync with Batch collection:
       try {
@@ -3100,7 +3195,11 @@ export const getOutstandingStudents = async (req, res) => {
       isArchived: { $ne: true },
     };
 
-    if (req.user?.role === "teacher") {
+    if (isReceptionist(req.user)) {
+      if (!isReceptionistFeatureAllowed(req.user, "fees")) {
+        return res.json([]);
+      }
+    } else if (isHiredTeacher(req.user)) {
       try {
         const myBatches = await Batch.find({ user: { $in: userIds }, teacher: req.user._id }).select("_id");
         const batchIds = (myBatches || []).map((b) => String(b._id || b.id));
@@ -3110,6 +3209,8 @@ export const getOutstandingStudents = async (req, res) => {
             { batches: { $in: batchIds } },
             { enrolledBatchIds: { $in: batchIds } },
           ];
+        } else {
+          return res.json([]);
         }
       } catch (_) {}
     }

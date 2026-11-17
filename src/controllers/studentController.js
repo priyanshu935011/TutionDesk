@@ -24,6 +24,7 @@ import { sendStudentNotification } from "../services/notificationService.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import { parseFcmTokens, addFcmToken, removeFcmToken, serializeTokensForDb } from "../utils/fcmTokenHelper.js";
 import { cascadeDeleteStudent } from "../utils/cascadeErasure.js";
+import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -50,7 +51,7 @@ const getUserIds = (req) => {
   if (!req || !req.user) return [];
   const rawInst = req.user.institute;
   const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
-  const ownerId = req.user.role === "teacher" 
+  const ownerId = (req.user.role === "teacher" || isReceptionist(req.user))
     ? (req.user.institute?.adminUser || rawInst?.adminUser || instIdStr || req.user._id)
     : (instIdStr || req.user._id);
 
@@ -274,7 +275,13 @@ const isTeacherOfBatch = (b, user) => {
 };
 
     let teacherBatchIds = [];
-    if (req.user.role === "teacher") {
+    if (isReceptionist(req.user)) {
+      if (!isReceptionistFeatureAllowed(req.user, "students")) {
+        await setCache(cacheKey, []);
+        return res.json([]);
+      }
+      // Receptionist has institute-wide view of all active students
+    } else if (isHiredTeacher(req.user)) {
       teacherBatchIds = Array.from(activeBatchIds).filter((bId) => {
         const b = allBatches.find((x) => String(x._id) === bId);
         return isTeacherOfBatch(b, req.user);
@@ -295,7 +302,7 @@ const isTeacherOfBatch = (b, user) => {
     });
 
     let students = rawStudents;
-    if (req.user.role === "teacher") {
+    if (isHiredTeacher(req.user)) {
       const teacherBatchSet = new Set(teacherBatchIds);
       students = rawStudents.filter((student) => {
         if (student.isArchived) return false;
@@ -478,13 +485,13 @@ export const getStudentBasicById = async (req, res) => {
       }
     }
 
-    const ownerId = req.user.role === "teacher" 
+    const ownerId = (req.user.role === "teacher" || isReceptionist(req.user))
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
-      : req.user._id;
+      : (req.user.institute?._id || req.user.institute || req.user._id);
 
     const query = { _id: studentId, user: ownerId };
 
-    if (req.user.role === "teacher") {
+    if (isHiredTeacher(req.user)) {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const batchIds = myBatches.map((b) => b._id);
       query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }];
@@ -618,15 +625,23 @@ export const getStudentById = async (req, res) => {
       }
     }
 
-    const ownerId = req.user.role === "teacher" 
+    const ownerId = (req.user.role === "teacher" || isReceptionist(req.user))
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute) 
-      : req.user._id;
+      : (req.user.institute?._id || req.user.institute || req.user._id);
     const query = { _id: studentId, user: ownerId };
 
-    if (req.user.role === "teacher") {
+    if (isHiredTeacher(req.user)) {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const batchIds = myBatches.map((b) => b._id);
       query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }];
+    }
+
+    if (isReceptionist(req.user)) {
+      if (!isReceptionistFeatureAllowed(req.user, "students")) {
+        return res.status(403).json({ message: "Access denied. Student management is not enabled for your account." });
+      }
+      delete req.body.paymentHistory;
+      delete req.body.paidAmount;
     }
 
     const student = await populateStudent(
@@ -657,8 +672,11 @@ export const getStudentById = async (req, res) => {
 
 export const createStudent = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
+    if (isHiredTeacher(req.user)) {
       return res.status(403).json({ message: "Access denied. Teachers cannot enroll students." });
+    }
+    if (isReceptionist(req.user) && !isReceptionistFeatureAllowed(req.user, "students")) {
+      return res.status(403).json({ message: "Access denied. Student enrollment feature is not enabled for your account." });
     }
 
     const {
@@ -1227,8 +1245,8 @@ export const updateStudent = async (req, res) => {
 
 export const deleteStudent = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Teachers cannot delete students." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Staff members cannot delete students." });
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -1262,8 +1280,8 @@ export const deleteStudent = async (req, res) => {
 
 export const archiveStudent = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Teachers cannot archive students." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Staff members cannot archive students." });
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -1359,8 +1377,11 @@ export const archiveStudent = async (req, res) => {
 
 export const addPayment = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
+    if (isHiredTeacher(req.user)) {
       return res.status(403).json({ message: "Access denied. Teachers cannot record payments." });
+    }
+    if (isReceptionist(req.user) && !isReceptionistFeatureAllowed(req.user, "fees")) {
+      return res.status(403).json({ message: "Access denied. Fee collection feature is not enabled for your account." });
     }
 
     const ownerId = req.user.role === "teacher" 
@@ -1492,7 +1513,7 @@ export const markAttendance = async (req, res) => {
       : (req.user.institute?._id || req.user.institute || req.user._id);
     const query = { _id: req.params.id, user: ownerId };
 
-    if (req.user.role === "teacher") {
+    if (isHiredTeacher(req.user)) {
       const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
       const batchIds = myBatches.map((b) => b._id);
       const strBatchIds = batchIds.map((b) => String(b));
@@ -1501,6 +1522,10 @@ export const markAttendance = async (req, res) => {
         { batches: { $in: batchIds } },
         { enrolledBatchIds: { $in: strBatchIds } }
       ];
+    } else if (isReceptionist(req.user)) {
+      if (!isReceptionistFeatureAllowed(req.user, "attendance")) {
+        return res.status(403).json({ message: "Access denied. Attendance feature is not enabled for your account." });
+      }
     }
 
     const student = await Student.findOne(query);
@@ -1678,7 +1703,11 @@ export const markBatchAttendance = async (req, res) => {
     const instIdStr = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
     const instituteId = instIdStr || req.user._id;
 
-    const ownerId = req.user.role === "teacher" 
+    if (isReceptionist(req.user) && !isReceptionistFeatureAllowed(req.user, "attendance")) {
+      return res.status(403).json({ message: "Access denied. Attendance feature is not enabled for your account." });
+    }
+
+    const ownerId = (req.user.role === "teacher" || isReceptionist(req.user))
       ? (req.user.institute?.adminUser || rawInst?.adminUser || instIdStr || req.user._id)
       : (instIdStr || req.user._id);
 

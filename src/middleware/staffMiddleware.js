@@ -12,6 +12,7 @@ const staffMiddleware = (req, res, next) => {
     "marketing_person",
     "admin",
     "teacher",
+    "receptionist",
     "institute_admin",
     "owner",
   ];

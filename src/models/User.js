@@ -33,7 +33,8 @@ const userSchema = new mongoose.Schema(
         "marketing_admin",
         "marketing_person",
         "institute_admin",
-        "teacher"
+        "teacher",
+        "receptionist"
       ],
       default: "institute_admin",
     },

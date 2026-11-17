@@ -4,19 +4,17 @@ import StaffSalary from "../models/StaffSalary.js";
 import Student from "../models/Student.js";
 import User from "../models/User.js";
 import { readUserMetadata } from "../utils/supabaseModel.js";
+import { isReceptionist, getTodayISTDateString } from "../utils/staffPermissionHelper.js";
 
 // Helper to get current Indian YYYY-MM
 export const getCurrentMonthKey = () => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
+  return getTodayISTDateString().substring(0, 7);
 };
 
 export const getFinanceAnalytics = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Only institute owners can view finances." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Staff members cannot view finances." });
     }
 
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
@@ -95,7 +93,7 @@ export const getFinanceAnalytics = async (req, res) => {
     // 3. Fetch Staff Members & Salary Disbursements for this month
     const staffMembers = await User.find({
       institute: instituteId,
-      role: "teacher",
+      role: { $in: ["teacher", "receptionist"] },
     }).select("name email phone role salary staffRole assignedBatches createdAt");
 
     const userMeta = readUserMetadata();
@@ -298,8 +296,8 @@ export const deleteIncome = async (req, res) => {
 
 export const disburseStaffSalary = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Only institute admins can disburse salary." });
     }
 
     const { staffId, monthKey, amount, paymentMode, notes } = req.body;
@@ -307,24 +305,39 @@ export const disburseStaffSalary = async (req, res) => {
       return res.status(400).json({ message: "staffId and monthKey are required." });
     }
 
+    const cleanMonthKey = String(monthKey).trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(cleanMonthKey)) {
+      return res.status(400).json({ message: "Invalid monthKey. Expected YYYY-MM." });
+    }
+
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
-    const staff = await User.findById(staffId);
+    // Enforce tenant scoping: staff must belong to this institute
+    const staff = await User.findOne({
+      _id: staffId,
+      institute: instituteId,
+      role: { $in: ["teacher", "receptionist"] },
+    });
     if (!staff) {
-      return res.status(404).json({ message: "Staff member not found." });
+      return res.status(404).json({ message: "Staff member not found in your institute." });
+    }
+
+    const effectiveAmount = amount !== undefined ? Number(amount) : Number(staff.salary || 0);
+    if (isNaN(effectiveAmount) || effectiveAmount < 0 || !isFinite(effectiveAmount)) {
+      return res.status(400).json({ message: "Invalid salary amount. Must be a non-negative number." });
     }
 
     const record = await StaffSalary.findOneAndUpdate(
       {
         institute: instituteId,
         staff: staffId,
-        monthKey: monthKey,
+        monthKey: cleanMonthKey,
       },
       {
         institute: instituteId,
         staff: staffId,
         staffName: staff.name,
-        monthKey: monthKey,
-        amount: Number(amount !== undefined ? amount : (staff.salary || 0)),
+        monthKey: cleanMonthKey,
+        amount: effectiveAmount,
         status: "disbursed",
         disbursedAt: new Date(),
         paymentMode: paymentMode || "Cash",
@@ -345,17 +358,31 @@ export const disburseStaffSalary = async (req, res) => {
 
 export const deleteStaffSalaryDisbursement = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Only institute admins can modify salary records." });
     }
 
     const { staffId, monthKey } = req.params;
+    const cleanMonthKey = String(monthKey || "").trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(cleanMonthKey)) {
+      return res.status(400).json({ message: "Invalid monthKey format. Expected YYYY-MM." });
+    }
+
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+
+    // Verify staff belongs to this institute
+    const staff = await User.findOne({
+      _id: staffId,
+      institute: instituteId,
+    });
+    if (!staff) {
+      return res.status(404).json({ message: "Staff member not found in your institute." });
+    }
 
     await StaffSalary.findOneAndDelete({
       institute: instituteId,
       staff: staffId,
-      monthKey: monthKey,
+      monthKey: cleanMonthKey,
     });
 
     return res.json({ message: "Salary disbursement removed." });

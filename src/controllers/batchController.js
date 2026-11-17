@@ -6,7 +6,7 @@ import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import { readUserMetadata } from "../utils/supabaseModel.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
-
+import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
 
 export const getBatches = async (req, res) => {
   try {
@@ -34,7 +34,12 @@ export const getBatches = async (req, res) => {
     }
 
     const query = { user: { $in: userIds } };
-    if (req.user.role === "teacher") {
+    if (isReceptionist(req.user)) {
+      if (!isReceptionistFeatureAllowed(req.user, "batches")) {
+        return res.status(403).json({ message: "Access denied. Batches feature is not enabled for your account." });
+      }
+      // Receptionist has view-only access to all batches in the institute
+    } else if (isHiredTeacher(req.user)) {
       const teacherUser = await User.findById(req.user._id);
       const meta = readUserMetadata()[String(req.user._id)] || {};
       const rawAssigned = Array.isArray(teacherUser?.assignedBatches) && teacherUser.assignedBatches.length > 0
@@ -84,8 +89,8 @@ export const getBatches = async (req, res) => {
 
 export const createBatch = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Teachers cannot create batches." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Only institute administrators can create batches." });
     }
 
     const { name, scheduleDays, startTime, endTime, teacher, teacherId, session } = req.body;
@@ -121,8 +126,8 @@ export const createBatch = async (req, res) => {
 
 export const updateBatch = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Teachers cannot modify batches." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Only institute administrators can modify batches." });
     }
 
     const { name, scheduleDays, startTime, endTime, teacher, teacherId, status, session } = req.body;
@@ -212,8 +217,6 @@ export const updateBatch = async (req, res) => {
         }
       }
     } else if (newStatus === "active" && previousStatus === "archived") {
-      // ONLY unarchive students when an archived batch is explicitly restored to active!
-      // NEVER unarchive students who were individually archived by admin/teacher.
       const studentsInBatch = await Student.find({
         user: { $in: userIds },
         $or: [{ batch: req.params.id }, { batches: req.params.id }, { enrolledBatchIds: req.params.id }],
@@ -248,8 +251,8 @@ export const updateBatch = async (req, res) => {
 
 export const deleteBatch = async (req, res) => {
   try {
-    if (req.user.role === "teacher") {
-      return res.status(403).json({ message: "Access denied. Teachers cannot delete batches." });
+    if (req.user.role === "teacher" || isReceptionist(req.user)) {
+      return res.status(403).json({ message: "Access denied. Only institute administrators can delete batches." });
     }
 
     const batchId = req.params.id;
@@ -302,8 +305,6 @@ export const deleteBatch = async (req, res) => {
       const otherRecords = allStudentRecords.filter((r) => String(r._id) !== String(student._id));
 
       if (otherRecords.length > 0) {
-        // If student is enrolled in multiple batches:
-        // Delete the student record for this batch, but transfer fees if this record held them
         const holdsFees = Number(student.totalFees || 0) > 0 || (student.paymentHistory && student.paymentHistory.length > 0);
         if (holdsFees) {
           const recipient = otherRecords[0];
@@ -316,12 +317,9 @@ export const deleteBatch = async (req, res) => {
         
         await Student.deleteOne({ _id: student._id });
         try { await TestResult.deleteMany({ student: student._id }); } catch (_) {}
-        try { await QuizAttempt.deleteMany({ student: student._id }); } catch (_) {}
       } else {
-        // If enrolled ONLY in this batch, delete completely
         await Student.deleteOne({ _id: student._id });
         try { await TestResult.deleteMany({ student: student._id }); } catch (_) {}
-        try { await QuizAttempt.deleteMany({ student: student._id }); } catch (_) {}
       }
     }
 
@@ -346,8 +344,6 @@ export const deleteBatch = async (req, res) => {
       await Note.deleteMany({ batch: batchId });
     }
 
-
-
     // Finally delete the batch
     await Batch.deleteOne({ _id: batchId });
 
@@ -362,4 +358,3 @@ export const deleteBatch = async (req, res) => {
     return res.status(500).json({ message: "Could not delete batch" });
   }
 };
-// Trivial change to force reload server - attempt 2

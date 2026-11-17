@@ -23,7 +23,7 @@ export const getDashboard = async (req, res) => {
     }
 
     const adminUserId = rawInst?.adminUser ? String(rawInst.adminUser) : null;
-    const ownerId = req.user.role === "teacher" 
+    const ownerId = (req.user.role === "teacher" || req.user.role === "receptionist") 
       ? (adminUserId || instIdStr || req.user._id)
       : (instIdStr || req.user._id);
 

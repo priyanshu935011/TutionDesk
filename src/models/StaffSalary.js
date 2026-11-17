@@ -51,6 +51,8 @@ const staffSalarySchema = new mongoose.Schema(
   }
 );
 
+staffSalarySchema.index({ institute: 1, staff: 1, monthKey: 1 }, { unique: true });
+
 const StaffSalary = mongoose.model("StaffSalary", staffSalarySchema);
 
 export default StaffSalary;

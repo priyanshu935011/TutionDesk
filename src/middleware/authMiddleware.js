@@ -166,11 +166,15 @@ const protect = async (req, res, next) => {
         id: userId || "00000000-0000-0000-0000-000000000000",
         email: decoded?.email || "",
         role: decoded?.role || "teacher",
+        staffRole: decoded?.staffRole || (decoded?.role === "receptionist" ? "Receptionist" : "Teacher"),
         institute: decoded?.institute || decoded?.instituteId || null,
       };
     }
 
     req.user = user;
+    if (decoded?.staffRole && !req.user.staffRole) {
+      req.user.staffRole = decoded.staffRole;
+    }
     if (decoded?.isSuperAdmin) {
       req.user.isSuperAdmin = true;
       req.user.superAdminEmail = decoded.superAdminEmail;

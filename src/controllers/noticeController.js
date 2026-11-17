@@ -6,6 +6,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import { sendMessage, getSessionStatus, sendTemplateMessage } from "../services/whatsappService.js";
 import { getCache, setCache, clearCachePattern } from "../utils/cache.js";
 import { sendStudentNotification } from "../services/notificationService.js";
+import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
 
 const formatDate = (val) => (val ? new Date(val).toLocaleDateString("en-IN") : "-");
 
@@ -14,6 +15,17 @@ export const createNotice = async (req, res) => {
     const instituteId = req.user.institute?._id || req.user.institute;
     if (!instituteId) {
       return res.status(400).json({ message: "No institute associated with account." });
+    }
+
+    if (isReceptionist(req.user) && !isReceptionistFeatureAllowed(req.user, "notices")) {
+      return res.status(403).json({ message: "Access denied. Notices feature is not enabled for your account." });
+    }
+
+    if (isHiredTeacher(req.user)) {
+      const userFeats = Array.isArray(req.user.allowedFeatures) ? req.user.allowedFeatures : [];
+      if (userFeats.length > 0 && !userFeats.includes("notices")) {
+        return res.status(403).json({ message: "Access denied. Notices feature is disabled for your staff account." });
+      }
     }
 
     const inst = await Institute.findById(instituteId);
@@ -287,14 +299,23 @@ export const deleteNotice = async (req, res) => {
       ? (req.user.institute?.adminUser || req.user.institute?._id || req.user.institute)
       : (req.user.institute?._id || req.user.institute || req.user._id);
 
-    await Notice.findOneAndDelete({
+    const isStaff = isHiredTeacher(req.user) || isReceptionist(req.user);
+    const deleteFilter = {
       _id: req.params.id,
       $or: [
         { user: ownerId },
         { user: instituteId },
         { institute: instituteId }
       ].filter(Boolean)
-    });
+    };
+    if (isStaff) {
+      deleteFilter.createdBy = req.user._id;
+    }
+
+    const deleted = await Notice.findOneAndDelete(deleteFilter);
+    if (!deleted) {
+      return res.status(404).json({ message: "Notice not found or you do not have permission to delete it." });
+    }
 
     await clearCachePattern("teacher:*");
     await clearCachePattern("student:*");
