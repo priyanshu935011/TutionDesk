@@ -21,6 +21,8 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  */
 export const sendStudentNotification = async ({
   studentIds,
+  batchIds,
+  batchId,
   instituteId,
   title,
   message,
@@ -30,12 +32,62 @@ export const sendStudentNotification = async ({
   data = {},
 }) => {
   try {
-    if (!studentIds) return;
-    const targets = Array.isArray(studentIds) ? studentIds : [studentIds];
-    const validTargets = targets
-      .map((id) => (typeof id === "object" ? String(id?._id || id?.id || "") : String(id)))
-      .filter((id) => id && id !== "null" && id !== "undefined");
+    const targetSet = new Set();
 
+    if (studentIds) {
+      const raw = Array.isArray(studentIds) ? studentIds : [studentIds];
+      raw.forEach((id) => {
+        const s = typeof id === "object" ? String(id?._id || id?.id || "") : String(id || "");
+        if (s && s !== "null" && s !== "undefined") targetSet.add(s.trim());
+      });
+    }
+
+    const rawBatchIds = [
+      ...(Array.isArray(batchIds) ? batchIds : (batchIds ? [batchIds] : [])),
+      ...(batchId ? [batchId] : []),
+    ].map((b) => (typeof b === "object" ? String(b?._id || b?.id || "") : String(b || ""))).filter(Boolean);
+
+    if (rawBatchIds.length > 0) {
+      try {
+        const batchStudents = await Student.find({
+          $or: [
+            { batch: { $in: rawBatchIds } },
+            { batches: { $in: rawBatchIds } },
+            { enrolledBatchIds: { $in: rawBatchIds } },
+          ],
+          isArchived: { $ne: true },
+        }).select("_id enrollmentNumber id");
+        batchStudents.forEach((s) => {
+          if (s._id) targetSet.add(String(s._id));
+          if (s.id) targetSet.add(String(s.id));
+        });
+      } catch (bErr) {
+        console.warn("Error resolving batch students for notification:", bErr.message);
+      }
+    }
+
+    // If still no targets and instituteId is provided, resolve all institute students
+    if (targetSet.size === 0 && instituteId) {
+      try {
+        let instOwnerIds = [String(instituteId)];
+        const instDoc = await mongoose.model("Institute").findById(instituteId).select("adminUser");
+        if (instDoc?.adminUser) {
+          instOwnerIds.push(String(instDoc.adminUser));
+        }
+        const instStudents = await Student.find({
+          user: { $in: instOwnerIds },
+          isArchived: { $ne: true },
+        }).select("_id id");
+        instStudents.forEach((s) => {
+          if (s._id) targetSet.add(String(s._id));
+          if (s.id) targetSet.add(String(s.id));
+        });
+      } catch (iErr) {
+        console.warn("Error resolving institute students for notification:", iErr.message);
+      }
+    }
+
+    const validTargets = Array.from(targetSet);
     if (validTargets.length === 0) return;
 
     const cleanTitle = String(title || "").trim();
@@ -97,12 +149,29 @@ export const sendStudentNotification = async ({
       orConditions.push({ enrollmentNumber: { $in: validTargets } });
 
       const mongoStudents = await Student.find({ $or: orConditions })
-        .select("fcmToken fcmTokens")
+        .select("fcmToken fcmTokens email phone")
         .lean();
 
       for (const st of mongoStudents) {
         parseFcmTokens(st.fcmTokens).forEach((t) => tokenSet.add(t));
         parseFcmTokens(st.fcmToken).forEach((t) => tokenSet.add(t));
+      }
+
+      // Also check if any student email/phone has user-level FCM tokens
+      const studentEmailsAndPhones = mongoStudents.flatMap((s) => [s.email, s.phone]).filter(Boolean);
+      if (studentEmailsAndPhones.length > 0) {
+        try {
+          const linkedUsers = await User.find({
+            $or: [
+              { email: { $in: studentEmailsAndPhones } },
+              { phone: { $in: studentEmailsAndPhones } },
+            ],
+          }).select("fcmToken fcmTokens").lean();
+          for (const u of linkedUsers) {
+            parseFcmTokens(u.fcmTokens).forEach((t) => tokenSet.add(t));
+            parseFcmTokens(u.fcmToken).forEach((t) => tokenSet.add(t));
+          }
+        } catch (_) {}
       }
     } catch (mErr) {
       console.warn("MongoDB student FCM token fetch warning:", mErr.message);
@@ -140,6 +209,7 @@ export const sendStudentNotification = async ({
     } catch (_) {}
 
     const allTokens = Array.from(tokenSet);
+    console.log(`[PushNotification] Dispatched "${cleanTitle}" to ${validTargets.length} target(s) across ${allTokens.length} active device token(s).`);
     if (allTokens.length > 0) {
       await sendFcmPushNotification({
         fcmTokens: allTokens,

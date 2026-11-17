@@ -793,10 +793,33 @@ export const handleBunnyWebhook = async (req, res) => {
       String(rawStatus).toLowerCase().includes("fail") ||
       String(rawStatus).toLowerCase().includes("error");
 
+    const wasAlreadyReady = video.status === "READY";
     if (isFinished) {
       video.status = "READY";
       video.processingProgress = 100;
       await video.save();
+
+      if (!wasAlreadyReady) {
+        try {
+          const batches = Array.isArray(video.batches) ? video.batches : [];
+          const students = Array.isArray(video.students) ? video.students : [];
+          if (batches.length > 0 || students.length > 0 || video.targetAudienceType === "all") {
+            sendStudentNotification({
+              studentIds: students,
+              batchIds: batches,
+              instituteId: video.institute,
+              title: "New Video Lecture Available",
+              message: `New video lecture available: "${video.title || "Lecture Video"}".`,
+              type: "video",
+              imageUrl: video.thumbnailUrl || "",
+              actionUrl: "/student/videos",
+              data: { videoId: String(video._id || video.id || video.bunnyVideoId), title: video.title },
+            });
+          }
+        } catch (vnErr) {
+          console.warn("Bunny webhook student notification warning:", vnErr.message);
+        }
+      }
     } else if (isFailed) {
       video.status = "FAILED";
       await video.save();
@@ -1818,14 +1841,62 @@ export const createVideoRelease = async (req, res) => {
       return res.status(403).json({ message: "Release Videos feature is disabled for your profile." });
     }
 
-    const { videoIds = [], studentIds = [], startsAt, expiresAt, neverExpires } = req.body;
+    const { videoIds = [], studentIds = [], batchIds = [], batchId, startsAt, expiresAt, neverExpires } = req.body;
 
     if (!Array.isArray(videoIds) || videoIds.length === 0) {
       return res.status(400).json({ message: "Please select at least one video to release." });
     }
 
-    if (!Array.isArray(studentIds) || studentIds.length === 0) {
-      return res.status(400).json({ message: "Please select at least one student." });
+    const rawBatchIds = [
+      ...(Array.isArray(batchIds) ? batchIds : (batchIds ? [batchIds] : [])),
+      ...(batchId ? [batchId] : []),
+    ].map((b) => String(typeof b === "object" ? b._id || b.id || b : b).trim()).filter(Boolean);
+
+    let finalStudentIds = [];
+    if (Array.isArray(studentIds)) {
+      finalStudentIds = studentIds.map((s) => String(typeof s === "object" ? s._id || s.id || s : s).trim()).filter(Boolean);
+    }
+
+    if (rawBatchIds.length > 0) {
+      try {
+        const batchStudents = await Student.find({
+          $or: [
+            { batch: { $in: rawBatchIds } },
+            { batches: { $in: rawBatchIds } },
+            { enrolledBatchIds: { $in: rawBatchIds } },
+          ],
+          isArchived: { $ne: true },
+        }).select("_id");
+        batchStudents.forEach((s) => {
+          const sId = String(s._id);
+          if (!finalStudentIds.includes(sId)) {
+            finalStudentIds.push(sId);
+          }
+        });
+      } catch (bErr) {
+        console.warn("Failed resolving batch students for video release:", bErr.message);
+      }
+    }
+
+    if (finalStudentIds.length === 0 && (req.body.allStudents || req.body.targetAudienceType === "all")) {
+      try {
+        const instDoc = await Institute.findById(instituteId).select("adminUser");
+        const ownerIds = [instituteId, instDoc?.adminUser, rawUserId].filter(Boolean);
+        const allStudents = await Student.find({
+          user: { $in: ownerIds },
+          isArchived: { $ne: true },
+        }).select("_id");
+        allStudents.forEach((s) => {
+          const sId = String(s._id);
+          if (!finalStudentIds.includes(sId)) finalStudentIds.push(sId);
+        });
+      } catch (aErr) {
+        console.warn("Failed resolving all students for video release:", aErr.message);
+      }
+    }
+
+    if (finalStudentIds.length === 0) {
+      return res.status(400).json({ message: "Please select at least one student or batch." });
     }
 
     const startDt = startsAt ? new Date(startsAt) : new Date();
@@ -1909,7 +1980,7 @@ export const createVideoRelease = async (req, res) => {
         writeFallbackData("video_releases", [release]);
       }
 
-      for (const sId of studentIds) {
+      for (const sId of finalStudentIds) {
         const relIdStr = String(release._id || release.id || release).trim();
         const sIdStr = String(typeof sId === "object" ? sId._id || sId.id || sId : sId).trim();
         const validRelUuid = toValidUUID(relIdStr);
@@ -1969,7 +2040,7 @@ export const createVideoRelease = async (req, res) => {
         await logTeacherActivity(teacherId, {
           type: "video_release",
           title: `Released ${targetVideos.length} video(s): ${videoTitles.slice(0, 50)}`,
-          details: `Released to ${studentIds.length} student(s)`,
+          details: `Released to ${finalStudentIds.length} student(s)`,
         });
       } catch (logErr) {
         console.warn("logTeacherActivity warning in createVideoRelease:", logErr.message);
@@ -1981,19 +2052,20 @@ export const createVideoRelease = async (req, res) => {
       const videoTitle = firstVid?.title || "New Video Lecture";
       const countMsg = targetVideos.length > 1 ? ` (+${targetVideos.length - 1} more)` : "";
       sendStudentNotification({
-        studentIds,
+        studentIds: finalStudentIds,
+        batchIds: rawBatchIds,
         instituteId,
         title: "New Video Lecture Released",
         message: `Watch "${videoTitle}"${countMsg} on your student portal.`,
         type: "video",
         imageUrl: firstVid?.thumbnailUrl || "",
         actionUrl: "/student/videos",
-        data: { videoCount: targetVideos.length, title: videoTitle },
+        data: { videoCount: targetVideos.length, title: videoTitle, batchIds: rawBatchIds },
       });
     } catch (nErr) {}
 
     return res.status(201).json({
-      message: `Successfully released ${targetVideos.length} video(s) to ${studentIds.length} student(s).`,
+      message: `Successfully released ${targetVideos.length} video(s) to ${finalStudentIds.length} student(s).`,
       releasesCount: createdReleases.length,
     });
   } catch (error) {

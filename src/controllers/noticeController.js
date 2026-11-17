@@ -68,22 +68,42 @@ export const createNotice = async (req, res) => {
     });
 
     try {
-      let bQuery = { user: instituteId };
-      if (targetType === "batch" && Array.isArray(batchIds) && batchIds.length > 0) {
-        bQuery.batch = { $in: batchIds };
+      let stIds = [];
+      const cleanBatchIds = Array.isArray(batchIds) ? batchIds.map((b) => String(b)).filter(Boolean) : [];
+
+      if (targetType === "batch" && cleanBatchIds.length > 0) {
+        const batchStudents = await Student.find({
+          $or: [
+            { batch: { $in: cleanBatchIds } },
+            { batches: { $in: cleanBatchIds } },
+            { enrolledBatchIds: { $in: cleanBatchIds } },
+          ],
+          isArchived: { $ne: true },
+        }).select("_id");
+        stIds = batchStudents.map((s) => s._id);
+      } else {
+        const instDoc = await Institute.findById(instituteId).select("adminUser");
+        const ownerIds = [String(instituteId), instDoc?.adminUser ? String(instDoc.adminUser) : null, String(req.user._id)].filter(Boolean);
+        const allStudents = await Student.find({
+          user: { $in: ownerIds },
+          isArchived: { $ne: true },
+        }).select("_id");
+        stIds = allStudents.map((s) => s._id);
       }
-      const targetStudents = await Student.find(bQuery).select("_id");
-      const stIds = targetStudents.map((s) => s._id);
 
       sendStudentNotification({
         studentIds: stIds,
+        batchIds: cleanBatchIds,
         instituteId,
         title: "New Notice",
         message: `${title}: ${content || "Check notice board for details."}`,
         type: "notice",
+        actionUrl: "/student/notices",
         data: { noticeId: notice._id, noticeType },
       });
-    } catch (nErr) {}
+    } catch (nErr) {
+      console.warn("Notice push notification error:", nErr.message);
+    }
 
     // Invalidate L1 Cache
     await clearCachePattern("teacher:*");

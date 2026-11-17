@@ -1470,6 +1470,7 @@ export const addPayment = async (req, res) => {
         title: "Fee Payment Received",
         message: `Payment of ₹${numAmount} received. Remaining balance: ₹${remaining}.`,
         type: "fee_paid",
+        actionUrl: "/student/fees",
         data: { amount: numAmount, remaining },
       });
     } catch (nErr) {}
@@ -1600,6 +1601,7 @@ export const markAttendance = async (req, res) => {
         title: status === "present" ? "Attendance Marked" : "Attendance Alert",
         message: `Your attendance for ${targetDay} has been marked as ${formattedStatus}.`,
         type: "attendance",
+        actionUrl: "/student/attendance",
         data: { status, date: targetDay },
       });
     } catch (nErr) {}
@@ -1924,7 +1926,8 @@ export const markBatchAttendance = async (req, res) => {
             title: "Attendance Marked",
             message: `Your attendance for ${targetDateStr} has been marked as Present.`,
             type: "attendance",
-            data: { status: "present", date: targetDateStr },
+            actionUrl: "/student/attendance",
+            data: { status: "present", date: targetDateStr, batchId: batchId ? String(batchId) : "" },
           });
         }
         if (absentStudentIds.length > 0) {
@@ -1934,7 +1937,8 @@ export const markBatchAttendance = async (req, res) => {
             title: "Attendance Alert",
             message: `Your attendance for ${targetDateStr} has been marked as Absent.`,
             type: "attendance",
-            data: { status: "absent", date: targetDateStr },
+            actionUrl: "/student/attendance",
+            data: { status: "absent", date: targetDateStr, batchId: batchId ? String(batchId) : "" },
           });
         }
       } catch (notifErr) {
@@ -4053,6 +4057,7 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
         title: "Fee Payment Reminder",
         message: `Fee Reminder: Pending dues of ₹${pendingAmount}. Please pay at your earliest convenience.`,
         type: "fee_reminder",
+        actionUrl: "/student/fees",
         data: { pendingAmount, dueDate },
       });
     } catch (nErr) {}

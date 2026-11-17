@@ -1405,28 +1405,39 @@ export const uploadNote = async (req, res) => {
     try {
       let targetStudentIds = resolvedStudentIds;
       if (targetType !== "student") {
-        let sQuery = {};
         if (resolvedBatchIds && resolvedBatchIds.length > 0) {
-          sQuery = {
-            institute: instituteId,
-            $or: [{ batch: { $in: resolvedBatchIds } }, { batches: { $in: resolvedBatchIds } }],
-          };
+          const batchStudents = await Student.find({
+            $or: [
+              { batch: { $in: resolvedBatchIds } },
+              { batches: { $in: resolvedBatchIds } },
+              { enrolledBatchIds: { $in: resolvedBatchIds } },
+            ],
+            isArchived: { $ne: true },
+          }).select("_id");
+          targetStudentIds = batchStudents.map((s) => s._id);
         } else {
-          sQuery = { institute: instituteId };
+          const instDoc = await Institute.findById(instituteId).select("adminUser");
+          const ownerIds = [instituteId, instDoc?.adminUser, req.user._id].filter(Boolean);
+          const allStudents = await Student.find({
+            user: { $in: ownerIds },
+            isArchived: { $ne: true },
+          }).select("_id");
+          targetStudentIds = allStudents.map((s) => s._id);
         }
-        const batchStudents = await Student.find(sQuery).select("_id");
-        targetStudentIds = batchStudents.map((s) => s._id);
       }
       sendStudentNotification({
         studentIds: targetStudentIds,
+        batchIds: resolvedBatchIds,
         instituteId,
         title: "New Study Material",
-        message: `New study material uploaded: ${title.trim()}.`,
+        message: `New study material uploaded: ${title.trim()} (${noteCategory || "Notes"}).`,
         type: "notes",
         data: { title: title.trim(), noteCategory: noteCategory || "Notes" },
         actionUrl: "/student/notes",
       });
-    } catch (nErr) {}
+    } catch (nErr) {
+      console.warn("Notes notification error:", nErr.message);
+    }
 
     if (req.body.sendWhatsApp === "true" || req.body.sendWhatsApp === true) {
       setImmediate(async () => {
@@ -2218,18 +2229,31 @@ export const createTestResultsBulk = async (req, res) => {
       const totalNum = Number(totalMarks || 100);
       for (const entry of entries) {
         if (!entry.studentId) continue;
-        const scoreNum = Number(entry.score || 0);
-        const percentage = totalNum > 0 ? Math.round((scoreNum / totalNum) * 100) : 0;
+        const isAbsentEntry = entry.isAbsent === true || entry.status === "absent" || entry.score === "Absent" || entry.score === -1;
+        const scoreNum = isAbsentEntry ? "Absent" : Number(entry.score || 0);
+        const percentage = !isAbsentEntry && totalNum > 0 ? Math.round((Number(entry.score || 0) / totalNum) * 100) : null;
         sendStudentNotification({
           studentIds: [entry.studentId],
           instituteId,
           title: "New Test Result",
-          message: `Your score for ${formattedTestTitle}: ${scoreNum}/${totalNum} (${percentage}%).`,
+          message: isAbsentEntry
+            ? `You were marked absent for test: ${formattedTestTitle}.`
+            : `Your score for ${formattedTestTitle}: ${scoreNum}/${totalNum}${percentage !== null ? ` (${percentage}%)` : ""}.`,
           type: "marks",
-          data: { title: formattedTestTitle, score: scoreNum, totalMarks: totalNum, percentage },
+          actionUrl: "/student/marks",
+          data: {
+            title: formattedTestTitle,
+            score: scoreNum,
+            totalMarks: totalNum,
+            percentage,
+            subject: subject || "",
+            batchId: batchId ? String(batchId) : "",
+          },
         });
       }
-    } catch (nErr) {}
+    } catch (nErr) {
+      console.warn("createTestResultsBulk notification error:", nErr.message);
+    }
 
     return res.status(201).json(populatedResults);
   } catch (error) {

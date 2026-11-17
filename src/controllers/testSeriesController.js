@@ -13,6 +13,7 @@ import { isTeacherOfBatch } from "./teacherController.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
+import { sendStudentNotification } from "../services/notificationService.js";
 
 const DEFAULT_CATEGORIES = [
   { name: "Class 10", icon: "🎓" },
@@ -565,14 +566,32 @@ export const createTestSeries = async (req, res) => {
 
     if (!isSuperAdmin && instituteId) {
       try {
+        const rawAssignedBatches = Array.isArray(req.body.assignedBatches)
+          ? req.body.assignedBatches
+          : (Array.isArray(req.body.batches) ? req.body.batches : []);
         await InstituteTestSeriesAccess.create({
           institute: String(instituteId),
           institute_id: String(instituteId),
           testSeries: String(testSeries._id || testSeries.id),
           test_series_id: String(testSeries._id || testSeries.id),
           isEnabled: true,
-          assignedBatches: [],
+          assignedBatches: rawAssignedBatches,
           assignedBy: req.user?._id ? String(req.user._id) : null,
+        });
+
+        sendStudentNotification({
+          batchIds: rawAssignedBatches,
+          instituteId,
+          title: "New Test Series Available",
+          message: `New test series "${testSeries.title}" has been published.`,
+          type: "test_series",
+          actionUrl: "/student/test-series",
+          data: {
+            testSeriesId: String(testSeries._id || testSeries.id),
+            title: testSeries.title,
+            subject: testSeries.subject,
+            durationMinutes: testSeries.durationMinutes,
+          },
         });
       } catch (accErr) {
         console.warn("Could not auto-create InstituteTestSeriesAccess:", accErr?.message);
@@ -748,6 +767,29 @@ export const assignTestSeries = async (req, res) => {
     try {
       await clearCachePattern("student:test_series:*");
     } catch (_) {}
+
+    if (access.isEnabled) {
+      try {
+        const testDoc = await TestSeries.findById(id).select("title subject durationMinutes");
+        const testTitle = testDoc?.title || "Test Series";
+        sendStudentNotification({
+          batchIds: access.assignedBatches && access.assignedBatches.length > 0 ? access.assignedBatches : [],
+          instituteId,
+          title: "New Test Series Available",
+          message: `Test Series "${testTitle}" is now available for you to attempt.`,
+          type: "test_series",
+          actionUrl: "/student/test-series",
+          data: {
+            testSeriesId: String(id),
+            title: testTitle,
+            subject: testDoc?.subject || "",
+            durationMinutes: testDoc?.durationMinutes || 60,
+          },
+        });
+      } catch (nErr) {
+        console.warn("assignTestSeries notification error:", nErr.message);
+      }
+    }
 
     res.json({
       message: "Test series assignment updated",
@@ -1202,6 +1244,27 @@ export const submitStudentTest = async (req, res) => {
     try {
       await deleteCache(`student:test_series:${studentId}`);
     } catch (_) {}
+
+    try {
+      sendStudentNotification({
+        studentIds: [studentId],
+        instituteId: instId,
+        title: "Test Submitted",
+        message: `Your score for "${test.title}": ${finalScore}/${totalPossibleMarks} (${percentage}%). ${isPassed ? "Passed!" : "Review answers in student app."}`,
+        type: "test_result",
+        actionUrl: "/student/test-series",
+        data: {
+          attemptId: String(attempt._id),
+          testSeriesId: String(test._id || test.id),
+          score: finalScore,
+          totalMarks: totalPossibleMarks,
+          percentage,
+          isPassed,
+        },
+      });
+    } catch (nErr) {
+      console.warn("submitStudentTest notification error:", nErr.message);
+    }
 
     res.json({
       message: "Test submitted successfully",
