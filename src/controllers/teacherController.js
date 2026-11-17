@@ -269,6 +269,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
     let myActiveBatches = [];
+    let batchIds = [];
 
     if (isReceptionist(req.user)) {
       const canViewStudents = isReceptionistFeatureAllowed(req.user, "students");
@@ -280,10 +281,28 @@ export const getTeacherDashboard = async (req, res) => {
         batchQuery.user = null;
       }
     } else if (isHiredTeacher(req.user)) {
-      myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
-      const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
+      const assignedBatchIds = await getTeacherAssignedBatchIds(req.user, instituteId);
+      const assignedBatchSet = new Set(assignedBatchIds.map((id) => String(id).toLowerCase().trim()));
 
-      const myBatchObjectIds = myActiveBatches.map(b => b._id || b.id).filter(Boolean);
+      myActiveBatches = allInstBatches.filter((b) => {
+        const bId = String(b._id || b.id || "").toLowerCase().trim();
+        return assignedBatchSet.has(bId) || isTeacherOfBatch(b, req.user);
+      });
+
+      batchIds = Array.from(new Set([
+        ...myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean),
+        ...assignedBatchIds,
+      ]));
+
+      const queryBatchIds = Array.from(new Set(
+        batchIds.flatMap((id) => {
+          const str = String(id || "").trim();
+          const uuid = toValidUUID(str);
+          return [str, uuid].filter(Boolean);
+        })
+      ));
+
+      const myBatchObjectIds = queryBatchIds;
       batchQuery.$or = [
         ...(myBatchObjectIds.length > 0 ? [{ _id: { $in: myBatchObjectIds } }] : []),
         { teacher: req.user._id },
@@ -309,13 +328,13 @@ export const getTeacherDashboard = async (req, res) => {
         ],
       };
 
-      if (batchIds.length > 0) {
+      if (queryBatchIds.length > 0) {
         studentQuery.$or = [
-          { batch: { $in: batchIds } },
-          { batches: { $in: batchIds } },
-          { enrolledBatchIds: { $in: batchIds } },
+          { batch: { $in: queryBatchIds } },
+          { batches: { $in: queryBatchIds } },
+          { enrolledBatchIds: { $in: queryBatchIds } },
         ];
-        quizQuery.batches = { $in: batchIds };
+        quizQuery.batches = { $in: queryBatchIds };
       } else {
         studentQuery.batch = null;
         quizQuery.batches = null;
@@ -415,9 +434,25 @@ export const getTeacherDashboard = async (req, res) => {
     const students = (rawStudents || []).filter((student) => {
       if (student.isArchived === true || student.is_archived === true || String(student.isArchived) === "true" || String(student.is_archived) === "true") return false;
       const studentBatchIds = [];
-      if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch));
-      if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b)));
+      if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
+      if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
       if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+      if (Array.isArray(student.enrolled_batch_ids)) student.enrolled_batch_ids.forEach((b) => studentBatchIds.push(String(b)));
+
+      if (isHiredTeacher(req.user)) {
+        const teacherBatchSet = new Set(
+          batchIds.flatMap((id) => {
+            const str = String(id || "").trim().toLowerCase();
+            const uuid = toValidUUID(str);
+            return [str, uuid ? uuid.toLowerCase() : null].filter(Boolean);
+          })
+        );
+        return studentBatchIds.some((bId) => {
+          const cleanId = String(bId || "").trim().toLowerCase();
+          return teacherBatchSet.has(cleanId) || teacherBatchSet.has(toValidUUID(cleanId)?.toLowerCase());
+        });
+      }
+
       if (studentBatchIds.length === 0) return true;
       return studentBatchIds.some((bId) => activeBatchIds.has(bId));
     });

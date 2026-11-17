@@ -14,7 +14,8 @@ export const isReceptionist = (user) => {
 export const isHiredTeacher = (user) => {
   if (!user) return false;
   const role = String(user.role || "").toLowerCase().trim();
-  return role === "teacher" && !isReceptionist(user);
+  const staffRole = String(user.staffRole || "").toLowerCase().trim();
+  return (role === "teacher" || role === "staff" || staffRole === "teacher") && !isReceptionist(user);
 };
 
 export const isInstituteAdmin = (user) => {

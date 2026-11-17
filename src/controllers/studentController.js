@@ -253,20 +253,33 @@ export const getStudents = async (req, res) => {
     let teacherBatchIds = [];
     if (isReceptionist(req.user)) {
       if (!isReceptionistFeatureAllowed(req.user, "students")) {
-        await setCache(cacheKey, []);
-        return res.json([]);
+        const emptyPayload = { students: [], total: 0 };
+        await setCache(cacheKey, emptyPayload);
+        return res.json(emptyPayload);
       }
       // Receptionist has institute-wide view of all active students
     } else if (isHiredTeacher(req.user)) {
-      teacherBatchIds = await getTeacherAssignedBatchIds(req.user, rawInst?._id || rawInst || instId);
+      const rawInst = req.user?.institute;
+      const instId = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
+      const ownerId = req.user?.institute?.adminUser || rawInst?.adminUser || instId || req.user?._id;
+
+      teacherBatchIds = await getTeacherAssignedBatchIds(req.user, instId || ownerId);
       if (teacherBatchIds.length === 0) {
-        await setCache(cacheKey, []);
-        return res.json([]);
+        const emptyPayload = { students: [], total: 0 };
+        await setCache(cacheKey, emptyPayload);
+        return res.json(emptyPayload);
       }
+      const queryBatchIds = Array.from(new Set(
+        teacherBatchIds.flatMap((id) => {
+          const str = String(id || "").trim();
+          const uuid = toValidUUID(str);
+          return [str, uuid].filter(Boolean);
+        })
+      ));
       query.$or = [
-        { batch: { $in: teacherBatchIds } },
-        { batches: { $in: teacherBatchIds } },
-        { enrolledBatchIds: { $in: teacherBatchIds } },
+        { batch: { $in: queryBatchIds } },
+        { batches: { $in: queryBatchIds } },
+        { enrolledBatchIds: { $in: queryBatchIds } },
       ];
     }
 
@@ -276,14 +289,24 @@ export const getStudents = async (req, res) => {
 
     let students = rawStudents;
     if (isHiredTeacher(req.user)) {
-      const teacherBatchSet = new Set(teacherBatchIds);
+      const teacherBatchSet = new Set(
+        teacherBatchIds.flatMap((id) => {
+          const str = String(id || "").trim().toLowerCase();
+          const uuid = toValidUUID(str);
+          return [str, uuid ? uuid.toLowerCase() : null].filter(Boolean);
+        })
+      );
       students = rawStudents.filter((student) => {
-        if (student.isArchived) return false;
+        if (student.isArchived === true || student.is_archived === true || String(student.isArchived) === "true") return false;
         const studentBatchIds = [];
         if (student.batch) studentBatchIds.push(String(student.batch._id || student.batch.id || student.batch));
         if (Array.isArray(student.batches)) student.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
         if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
-        return studentBatchIds.some((bId) => teacherBatchSet.has(bId));
+        if (Array.isArray(student.enrolled_batch_ids)) student.enrolled_batch_ids.forEach((b) => studentBatchIds.push(String(b)));
+        return studentBatchIds.some((bId) => {
+          const cleanId = String(bId || "").trim().toLowerCase();
+          return teacherBatchSet.has(cleanId) || teacherBatchSet.has(toValidUUID(cleanId)?.toLowerCase());
+        });
       });
     } else if (req.query.archivedOnly === "true") {
       students = rawStudents.filter((student) => {

@@ -4,7 +4,7 @@ import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
-import { readUserMetadata } from "../utils/supabaseModel.js";
+import { readUserMetadata, toValidUUID } from "../utils/supabaseModel.js";
 import { getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
@@ -24,7 +24,8 @@ export const getBatches = async (req, res) => {
     ].filter(Boolean);
 
     const isRefresh = req.query.nocache === "true" || req.query.refresh === "true" || req.query.skipCache === "true";
-    const cacheKey = `teacher:batches:${ownerId}:${req.user.role}:${req.query.includeArchived}:${req.query.status}`;
+    const cacheUserKey = req.user?._id || req.user?.id || ownerId;
+    const cacheKey = `teacher:batches:${cacheUserKey}:${req.user.role}:${req.query.includeArchived}:${req.query.status}`;
     if (!isRefresh) {
       const cached = await getCache(cacheKey);
       if (cached) {
@@ -42,16 +43,31 @@ export const getBatches = async (req, res) => {
       // Receptionist has view-only access to all batches in the institute
     } else if (isHiredTeacher(req.user)) {
       const assignedIds = await getTeacherAssignedBatchIds(req.user, ownerId);
-      if (assignedIds.length > 0) {
+      const queryTeacherIds = [
+        req.user._id,
+        toValidUUID(req.user._id),
+        req.user.phone,
+        req.user.email,
+      ].filter(Boolean);
+
+      const queryBatchIds = Array.from(new Set(
+        assignedIds.flatMap((id) => {
+          const str = String(id || "").trim();
+          const uuid = toValidUUID(str);
+          return [str, uuid].filter(Boolean);
+        })
+      ));
+
+      if (queryBatchIds.length > 0) {
         query.$or = [
-          { teacher: req.user._id },
-          { teachers: req.user._id },
-          { _id: { $in: assignedIds } }
+          { teacher: { $in: queryTeacherIds } },
+          { teachers: { $in: queryTeacherIds } },
+          { _id: { $in: queryBatchIds } }
         ];
       } else {
         query.$or = [
-          { teacher: req.user._id },
-          { teachers: req.user._id },
+          { teacher: { $in: queryTeacherIds } },
+          { teachers: { $in: queryTeacherIds } },
         ];
       }
     }
@@ -66,15 +82,23 @@ export const getBatches = async (req, res) => {
     ]);
 
     const processedBatches = batches.map((batch) => {
+      const bIdStr = String(batch._id || batch.id || "").trim();
+      const bUuid = toValidUUID(bIdStr);
       const count = students.filter((s) => {
-        const bIdStr = String(batch._id);
-        if (s.batch && String(s.batch) === bIdStr) return true;
-        if (Array.isArray(s.batches) && s.batches.some(b => String(b._id || b) === bIdStr)) return true;
-        if (Array.isArray(s.enrolledBatchIds) && s.enrolledBatchIds.some(b => String(b) === bIdStr)) return true;
-        return false;
+        if (s.isArchived === true || s.is_archived === true) return false;
+        const studentBatchIds = [];
+        if (s.batch) studentBatchIds.push(String(s.batch._id || s.batch.id || s.batch));
+        if (Array.isArray(s.batches)) s.batches.forEach((b) => studentBatchIds.push(String(b._id || b.id || b)));
+        if (Array.isArray(s.enrolledBatchIds)) s.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
+        if (Array.isArray(s.enrolled_batch_ids)) s.enrolled_batch_ids.forEach((b) => studentBatchIds.push(String(b)));
+        return studentBatchIds.some((id) => {
+          const clean = String(id || "").trim();
+          return clean === bIdStr || (bUuid && clean === bUuid);
+        });
       }).length;
+      const bObj = batch.toJSON ? batch.toJSON() : (batch.toObject ? batch.toObject() : { ...batch });
       return {
-        ...batch.toJSON(),
+        ...bObj,
         studentCount: count,
       };
     });
