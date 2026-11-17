@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import TestSeriesFolder from "../models/TestSeriesFolder.js";
 import TestSeries from "../models/TestSeries.js";
 import TestSeriesCategory from "../models/TestSeriesCategory.js";
@@ -46,8 +48,37 @@ function sanitizeQuestionsForStudent(questions = []) {
 }
 
 // -------------------------------------------------------------
-// CATEGORIES (DATABASE-STORED)
+// CATEGORIES, SUBJECTS & TOPICS TAXONOMY
 // -------------------------------------------------------------
+
+const FALLBACK_DIR = process.env.FALLBACK_DIR || path.join(process.cwd(), "scratch", "data");
+const TAXONOMY_FILE = path.join(FALLBACK_DIR, "category_taxonomy.json");
+
+export function readCategoryTaxonomy() {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(TAXONOMY_FILE)) {
+      fs.writeFileSync(TAXONOMY_FILE, JSON.stringify({}, null, 2));
+      return {};
+    }
+    return JSON.parse(fs.readFileSync(TAXONOMY_FILE, "utf8")) || {};
+  } catch (e) {
+    return {};
+  }
+}
+
+export function writeCategoryTaxonomy(data) {
+  try {
+    if (!fs.existsSync(FALLBACK_DIR)) {
+      fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+    }
+    fs.writeFileSync(TAXONOMY_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.warn("Could not write category_taxonomy.json:", e.message);
+  }
+}
 
 export const getCategories = async (req, res) => {
   try {
@@ -63,11 +94,76 @@ export const getCategories = async (req, res) => {
       } catch (_) {}
     }
 
-    const categories = (dbCategories || []).map((c) => ({
-      id: c._id || c.id,
-      name: c.name,
-      icon: c.icon || "📝",
-    }));
+    const taxonomy = readCategoryTaxonomy();
+
+    // Query distinct subjects and topics from test_series to merge into taxonomy
+    let existingTests = [];
+    try {
+      existingTests = await TestSeries.find({}).select("category subject topic");
+    } catch (_) {}
+
+    const testsTaxonomy = {};
+    for (const t of existingTests) {
+      const catKey = String(t.category || "General").toLowerCase().trim();
+      const subName = String(t.subject || "General").trim();
+      const topName = String(t.topic || "General").trim();
+
+      if (!testsTaxonomy[catKey]) testsTaxonomy[catKey] = {};
+      if (!testsTaxonomy[catKey][subName]) testsTaxonomy[catKey][subName] = new Set();
+      if (topName) testsTaxonomy[catKey][subName].add(topName);
+    }
+
+    const categories = (dbCategories || []).map((c) => {
+      const catName = c.name;
+      const catKey = String(catName).toLowerCase().trim();
+      const taxData = taxonomy[catKey] || {};
+      const taxSubjects = Array.isArray(taxData.subjects)
+        ? taxData.subjects
+        : Array.isArray(c.subjects)
+        ? c.subjects
+        : [];
+
+      // Build subject map
+      const subjectMap = new Map();
+
+      // 1. Add configured subjects from taxonomy
+      taxSubjects.forEach((sub) => {
+        if (!sub || !sub.name) return;
+        const sName = String(sub.name).trim();
+        const topics = Array.isArray(sub.topics) ? [...sub.topics] : [];
+        subjectMap.set(sName.toLowerCase(), {
+          name: sName,
+          icon: sub.icon || "📚",
+          topics: topics.map((t) => String(t).trim()).filter(Boolean),
+        });
+      });
+
+      // 2. Merge subjects & topics discovered from existing tests
+      if (testsTaxonomy[catKey]) {
+        for (const [sName, topSet] of Object.entries(testsTaxonomy[catKey])) {
+          const sLower = sName.toLowerCase();
+          if (!subjectMap.has(sLower)) {
+            subjectMap.set(sLower, {
+              name: sName,
+              icon: "📚",
+              topics: Array.from(topSet),
+            });
+          } else {
+            const existingSub = subjectMap.get(sLower);
+            const topicSet = new Set(existingSub.topics);
+            topSet.forEach((t) => topicSet.add(t));
+            existingSub.topics = Array.from(topicSet);
+          }
+        }
+      }
+
+      return {
+        id: c._id || c.id,
+        name: c.name,
+        icon: c.icon || "📝",
+        subjects: Array.from(subjectMap.values()),
+      };
+    });
 
     res.json({
       categories: categories.map((c) => c.name),
@@ -95,7 +191,15 @@ export const createCategory = async (req, res) => {
     const newCat = await TestSeriesCategory.create({
       name: cleanName,
       icon: icon ? icon.trim() : "📝",
+      subjects: [],
     });
+
+    const catKey = cleanName.toLowerCase().trim();
+    const taxonomy = readCategoryTaxonomy();
+    if (!taxonomy[catKey]) {
+      taxonomy[catKey] = { name: cleanName, subjects: [] };
+      writeCategoryTaxonomy(taxonomy);
+    }
 
     res.status(201).json({
       message: "Category created successfully",
@@ -103,11 +207,77 @@ export const createCategory = async (req, res) => {
         id: newCat._id || newCat.id,
         name: newCat.name,
         icon: newCat.icon,
+        subjects: [],
       },
     });
   } catch (error) {
     console.error("Error creating category:", error);
     res.status(500).json({ message: "Failed to create category" });
+  }
+};
+
+export const updateCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, icon } = req.body;
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const oldName = cat.name;
+    const newName = name ? name.trim() : oldName;
+    const newIcon = icon ? icon.trim() : cat.icon || "📝";
+
+    if (newName.toLowerCase() !== oldName.toLowerCase()) {
+      const existing = await TestSeriesCategory.findOne({ name: newName });
+      if (existing && String(existing._id || existing.id) !== String(cat._id || cat.id)) {
+        return res.status(400).json({ message: "Category with this name already exists" });
+      }
+    }
+
+    cat.name = newName;
+    cat.icon = newIcon;
+    await cat.save();
+
+    // If name changed, cascade update to TestSeries and TestSeriesFolder
+    if (newName !== oldName) {
+      try {
+        await TestSeries.updateMany({ category: oldName }, { $set: { category: newName } });
+        await TestSeriesFolder.updateMany({ category: oldName }, { $set: { category: newName } });
+      } catch (cErr) {
+        console.warn("Cascade category rename error:", cErr.message);
+      }
+
+      // Update taxonomy file
+      const taxonomy = readCategoryTaxonomy();
+      const oldKey = oldName.toLowerCase().trim();
+      const newKey = newName.toLowerCase().trim();
+      if (taxonomy[oldKey]) {
+        taxonomy[newKey] = { ...taxonomy[oldKey], name: newName };
+        delete taxonomy[oldKey];
+        writeCategoryTaxonomy(taxonomy);
+      }
+    }
+
+    try {
+      await clearCachePattern("student:test_series:*");
+    } catch (_) {}
+
+    res.json({
+      message: "Category updated successfully",
+      category: {
+        id: cat._id || cat.id,
+        name: cat.name,
+        icon: cat.icon,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating category:", error);
+    res.status(500).json({ message: "Failed to update category" });
   }
 };
 
@@ -121,14 +291,371 @@ export const deleteCategory = async (req, res) => {
       return res.status(404).json({ message: "Category not found" });
     }
 
+    const catKey = cat.name.toLowerCase().trim();
     await TestSeriesCategory.deleteOne({
       $or: [{ _id: id }, { id: id }, { name: id }],
     });
+
+    const taxonomy = readCategoryTaxonomy();
+    if (taxonomy[catKey]) {
+      delete taxonomy[catKey];
+      writeCategoryTaxonomy(taxonomy);
+    }
 
     res.json({ message: "Category deleted successfully" });
   } catch (error) {
     console.error("Error deleting category:", error);
     res.status(500).json({ message: "Failed to delete category" });
+  }
+};
+
+// -------------------------------------------------------------
+// SUBJECTS CRUD INSIDE CATEGORY
+// -------------------------------------------------------------
+
+export const addSubject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, icon } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Subject name is required" });
+    }
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const cleanSubName = name.trim();
+    const cleanIcon = icon ? icon.trim() : "📚";
+    const catKey = cat.name.toLowerCase().trim();
+
+    const taxonomy = readCategoryTaxonomy();
+    if (!taxonomy[catKey]) {
+      taxonomy[catKey] = { name: cat.name, subjects: [] };
+    }
+    if (!Array.isArray(taxonomy[catKey].subjects)) {
+      taxonomy[catKey].subjects = [];
+    }
+
+    const exists = taxonomy[catKey].subjects.some(
+      (s) => s.name.toLowerCase() === cleanSubName.toLowerCase()
+    );
+    if (exists) {
+      return res.status(400).json({ message: "Subject already exists in this category" });
+    }
+
+    const newSubject = {
+      name: cleanSubName,
+      icon: cleanIcon,
+      topics: [],
+    };
+    taxonomy[catKey].subjects.push(newSubject);
+    writeCategoryTaxonomy(taxonomy);
+
+    try {
+      cat.subjects = taxonomy[catKey].subjects;
+      await cat.save();
+    } catch (_) {}
+
+    res.status(201).json({
+      message: "Subject added successfully",
+      subject: newSubject,
+    });
+  } catch (error) {
+    console.error("Error adding subject:", error);
+    res.status(500).json({ message: "Failed to add subject" });
+  }
+};
+
+export const updateSubject = async (req, res) => {
+  try {
+    const { id, subjectName } = req.params;
+    const { name: newName, icon: newIcon } = req.body;
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const oldSubject = decodeURIComponent(subjectName).trim();
+    const cleanNewName = newName ? newName.trim() : oldSubject;
+    const catKey = cat.name.toLowerCase().trim();
+
+    const taxonomy = readCategoryTaxonomy();
+    if (!taxonomy[catKey] || !Array.isArray(taxonomy[catKey].subjects)) {
+      taxonomy[catKey] = { name: cat.name, subjects: [] };
+    }
+
+    let subObj = taxonomy[catKey].subjects.find(
+      (s) => s.name.toLowerCase() === oldSubject.toLowerCase()
+    );
+    if (!subObj) {
+      subObj = { name: cleanNewName, icon: newIcon || "📚", topics: [] };
+      taxonomy[catKey].subjects.push(subObj);
+    } else {
+      subObj.name = cleanNewName;
+      if (newIcon) subObj.icon = newIcon.trim();
+    }
+
+    writeCategoryTaxonomy(taxonomy);
+
+    try {
+      cat.subjects = taxonomy[catKey].subjects;
+      await cat.save();
+    } catch (_) {}
+
+    // Cascade update to TestSeries if subject name changed
+    if (cleanNewName.toLowerCase() !== oldSubject.toLowerCase()) {
+      try {
+        await TestSeries.updateMany(
+          { category: cat.name, subject: oldSubject },
+          { $set: { subject: cleanNewName } }
+        );
+      } catch (cErr) {
+        console.warn("Cascade subject rename error:", cErr.message);
+      }
+    }
+
+    res.json({
+      message: "Subject updated successfully",
+      subject: subObj,
+    });
+  } catch (error) {
+    console.error("Error updating subject:", error);
+    res.status(500).json({ message: "Failed to update subject" });
+  }
+};
+
+export const deleteSubject = async (req, res) => {
+  try {
+    const { id, subjectName } = req.params;
+    const { deleteTests } = req.query;
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const targetSub = decodeURIComponent(subjectName).trim();
+    const catKey = cat.name.toLowerCase().trim();
+
+    const taxonomy = readCategoryTaxonomy();
+    if (taxonomy[catKey] && Array.isArray(taxonomy[catKey].subjects)) {
+      taxonomy[catKey].subjects = taxonomy[catKey].subjects.filter(
+        (s) => s.name.toLowerCase() !== targetSub.toLowerCase()
+      );
+      writeCategoryTaxonomy(taxonomy);
+    }
+
+    try {
+      cat.subjects = taxonomy[catKey]?.subjects || [];
+      await cat.save();
+    } catch (_) {}
+
+    if (deleteTests === "true" || deleteTests === true) {
+      try {
+        await TestSeries.deleteMany({ category: cat.name, subject: targetSub });
+      } catch (_) {}
+    } else {
+      try {
+        await TestSeries.updateMany(
+          { category: cat.name, subject: targetSub },
+          { $set: { subject: "General" } }
+        );
+      } catch (_) {}
+    }
+
+    res.json({ message: "Subject deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting subject:", error);
+    res.status(500).json({ message: "Failed to delete subject" });
+  }
+};
+
+// -------------------------------------------------------------
+// CHAPTERS / TOPICS CRUD INSIDE SUBJECT & CATEGORY
+// -------------------------------------------------------------
+
+export const addTopic = async (req, res) => {
+  try {
+    const { id, subjectName } = req.params;
+    const { name } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: "Chapter/Topic name is required" });
+    }
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const targetSub = decodeURIComponent(subjectName).trim();
+    const cleanTopic = name.trim();
+    const catKey = cat.name.toLowerCase().trim();
+
+    const taxonomy = readCategoryTaxonomy();
+    if (!taxonomy[catKey]) taxonomy[catKey] = { name: cat.name, subjects: [] };
+    if (!Array.isArray(taxonomy[catKey].subjects)) taxonomy[catKey].subjects = [];
+
+    let subObj = taxonomy[catKey].subjects.find(
+      (s) => s.name.toLowerCase() === targetSub.toLowerCase()
+    );
+    if (!subObj) {
+      subObj = { name: targetSub, icon: "📚", topics: [] };
+      taxonomy[catKey].subjects.push(subObj);
+    }
+    if (!Array.isArray(subObj.topics)) subObj.topics = [];
+
+    const exists = subObj.topics.some((t) => t.toLowerCase() === cleanTopic.toLowerCase());
+    if (exists) {
+      return res.status(400).json({ message: "Topic already exists in this subject" });
+    }
+
+    subObj.topics.push(cleanTopic);
+    writeCategoryTaxonomy(taxonomy);
+
+    try {
+      cat.subjects = taxonomy[catKey].subjects;
+      await cat.save();
+    } catch (_) {}
+
+    res.status(201).json({
+      message: "Chapter/Topic added successfully",
+      topic: cleanTopic,
+    });
+  } catch (error) {
+    console.error("Error adding topic:", error);
+    res.status(500).json({ message: "Failed to add topic" });
+  }
+};
+
+export const updateTopic = async (req, res) => {
+  try {
+    const { id, subjectName, topicName } = req.params;
+    const { name: newTopicName } = req.body;
+
+    if (!newTopicName || !newTopicName.trim()) {
+      return res.status(400).json({ message: "New chapter/topic name is required" });
+    }
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const targetSub = decodeURIComponent(subjectName).trim();
+    const oldTopic = decodeURIComponent(topicName).trim();
+    const cleanNewTopic = newTopicName.trim();
+    const catKey = cat.name.toLowerCase().trim();
+
+    const taxonomy = readCategoryTaxonomy();
+    if (taxonomy[catKey] && Array.isArray(taxonomy[catKey].subjects)) {
+      const subObj = taxonomy[catKey].subjects.find(
+        (s) => s.name.toLowerCase() === targetSub.toLowerCase()
+      );
+      if (subObj && Array.isArray(subObj.topics)) {
+        subObj.topics = subObj.topics.map((t) =>
+          t.toLowerCase() === oldTopic.toLowerCase() ? cleanNewTopic : t
+        );
+        writeCategoryTaxonomy(taxonomy);
+      }
+    }
+
+    try {
+      cat.subjects = taxonomy[catKey]?.subjects || [];
+      await cat.save();
+    } catch (_) {}
+
+    // Cascade update to TestSeries
+    if (cleanNewTopic.toLowerCase() !== oldTopic.toLowerCase()) {
+      try {
+        await TestSeries.updateMany(
+          { category: cat.name, subject: targetSub, topic: oldTopic },
+          { $set: { topic: cleanNewTopic } }
+        );
+      } catch (cErr) {
+        console.warn("Cascade topic rename error:", cErr.message);
+      }
+    }
+
+    res.json({
+      message: "Chapter/Topic updated successfully",
+      topic: cleanNewTopic,
+    });
+  } catch (error) {
+    console.error("Error updating topic:", error);
+    res.status(500).json({ message: "Failed to update topic" });
+  }
+};
+
+export const deleteTopic = async (req, res) => {
+  try {
+    const { id, subjectName, topicName } = req.params;
+    const { deleteTests } = req.query;
+
+    const cat = await TestSeriesCategory.findOne({
+      $or: [{ _id: id }, { id: id }, { name: id }],
+    });
+    if (!cat) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    const targetSub = decodeURIComponent(subjectName).trim();
+    const targetTopic = decodeURIComponent(topicName).trim();
+    const catKey = cat.name.toLowerCase().trim();
+
+    const taxonomy = readCategoryTaxonomy();
+    if (taxonomy[catKey] && Array.isArray(taxonomy[catKey].subjects)) {
+      const subObj = taxonomy[catKey].subjects.find(
+        (s) => s.name.toLowerCase() === targetSub.toLowerCase()
+      );
+      if (subObj && Array.isArray(subObj.topics)) {
+        subObj.topics = subObj.topics.filter(
+          (t) => t.toLowerCase() !== targetTopic.toLowerCase()
+        );
+        writeCategoryTaxonomy(taxonomy);
+      }
+    }
+
+    try {
+      cat.subjects = taxonomy[catKey]?.subjects || [];
+      await cat.save();
+    } catch (_) {}
+
+    if (deleteTests === "true" || deleteTests === true) {
+      try {
+        await TestSeries.deleteMany({
+          category: cat.name,
+          subject: targetSub,
+          topic: targetTopic,
+        });
+      } catch (_) {}
+    } else {
+      try {
+        await TestSeries.updateMany(
+          { category: cat.name, subject: targetSub, topic: targetTopic },
+          { $set: { topic: "General" } }
+        );
+      } catch (_) {}
+    }
+
+    res.json({ message: "Chapter/Topic deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting topic:", error);
+    res.status(500).json({ message: "Failed to delete topic" });
   }
 };
 

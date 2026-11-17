@@ -6,7 +6,14 @@ import { verifyJwtToken } from "../utils/jwtHelper.js";
 import {
   getCategories,
   createCategory,
+  updateCategory,
   deleteCategory,
+  addSubject,
+  updateSubject,
+  deleteSubject,
+  addTopic,
+  updateTopic,
+  deleteTopic,
   getFolders,
   createFolder,
   updateFolder,
@@ -67,7 +74,18 @@ router.post("/convert-pdf", upload.single("pdfFile"), convertPdfToTestSeries);
 // Categories
 router.get("/categories", getCategories);
 router.post("/categories", createCategory);
+router.put("/categories/:id", updateCategory);
 router.delete("/categories/:id", deleteCategory);
+
+// Subjects inside Categories
+router.post("/categories/:id/subjects", addSubject);
+router.put("/categories/:id/subjects/:subjectName", updateSubject);
+router.delete("/categories/:id/subjects/:subjectName", deleteSubject);
+
+// Topics inside Subjects inside Categories
+router.post("/categories/:id/subjects/:subjectName/topics", addTopic);
+router.put("/categories/:id/subjects/:subjectName/topics/:topicName", updateTopic);
+router.delete("/categories/:id/subjects/:subjectName/topics/:topicName", deleteTopic);
 
 // Folders
 router.get("/folders", getFolders);
