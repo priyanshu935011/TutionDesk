@@ -876,9 +876,15 @@ export const getAdminTeachers = async (req, res) => {
 
     const teachersWithDetails = await Promise.all(
       teachers.map(async (teacher) => {
-        const teacherBatches = await Batch.find({ teacher: teacher._id }).select(
-          "name scheduleDays startTime endTime"
-        );
+        const rawAssigned = Array.isArray(teacher.assignedBatches) ? teacher.assignedBatches : [];
+        const assignedIds = rawAssigned.map(b => String(b._id || b)).filter(Boolean);
+        const teacherBatches = await Batch.find({
+          $or: [
+            { teacher: teacher._id },
+            { teachers: teacher._id },
+            ...(assignedIds.length > 0 ? [{ _id: { $in: assignedIds } }] : [])
+          ]
+        }).select("name scheduleDays startTime endTime");
         
         const batchesWithCounts = await Promise.all(
           teacherBatches.map(async (b) => {

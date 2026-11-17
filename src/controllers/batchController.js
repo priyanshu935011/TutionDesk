@@ -40,20 +40,18 @@ export const getBatches = async (req, res) => {
       }
       // Receptionist has view-only access to all batches in the institute
     } else if (isHiredTeacher(req.user)) {
-      const teacherUser = await User.findById(req.user._id);
-      const meta = readUserMetadata()[String(req.user._id)] || {};
-      const rawAssigned = Array.isArray(teacherUser?.assignedBatches) && teacherUser.assignedBatches.length > 0
-        ? teacherUser.assignedBatches
-        : (Array.isArray(meta.assignedBatches) ? meta.assignedBatches : []);
-      const assignedIds = rawAssigned.map(b => String(b._id || b)).filter(Boolean);
-
+      const assignedIds = await getTeacherAssignedBatchIds(req.user, ownerId);
       if (assignedIds.length > 0) {
         query.$or = [
           { teacher: req.user._id },
+          { teachers: req.user._id },
           { _id: { $in: assignedIds } }
         ];
       } else {
-        query.teacher = req.user._id;
+        query.$or = [
+          { teacher: req.user._id },
+          { teachers: req.user._id },
+        ];
       }
     }
 
@@ -100,6 +98,7 @@ export const createBatch = async (req, res) => {
     }
 
     const resolvedTeacher = (teacher || teacherId) && (teacher || teacherId) !== "" ? (teacher || teacherId) : null;
+    const resolvedTeachers = Array.isArray(req.body.teachers || req.body.teacherIds) ? (req.body.teachers || req.body.teacherIds).filter(Boolean) : (resolvedTeacher ? [resolvedTeacher] : []);
 
     // Use institute ID (not user ID) to satisfy the institute_id FK constraint in Supabase
     const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
@@ -109,7 +108,8 @@ export const createBatch = async (req, res) => {
       scheduleDays: Array.isArray(scheduleDays) ? scheduleDays : [],
       startTime,
       endTime,
-      teacher: resolvedTeacher,
+      teacher: resolvedTeacher || (resolvedTeachers.length > 0 ? resolvedTeachers[0] : null),
+      teachers: resolvedTeachers,
       session: session ? String(session).trim() : "",
     });
 
@@ -141,6 +141,13 @@ export const updateBatch = async (req, res) => {
     if (resolvedTeacher !== undefined) {
       const isTeacherValidUuid = resolvedTeacher && typeof resolvedTeacher === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(resolvedTeacher);
       updateData.teacher = isTeacherValidUuid ? resolvedTeacher : null;
+    }
+    if (req.body.teachers !== undefined || req.body.teacherIds !== undefined) {
+      const rawTeachers = req.body.teachers || req.body.teacherIds;
+      updateData.teachers = Array.isArray(rawTeachers) ? rawTeachers.filter(Boolean) : [];
+      if (!updateData.teacher && updateData.teachers.length > 0) {
+        updateData.teacher = updateData.teachers[0];
+      }
     }
     
     if (status !== undefined) {

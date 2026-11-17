@@ -19,7 +19,8 @@ import {
   streamRemoteFileInline,
 } from "../utils/noteDownload.js";
 import { supabase, supabaseBucket } from "../utils/supabase.js";
-import { toValidUUID, readUserMetadata, writeUserMetadata } from "../utils/supabaseModel.js";
+import { toValidUUID, readUserMetadata, writeUserMetadata, readBatchesMetadata, writeBatchesMetadata } from "../utils/supabaseModel.js";
+import { isTeacherOfBatch, getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
@@ -57,32 +58,7 @@ const uploadBufferToCloudinary = (buffer, options = {}) =>
     Readable.from(buffer).pipe(uploadStream);
   });
 
-export const isTeacherOfBatch = (b, user) => {
-  if (!b || !b.teacher || !user) return false;
-  const t = b.teacher;
-  const uId = String(user._id || user.id || "").trim();
-  const uUuid = toValidUUID(user._id || user.id);
-  const uPhone = String(user.phone || "").trim();
-  const uEmail = String(user.email || "").trim().toLowerCase();
-
-  if (typeof t === "object" && t !== null) {
-    const tId = String(t._id || t.id || "").trim();
-    const tPhone = String(t.phone || "").trim();
-    const tEmail = String(t.email || "").trim().toLowerCase();
-    return (
-      (tId && (tId === uId || tId === uUuid)) ||
-      (tPhone && uPhone && tPhone === uPhone) ||
-      (tEmail && uEmail && tEmail === uEmail)
-    );
-  } else {
-    const tStr = String(t).trim();
-    return (
-      (tStr && (tStr === uId || tStr === uUuid)) ||
-      (uPhone && tStr === uPhone) ||
-      (uEmail && tStr.toLowerCase() === uEmail)
-    );
-  }
-};
+export { isTeacherOfBatch, getTeacherAssignedBatchIds };
 
 const invalidateUserDashboard = async (req) => {
   try {
@@ -285,7 +261,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     let allInstBatches = [];
     try {
-      allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher name");
+      allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers name");
       steps["step2_batches"] = `found ${allInstBatches.length} batches`;
     } catch (e2) {
       steps["step2_batches"] = { error: e2.message };
@@ -306,9 +282,13 @@ export const getTeacherDashboard = async (req, res) => {
       const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
       const batchIds = myActiveBatches.map((b) => String(b._id || b.id || b)).filter(Boolean);
 
+      const myBatchObjectIds = myActiveBatches.map(b => b._id || b.id).filter(Boolean);
       batchQuery.$or = [
+        ...(myBatchObjectIds.length > 0 ? [{ _id: { $in: myBatchObjectIds } }] : []),
         { teacher: req.user._id },
         { teacher: toValidUUID(req.user._id) },
+        { teachers: req.user._id },
+        { teachers: toValidUUID(req.user._id) },
         ...(req.user.phone ? [{ teacher: req.user.phone }] : []),
         ...(req.user.email ? [{ teacher: req.user.email }] : []),
       ];
@@ -383,7 +363,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     try {
       batches = await Batch.find(batchQuery)
-        .select("_id name className scheduleDays startTime endTime teacher status")
+        .select("_id name className scheduleDays startTime endTime teacher teachers status")
         .sort({ createdAt: -1 })
         .populate("teacher", "name email")
         .lean();
@@ -465,7 +445,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     const summary = {
       totalStudents: students.length,
-      totalBatches: (batches || []).filter((b) => b.status !== "archived").length,
+      totalBatches: req.user.role === "teacher" ? myActiveBatches.length : (batches || []).filter((b) => b.status !== "archived").length,
       totalQuizzes: 0,
       totalNotes: totalNotesCount,
       totalTestResults: totalTestResultsCount,
@@ -613,7 +593,7 @@ export const getNotes = async (req, res) => {
     let rows = rawRows;
     if (req.user.role === "teacher") {
       const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instId].filter(Boolean);
-      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher");
+      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers");
       const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
       const myBatchIds = new Set();
       myActiveBatches.forEach((b) => {
@@ -1796,7 +1776,7 @@ export const getTestResults = async (req, res) => {
     if (req.user.role === "teacher") {
       const ownerId = rawInst?.adminUser ? String(rawInst.adminUser) : String(req.user._id || req.user.id || "");
       const userIds = [ownerId, req.user._id, rawInst?._id, rawInst, instituteId].filter(Boolean);
-      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher name");
+      const allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers name");
       const myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
       const myBatchIds = new Set();
       myActiveBatches.forEach((b) => {
@@ -2255,18 +2235,7 @@ export const createHiredTeacher = async (req, res) => {
       : [];
     const validBatchIds = validBatches.map(b => String(b._id));
 
-    // Remove these batches from any previously assigned teachers
-    const prevTeacherIds = Array.from(new Set(validBatches.map(b => b.teacher ? String(b.teacher._id || b.teacher) : null).filter(Boolean)));
-    if (prevTeacherIds.length > 0) {
-      await User.updateMany(
-        { _id: { $in: prevTeacherIds } },
-        { $pull: { assignedBatches: { $in: validBatchIds } } }
-      );
-      for (const ptId of prevTeacherIds) {
-        await clearCachePattern(`teacher:dashboard:${ptId}`);
-        await clearCachePattern(`teacher:students:${ptId}*`);
-      }
-    }
+    // Multi-teacher support: preserve previous teachers, don't overwrite assignments
 
     const isRec = staffRole && String(staffRole).toLowerCase().trim() === "receptionist";
     const assignedRole = isRec ? "receptionist" : "teacher";
@@ -2300,13 +2269,25 @@ export const createHiredTeacher = async (req, res) => {
     };
     writeUserMetadata(userMeta);
 
-    // Sync batches if specified
+    // Sync batches: append new teacher to batch.teachers and set primary teacher if empty
     if (validBatchIds.length > 0) {
       try {
-        await Batch.updateMany(
-          { _id: { $in: validBatchIds } },
-          { teacher: newTeacher._id }
-        );
+        const bMeta = readBatchesMetadata();
+        const batchesToSync = await Batch.find({ _id: { $in: validBatchIds } });
+        for (const b of batchesToSync) {
+          const bId = String(b._id || b.id);
+          const currentTeachers = Array.isArray(b.teachers) ? b.teachers.map(t => String(t._id || t.id || t)) : (bMeta[bId]?.teachers || []);
+          if (!currentTeachers.includes(tId)) {
+            currentTeachers.push(tId);
+          }
+          b.teachers = currentTeachers;
+          if (!b.teacher) {
+            b.teacher = newTeacher._id;
+          }
+          bMeta[bId] = { ...(bMeta[bId] || {}), teachers: currentTeachers };
+          await b.save();
+        }
+        writeBatchesMetadata(bMeta);
         await clearCachePattern("teacher:batches:*");
       } catch (_) {}
     }
@@ -2353,7 +2334,7 @@ export const getHiredTeachers = async (req, res) => {
     // Fetch batches to resolve assigned batches
     const batches = await Batch.find({
       $or: [{ user: instituteId }, { user: req.user._id }],
-    }).select("name teacher");
+    }).select("name teacher teachers");
 
     // Fetch today's attendance for these staff members using IST timezone
     const todayStr = getTodayISTDateString();
@@ -2387,7 +2368,8 @@ export const getHiredTeachers = async (req, res) => {
       const teacherBatches = batches.filter((b) => {
         const bId = String(b._id || b.id);
         const bTeacherId = String(b.teacher?._id || b.teacher || "");
-        return bTeacherId === tId || assignedIds.has(bId);
+        const bTeachers = Array.isArray(b.teachers) ? b.teachers.map(t => String(t?._id || t?.id || t)) : [];
+        return bTeacherId === tId || bTeachers.includes(tId) || assignedIds.has(bId);
       }).map((b) => ({
         _id: String(b._id || b.id),
         id: String(b._id || b.id),
@@ -2544,6 +2526,26 @@ export const deleteHiredTeacher = async (req, res) => {
       await StaffSalary.deleteMany({ staff: teacherId });
     } catch (_) {}
 
+    // Remove deleted teacher from batch assignments
+    try {
+      const bMeta = readBatchesMetadata();
+      const batches = await Batch.find({
+        $or: [{ teacher: teacherId }, { teachers: teacherId }]
+      });
+      for (const b of batches) {
+        const bId = String(b._id || b.id);
+        let currentTeachers = Array.isArray(b.teachers) ? b.teachers.map(t => String(t._id || t.id || t)) : (bMeta[bId]?.teachers || []);
+        currentTeachers = currentTeachers.filter(id => id !== teacherId);
+        b.teachers = currentTeachers;
+        if (String(b.teacher?._id || b.teacher) === teacherId) {
+          b.teacher = currentTeachers.length > 0 ? currentTeachers[0] : null;
+        }
+        bMeta[bId] = { ...(bMeta[bId] || {}), teachers: currentTeachers };
+        await b.save();
+      }
+      writeBatchesMetadata(bMeta);
+    } catch (_) {}
+
     // Clean user metadata
     try {
       const userMeta = readUserMetadata();
@@ -2670,35 +2672,51 @@ export const updateHiredTeacher = async (req, res) => {
       teacher.assignedBatches = newBatchIds;
       meta[tId].assignedBatches = newBatchIds;
 
-      // Unassign these batches from previous teachers
-      const prevTeachers = Array.from(new Set(validBatches
-        .map(b => b.teacher ? String(b.teacher._id || b.teacher) : null)
-        .filter(t => t && t !== String(teacher._id))));
-      if (prevTeachers.length > 0) {
-        await User.updateMany(
-          { _id: { $in: prevTeachers } },
-          { $pull: { assignedBatches: { $in: newBatchIds } } }
-        );
-        for (const ptId of prevTeachers) {
-          await clearCachePattern(`teacher:dashboard:${ptId}`);
-          await clearCachePattern(`teacher:students:${ptId}*`);
+      // Multi-teacher assignment logic (non-destructive)
+      const prevAssigned = Array.isArray(teacher.assignedBatches)
+        ? teacher.assignedBatches.map(b => String(b._id || b))
+        : (meta[tId]?.assignedBatches || []);
+      const removedBatchIds = prevAssigned.filter(bId => !newBatchIds.includes(bId));
+      const addedBatchIds = newBatchIds.filter(bId => !prevAssigned.includes(bId));
+
+      const bMeta = readBatchesMetadata();
+
+      // Handle unassigned batches for THIS teacher
+      if (removedBatchIds.length > 0) {
+        const removedBatches = await Batch.find({ _id: { $in: removedBatchIds } });
+        for (const b of removedBatches) {
+          const bId = String(b._id || b.id);
+          let currentTeachers = Array.isArray(b.teachers) ? b.teachers.map(t => String(t._id || t.id || t)) : (bMeta[bId]?.teachers || []);
+          currentTeachers = currentTeachers.filter(id => id !== tId);
+          b.teachers = currentTeachers;
+          if (String(b.teacher?._id || b.teacher) === tId) {
+            b.teacher = currentTeachers.length > 0 ? currentTeachers[0] : null;
+          }
+          bMeta[bId] = { ...(bMeta[bId] || {}), teachers: currentTeachers };
+          await b.save();
         }
       }
 
-      // Sync with Batch collection:
-      try {
-        await Batch.updateMany(
-          { teacher: teacher._id, _id: { $nin: newBatchIds } },
-          { teacher: null }
-        );
-        if (newBatchIds.length > 0) {
-          await Batch.updateMany(
-            { _id: { $in: newBatchIds } },
-            { teacher: teacher._id }
-          );
+      // Handle newly assigned batches for THIS teacher
+      if (addedBatchIds.length > 0) {
+        const addedBatches = await Batch.find({ _id: { $in: addedBatchIds } });
+        for (const b of addedBatches) {
+          const bId = String(b._id || b.id);
+          let currentTeachers = Array.isArray(b.teachers) ? b.teachers.map(t => String(t._id || t.id || t)) : (bMeta[bId]?.teachers || []);
+          if (!currentTeachers.includes(tId)) {
+            currentTeachers.push(tId);
+          }
+          b.teachers = currentTeachers;
+          if (!b.teacher) {
+            b.teacher = tId;
+          }
+          bMeta[bId] = { ...(bMeta[bId] || {}), teachers: currentTeachers };
+          await b.save();
         }
-        await clearCachePattern("teacher:batches:*");
-      } catch (_) {}
+      }
+
+      writeBatchesMetadata(bMeta);
+      await clearCachePattern("teacher:batches:*");
     }
 
     writeUserMetadata(meta);
@@ -3201,8 +3219,7 @@ export const getOutstandingStudents = async (req, res) => {
       }
     } else if (isHiredTeacher(req.user)) {
       try {
-        const myBatches = await Batch.find({ user: { $in: userIds }, teacher: req.user._id }).select("_id");
-        const batchIds = (myBatches || []).map((b) => String(b._id || b.id));
+        const batchIds = await getTeacherAssignedBatchIds(req.user, instituteId);
         if (batchIds.length > 0) {
           query.$or = [
             { batch: { $in: batchIds } },

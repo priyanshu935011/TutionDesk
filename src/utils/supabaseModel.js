@@ -147,7 +147,7 @@ export const initializeSupabaseStorage = async () => {
   }
 };
 
-function readBatchesMetadata() {
+export function readBatchesMetadata() {
   try {
     if (!fs.existsSync(FALLBACK_DIR)) {
       fs.mkdirSync(FALLBACK_DIR, { recursive: true });
@@ -161,7 +161,7 @@ function readBatchesMetadata() {
   }
 }
 
-function writeBatchesMetadata(metadata) {
+export function writeBatchesMetadata(metadata) {
   try {
     const content = JSON.stringify(metadata, null, 2);
     fs.writeFileSync(BATCHES_METADATA_FILE, content);
@@ -535,6 +535,12 @@ function matchFilter(doc, filter) {
         docVal = doc.batch_ids || doc.batches;
       } else if (key === "students") {
         docVal = doc.student_ids || doc.students;
+      } else if (key === "teacher") {
+        docVal = doc.teacher_id || doc.teacher;
+      } else if (key === "teachers") {
+        docVal = doc.teacher_ids || doc.teachers;
+      } else if (key === "assignedBatches" || key === "assigned_batches") {
+        docVal = doc.assigned_batches || doc.assignedBatches;
       }
     }
 
@@ -604,7 +610,15 @@ function matchFilter(doc, filter) {
       if (Array.isArray(docVal)) {
         if (!docVal.map(item => String(cleanValue(item))).includes(String(val))) return false;
       } else {
-        if (String(docVal) !== String(val)) return false;
+        if (String(docVal) !== String(val)) {
+        if (key === "teacher") {
+          const teachersArr = Array.isArray(doc.teacher_ids || doc.teachers) ? (doc.teacher_ids || doc.teachers) : [];
+          if (teachersArr.map(item => String(cleanValue(item))).includes(String(val))) {
+            continue;
+          }
+        }
+        return false;
+      }
       }
     }
   }
@@ -641,6 +655,10 @@ const camelToSnake = (str) => {
   if (str === "pdfPublicId") return "pdf_public_id";
   if (str === "students") return "student_ids";
   if (str === "batches") return "batch_ids";
+  if (str === "teachers") return "teacher_ids";
+  if (str === "assignedBatches") return "assigned_batches";
+  if (str === "staffRole") return "staff_role";
+  if (str === "allowedFeatures") return "allowed_features";
   return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
 };
 
@@ -649,6 +667,10 @@ const snakeToCamel = (str) => {
   if (str === "file_url") return "pdfUrl";
   if (str === "student_ids") return "students";
   if (str === "batch_ids") return "batches";
+  if (str === "teacher_ids") return "teachers";
+  if (str === "assigned_batches") return "assignedBatches";
+  if (str === "staff_role") return "staffRole";
+  if (str === "allowed_features") return "allowedFeatures";
   if (str === "playlist_id") return "playlistId";
   if (str === "video_id") return "video";
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -992,6 +1014,17 @@ class SupabaseDocument {
       const meta = metadata[this._id] || {};
       this.status = meta.status ?? this.status ?? "active";
       this.session = this.session ?? meta.session ?? "";
+      const metaTeachers = Array.isArray(meta.teachers) ? meta.teachers : [];
+      const dataTeachers = Array.isArray(data.teacher_ids || data.teachers) ? (data.teacher_ids || data.teachers) : [];
+      if (dataTeachers.length > 0) {
+        this.teachers = dataTeachers;
+      } else if (metaTeachers.length > 0) {
+        this.teachers = metaTeachers;
+      } else if (this.teacher) {
+        this.teachers = [this.teacher];
+      } else {
+        this.teachers = [];
+      }
     }
 
     if (tableName === "users" && this._id) {
@@ -1018,6 +1051,14 @@ class SupabaseDocument {
       } else {
         this.activity = [];
       }
+      this.assignedBatches = Array.isArray(data.assigned_batches || data.assignedBatches)
+        ? (data.assigned_batches || data.assignedBatches)
+        : (Array.isArray(meta.assignedBatches) ? meta.assignedBatches : []);
+      this.salary = Number(data.salary ?? meta.salary ?? 0);
+      this.staffRole = data.staff_role || data.staffRole || meta.staffRole || (this.role === "receptionist" ? "Receptionist" : "Teacher");
+      this.allowedFeatures = Array.isArray(data.allowed_features || data.allowedFeatures)
+        ? (data.allowed_features || data.allowedFeatures)
+        : (Array.isArray(meta.allowedFeatures) ? meta.allowedFeatures : []);
     }
 
     if (tableName === "sales_leads" && this._id) {
@@ -1474,7 +1515,8 @@ class SupabaseDocument {
         metadata[this._id] = {
           ...(metadata[this._id] || {}),
           status: this.status ?? "active",
-          session: this.session ?? metadata[this._id]?.session ?? ""
+          session: this.session ?? metadata[this._id]?.session ?? "",
+          teachers: Array.isArray(this.teachers) ? this.teachers : (this.teacher ? [this.teacher] : [])
         };
         writeBatchesMetadata(metadata);
       }
@@ -1497,6 +1539,10 @@ class SupabaseDocument {
           payoutConfig: this.payoutConfig ?? metadata[this._id]?.payoutConfig ?? null,
           aiAccessEnabled: this.aiAccessEnabled ?? metadata[this._id]?.aiAccessEnabled ?? (this.role === "teacher" ? false : true),
           activity: this.activity ?? metadata[this._id]?.activity ?? [],
+          assignedBatches: Array.isArray(this.assignedBatches) ? this.assignedBatches : (metadata[this._id]?.assignedBatches || []),
+          salary: this.salary !== undefined ? Number(this.salary) : (metadata[this._id]?.salary ?? 0),
+          staffRole: this.staffRole || metadata[this._id]?.staffRole || (this.role === "receptionist" ? "Receptionist" : "Teacher"),
+          allowedFeatures: Array.isArray(this.allowedFeatures) ? this.allowedFeatures : (metadata[this._id]?.allowedFeatures || []),
         };
         writeUserMetadata(metadata);
       }
@@ -2181,14 +2227,15 @@ class SupabaseQuery {
       let path = typeof pop.fields === "string" ? pop.fields : pop.fields.path;
       let select = typeof pop.fields === "object" ? pop.fields.select : pop.selectFields;
 
-      const idKey = path === "teacher" ? "teacher_id" : 
+      const idKey = path === "teacher" ? "teacher_id" :
+                    path === "teachers" ? "teacher_ids" : 
                     (path === "batch" || path === "batches") ? "batch_id" : 
                     path === "institute" ? "institute_id" : 
                     (path === "student" || path === "students") ? "student_id" :
                     path === "parentAdmin" ? "parent_admin" : path;
       
       let refTable = "";
-      if (path === "teacher" || path === "user" || path === "parentAdmin") refTable = "users";
+      if (path === "teacher" || path === "teachers" || path === "user" || path === "parentAdmin") refTable = "users";
       else if (path === "batch" || path === "batches") refTable = "batches";
       else if (path === "institute") refTable = "institutes";
       else if (path === "student" || path === "students") refTable = "students";
@@ -2454,7 +2501,7 @@ class SupabaseModel {
               subVal = subVal.$in;
             }
 
-            const isIdArray = ["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features"].includes(dbSubKey);
+            const isIdArray = ["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features", "teacher_ids", "teachers", "assigned_batches", "assignedBatches"].includes(dbSubKey);
 
             if (subVal !== undefined) {
               if (subVal === null) {
@@ -2569,7 +2616,7 @@ class SupabaseModel {
         q = q.is(dbKey, null);
       } else if (val instanceof Date) {
         q = q.eq(dbKey, val.toISOString());
-      } else if (["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features"].includes(dbKey) && typeof val === "string") {
+      } else if (["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features", "teacher_ids", "teachers", "assigned_batches", "assignedBatches"].includes(dbKey) && typeof val === "string") {
         q = q.contains(dbKey, [val]);
       } else if (typeof val === "object" && val !== null && val.$size === undefined && val._id === undefined && val.id === undefined) {
         for (const [op, opVal] of Object.entries(val)) {
@@ -2620,7 +2667,7 @@ class SupabaseModel {
           }
         }
       } else {
-        if (["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features"].includes(dbKey)) {
+        if (["student_ids", "batch_ids", "enrolled_batch_ids", "batches", "schedule_days", "allowed_features", "teacher_ids", "teachers", "assigned_batches", "assignedBatches"].includes(dbKey)) {
           if (val && typeof val === "object" && val.$size === 0) {
             q = q.eq(dbKey, "{}");
           } else {

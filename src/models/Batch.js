@@ -31,6 +31,12 @@ const batchSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    teachers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
     session: {
       type: String,
       default: "",

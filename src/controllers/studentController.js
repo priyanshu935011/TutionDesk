@@ -237,7 +237,7 @@ export const getStudents = async (req, res) => {
     }
 
     // Fetch all batches for this institute and filter by status in-memory
-    const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id name status teacher");
+    const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id name status teacher teachers");
     const activeBatchIds = new Set(allBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
     const archivedBatchIds = new Set(allBatches.filter((b) => b.status === "archived").map((b) => String(b._id)));
 
@@ -247,32 +247,7 @@ export const getStudents = async (req, res) => {
       if (bId && b.name) batchNameMap.set(bId.toLowerCase(), b.name);
     });
 
-const isTeacherOfBatch = (b, user) => {
-  if (!b || !b.teacher || !user) return false;
-  const t = b.teacher;
-  const uId = String(user._id || user.id || "").trim();
-  const uUuid = toValidUUID(user._id || user.id);
-  const uPhone = String(user.phone || "").trim();
-  const uEmail = String(user.email || "").trim().toLowerCase();
-
-  if (typeof t === "object" && t !== null) {
-    const tId = String(t._id || t.id || "").trim();
-    const tPhone = String(t.phone || "").trim();
-    const tEmail = String(t.email || "").trim().toLowerCase();
-    return (
-      (tId && (tId === uId || tId === uUuid)) ||
-      (tPhone && uPhone && tPhone === uPhone) ||
-      (tEmail && uEmail && tEmail === uEmail)
-    );
-  } else {
-    const tStr = String(t).trim();
-    return (
-      (tStr && (tStr === uId || tStr === uUuid)) ||
-      (uPhone && tStr === uPhone) ||
-      (uEmail && tStr.toLowerCase() === uEmail)
-    );
-  }
-};
+// isTeacherOfBatch imported from batchTeacherHelper.js
 
     let teacherBatchIds = [];
     if (isReceptionist(req.user)) {
@@ -282,10 +257,7 @@ const isTeacherOfBatch = (b, user) => {
       }
       // Receptionist has institute-wide view of all active students
     } else if (isHiredTeacher(req.user)) {
-      teacherBatchIds = Array.from(activeBatchIds).filter((bId) => {
-        const b = allBatches.find((x) => String(x._id) === bId);
-        return isTeacherOfBatch(b, req.user);
-      });
+      teacherBatchIds = await getTeacherAssignedBatchIds(req.user, rawInst?._id || rawInst || instId);
       if (teacherBatchIds.length === 0) {
         await setCache(cacheKey, []);
         return res.json([]);
@@ -492,9 +464,8 @@ export const getStudentBasicById = async (req, res) => {
     const query = { _id: studentId, user: ownerId };
 
     if (isHiredTeacher(req.user)) {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => b._id);
-      query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }];
+      const batchIds = await getTeacherAssignedBatchIds(req.user, ownerId);
+      query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }, { enrolledBatchIds: { $in: batchIds } }];
     }
 
     const student = await Student.findOne(query)
@@ -631,9 +602,8 @@ export const getStudentById = async (req, res) => {
     const query = { _id: studentId, user: ownerId };
 
     if (isHiredTeacher(req.user)) {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => b._id);
-      query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }];
+      const batchIds = await getTeacherAssignedBatchIds(req.user, ownerId);
+      query.$or = [{ batch: { $in: batchIds } }, { batches: { $in: batchIds } }, { enrolledBatchIds: { $in: batchIds } }];
     }
 
     if (isReceptionist(req.user)) {
@@ -986,8 +956,7 @@ export const updateStudent = async (req, res) => {
 
     // Teacher ownership check
     if (req.user.role === "teacher") {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const myBatchIds = myBatches.map(b => String(b._id));
+      const myBatchIds = await getTeacherAssignedBatchIds(req.user, ownerId);
       const studentBatchIds = (student.batches && student.batches.length > 0)
         ? student.batches.map(b => (b?._id || b?.id || b).toString())
         : (student.batch ? [(student.batch?._id || student.batch?.id || student.batch).toString()] : []);
@@ -1514,8 +1483,7 @@ export const markAttendance = async (req, res) => {
     const query = { _id: req.params.id, user: ownerId };
 
     if (isHiredTeacher(req.user)) {
-      const myBatches = await Batch.find({ user: ownerId, teacher: req.user._id }).select("_id");
-      const batchIds = myBatches.map((b) => b._id);
+      const batchIds = await getTeacherAssignedBatchIds(req.user, ownerId);
       const strBatchIds = batchIds.map((b) => String(b));
       query.$or = [
         { batch: { $in: batchIds } },
