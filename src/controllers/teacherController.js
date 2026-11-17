@@ -240,8 +240,14 @@ export const getTeacherDashboard = async (req, res) => {
     const rawUserIds = [
       ownerId,
       req.user._id,
+      req.user.id,
       institute?._id,
+      institute?.id,
       institute?.adminUser,
+      instIdStr,
+      rawInst?.adminUser,
+      rawInst?._id,
+      rawInst,
     ];
     const userIds = Array.from(new Set(
       rawUserIds

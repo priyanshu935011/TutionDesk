@@ -22,17 +22,27 @@ export const getDashboard = async (req, res) => {
       );
     }
 
-    const adminUserId = rawInst?.adminUser ? String(rawInst.adminUser) : null;
+    const adminUserId = rawInst?.adminUser ? String(rawInst.adminUser) : (institute?.adminUser ? String(institute.adminUser) : null);
     const ownerId = (req.user.role === "teacher" || req.user.role === "receptionist") 
       ? (adminUserId || instIdStr || req.user._id)
       : (instIdStr || req.user._id);
 
-    const allBatches = await Batch.find({ user: ownerId }).select("_id status");
+    const userIds = Array.from(new Set([
+      ownerId,
+      req.user._id,
+      req.user.id,
+      instIdStr,
+      adminUserId,
+      institute?._id,
+      institute?.id,
+    ].filter(Boolean).map(id => String(id).trim())));
+
+    const allBatches = await Batch.find({ user: { $in: userIds } }).select("_id status");
     const activeBatches = allBatches.filter((b) => b.status !== "archived");
     const activeBatchIds = new Set(activeBatches.map((b) => String(b._id)));
     const activeBatchCount = activeBatches.length;
 
-    const studentQuery = { user: ownerId, isArchived: { $ne: true } };
+    const studentQuery = { user: { $in: userIds }, isArchived: { $ne: true } };
 
     const [rawStudents] = await Promise.all([
       Student.find(studentQuery).populate("batch", "name"),

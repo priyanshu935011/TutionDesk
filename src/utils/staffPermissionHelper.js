@@ -4,24 +4,28 @@
  * data isolation, role-based access control (RBAC), and security.
  */
 
-export const isReceptionist = (user) => {
-  if (!user) return false;
-  const role = String(user.role || "").toLowerCase().trim();
-  const staffRole = String(user.staffRole || "").toLowerCase().trim();
-  return role === "receptionist" || staffRole === "receptionist";
-};
-
-export const isHiredTeacher = (user) => {
-  if (!user) return false;
-  const role = String(user.role || "").toLowerCase().trim();
-  const staffRole = String(user.staffRole || "").toLowerCase().trim();
-  return (role === "teacher" || role === "staff" || staffRole === "teacher") && !isReceptionist(user);
-};
-
 export const isInstituteAdmin = (user) => {
   if (!user) return false;
   const role = String(user.role || "").toLowerCase().trim();
   return role === "institute_admin" || role === "super_admin" || user.isSuperAdmin === true;
+};
+
+export const isReceptionist = (user) => {
+  if (!user) return false;
+  if (isInstituteAdmin(user)) return false;
+  const role = String(user.role || "").toLowerCase().trim();
+  const staffRole = String(user.staffRole || "").toLowerCase().trim();
+  return role === "receptionist" || (role === "staff" && staffRole === "receptionist");
+};
+
+export const isHiredTeacher = (user) => {
+  if (!user) return false;
+  if (isInstituteAdmin(user)) return false;
+  const role = String(user.role || "").toLowerCase().trim();
+  const staffRole = String(user.staffRole || "").toLowerCase().trim();
+  if (role === "teacher") return true;
+  if (role === "staff" && staffRole !== "receptionist") return true;
+  return false;
 };
 
 export const RECEPTIONIST_FEATURE_ALIASES = {
