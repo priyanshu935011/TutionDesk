@@ -399,7 +399,7 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     try {
-      if (req.user.role === "teacher") {
+      if (isHiredTeacher(req.user)) {
         const allResults = await TestResult.find({ institute: instituteId }).lean();
         myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
         const myBatchIds = new Set();
@@ -465,7 +465,7 @@ export const getTeacherDashboard = async (req, res) => {
 
     let totalCollectedFees = 0;
     let totalPendingFees = 0;
-    if (req.user.role === "institute_admin") {
+    if (isInstituteAdmin(req.user)) {
       for (const student of students) {
         const sObj = student.toJSON ? student.toJSON() : student;
         const total = Number(sObj.totalFees ?? sObj.total_fees ?? sObj.fees ?? 0);
@@ -487,15 +487,15 @@ export const getTeacherDashboard = async (req, res) => {
 
     const summary = {
       totalStudents: students.length,
-      totalBatches: req.user.role === "teacher"
+      totalBatches: isHiredTeacher(req.user)
         ? (Array.isArray(myActiveBatches) && myActiveBatches.length > 0 ? myActiveBatches.length : (batches || []).filter((b) => b.status !== "archived").length)
         : (batches || []).filter((b) => b.status !== "archived").length,
       totalQuizzes: 0,
       totalNotes: totalNotesCount,
       totalTestResults: totalTestResultsCount,
       liveQuiz: null,
-      totalCollectedFees: req.user.role === "institute_admin" ? totalCollectedFees : undefined,
-      totalPendingFees: req.user.role === "institute_admin" ? totalPendingFees : undefined,
+      totalCollectedFees: isInstituteAdmin(req.user) ? totalCollectedFees : undefined,
+      totalPendingFees: isInstituteAdmin(req.user) ? totalPendingFees : undefined,
     };
 
     const processedBatches = (batches || []).map((batch) => {
