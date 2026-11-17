@@ -267,13 +267,16 @@ export const getTeacherDashboard = async (req, res) => {
 
     let allInstBatches = [];
     try {
-      allInstBatches = await Batch.find({ user: { $in: userIds } }).select("_id status teacher teachers name");
+      allInstBatches = await Batch.find({ user: { $in: userIds } })
+        .select("_id id name className scheduleDays startTime endTime teacher teachers status")
+        .populate("teacher", "name email")
+        .lean();
       steps["step2_batches"] = `found ${allInstBatches.length} batches`;
     } catch (e2) {
       steps["step2_batches"] = { error: e2.message };
     }
 
-    const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id)));
+    const activeBatchIds = new Set(allInstBatches.filter((b) => b.status !== "archived").map((b) => String(b._id || b.id)));
     let myActiveBatches = [];
     let batchIds = [];
 
@@ -292,7 +295,7 @@ export const getTeacherDashboard = async (req, res) => {
 
       myActiveBatches = allInstBatches.filter((b) => {
         const bId = String(b._id || b.id || "").toLowerCase().trim();
-        return assignedBatchSet.has(bId) || isTeacherOfBatch(b, req.user);
+        return (assignedBatchSet.has(bId) || isTeacherOfBatch(b, req.user)) && b.status !== "archived";
       });
 
       batchIds = Array.from(new Set([
@@ -388,11 +391,32 @@ export const getTeacherDashboard = async (req, res) => {
     }
 
     try {
-      batches = await Batch.find(batchQuery)
-        .select("_id name className scheduleDays startTime endTime teacher teachers status")
-        .sort({ createdAt: -1 })
-        .populate("teacher", "name email")
-        .lean();
+      if (isHiredTeacher(req.user)) {
+        const assignedBatchSet = new Set(batchIds.map((id) => String(id).toLowerCase().trim()));
+        batches = allInstBatches.filter((b) => {
+          const bId = String(b._id || b.id || "").toLowerCase().trim();
+          return assignedBatchSet.has(bId) || isTeacherOfBatch(b, req.user);
+        });
+
+        const foundBatchIds = new Set(batches.map(b => String(b._id || b.id)));
+        const missingIds = batchIds.filter(id => !foundBatchIds.has(String(id)));
+        if (missingIds.length > 0) {
+          try {
+            const extraBatches = await Batch.find({ _id: { $in: missingIds } })
+              .select("_id id name className scheduleDays startTime endTime teacher teachers status")
+              .populate("teacher", "name email")
+              .lean();
+            batches.push(...extraBatches);
+            myActiveBatches.push(...extraBatches.filter(b => b.status !== "archived"));
+          } catch (_) {}
+        }
+      } else {
+        batches = await Batch.find(batchQuery)
+          .select("_id id name className scheduleDays startTime endTime teacher teachers status")
+          .sort({ createdAt: -1 })
+          .populate("teacher", "name email")
+          .lean();
+      }
       steps["step5_batches_query"] = `found ${batches.length} batches`;
     } catch (e5) {
       steps["step5_batches_query"] = { error: e5.message };
@@ -401,7 +425,6 @@ export const getTeacherDashboard = async (req, res) => {
     try {
       if (isHiredTeacher(req.user)) {
         const allResults = await TestResult.find({ institute: instituteId }).lean();
-        myActiveBatches = allInstBatches.filter((b) => isTeacherOfBatch(b, req.user));
         const myBatchIds = new Set();
         myActiveBatches.forEach((b) => {
           const bIdStr = String(b._id || b.id || "");

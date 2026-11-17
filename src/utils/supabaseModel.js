@@ -2526,7 +2526,15 @@ class SupabaseModel {
                 subVal.forEach(item => {
                   const cleanItem = cleanValue(item);
                   if (cleanItem && String(cleanItem) !== "[object Object]") {
-                    orParts.push(`${dbSubKey}.eq.${cleanItem}`);
+                    const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
+                    const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user"].includes(dbSubKey);
+                    const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbSubKey === "institute_id" || dbSubKey === "created_by");
+                    if (isUuidCol && !isUuid && !isTextIdCol) {
+                      const targetSubVal = toValidUUID(String(cleanItem));
+                      orParts.push(`${dbSubKey}.eq.${targetSubVal}`);
+                    } else {
+                      orParts.push(`${dbSubKey}.eq.${cleanItem}`);
+                    }
                   }
                 });
               } else if (subVal instanceof Date) {

@@ -5,7 +5,7 @@ import TestResult from "../models/TestResult.js";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
 import { readUserMetadata, toValidUUID } from "../utils/supabaseModel.js";
-import { getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
+import { isTeacherOfBatch, getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
 
@@ -36,50 +36,53 @@ export const getBatches = async (req, res) => {
     }
 
     const query = { user: { $in: userIds } };
+    let batches = [];
+    let students = [];
+
     if (isReceptionist(req.user)) {
       if (!isReceptionistFeatureAllowed(req.user, "batches")) {
         return res.status(403).json({ message: "Access denied. Batches feature is not enabled for your account." });
       }
-      // Receptionist has view-only access to all batches in the institute
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      [batches, students] = await Promise.all([
+        Batch.find(query).sort({ createdAt: -1 }).populate("teacher", "name email"),
+        Student.find({ user: { $in: userIds }, isArchived: { $ne: true } }),
+      ]);
     } else if (isHiredTeacher(req.user)) {
       const assignedIds = await getTeacherAssignedBatchIds(req.user, ownerId);
-      const queryTeacherIds = [
-        req.user._id,
-        toValidUUID(req.user._id),
-        req.user.phone,
-        req.user.email,
-      ].filter(Boolean);
+      const assignedSet = new Set(assignedIds.map((id) => String(id).toLowerCase().trim()));
+      const allInstBatches = await Batch.find({ user: { $in: userIds } }).sort({ createdAt: -1 }).populate("teacher", "name email");
 
-      const queryBatchIds = Array.from(new Set(
-        assignedIds.flatMap((id) => {
-          const str = String(id || "").trim();
-          const uuid = toValidUUID(str);
-          return [str, uuid].filter(Boolean);
-        })
-      ));
+      batches = allInstBatches.filter((b) => {
+        const bId = String(b._id || b.id || "").toLowerCase().trim();
+        return assignedSet.has(bId) || isTeacherOfBatch(b, req.user);
+      });
 
-      if (queryBatchIds.length > 0) {
-        query.$or = [
-          { teacher: { $in: queryTeacherIds } },
-          { teachers: { $in: queryTeacherIds } },
-          { _id: { $in: queryBatchIds } }
-        ];
-      } else {
-        query.$or = [
-          { teacher: { $in: queryTeacherIds } },
-          { teachers: { $in: queryTeacherIds } },
-        ];
+      const foundBatchIds = new Set(batches.map((b) => String(b._id || b.id)));
+      const missingIds = assignedIds.filter((id) => !foundBatchIds.has(String(id)));
+      if (missingIds.length > 0) {
+        try {
+          const extraBatches = await Batch.find({ _id: { $in: missingIds } }).populate("teacher", "name email");
+          batches.push(...extraBatches);
+        } catch (_) {}
       }
-    }
 
-    if (req.query.status) {
-      query.status = req.query.status;
-    }
+      if (req.query.status) {
+        batches = batches.filter((b) => b.status === req.query.status);
+      }
 
-    const [batches, students] = await Promise.all([
-      Batch.find(query).sort({ createdAt: -1 }).populate("teacher", "name email"),
-      Student.find({ user: { $in: userIds }, isArchived: { $ne: true } }),
-    ]);
+      students = await Student.find({ user: { $in: userIds }, isArchived: { $ne: true } });
+    } else {
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      [batches, students] = await Promise.all([
+        Batch.find(query).sort({ createdAt: -1 }).populate("teacher", "name email"),
+        Student.find({ user: { $in: userIds }, isArchived: { $ne: true } }),
+      ]);
+    }
 
     const processedBatches = batches.map((batch) => {
       const bIdStr = String(batch._id || batch.id || "").trim();
