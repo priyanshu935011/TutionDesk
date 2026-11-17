@@ -3240,6 +3240,166 @@ export const switchSuperAdminInstitute = async (req, res) => {
   }
 };
 
+export const switchSuperAdminStaff = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) {
+      return res.status(403).json({ message: "Access denied. Exclusively for super admin." });
+    }
+
+    const { id } = req.params;
+    let staff = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await User.findById(id);
+    }
+    if (!staff) {
+      staff = await User.findOne({ _id: id, role: "teacher" });
+    }
+    if (!staff) {
+      return res.status(404).json({ message: "Staff account not found." });
+    }
+
+    let institute = null;
+    if (staff.institute) {
+      institute = await Institute.findById(staff.institute);
+    }
+
+    if (institute && isSubscriptionExpired(institute)) {
+      return res.status(400).json({
+        success: false,
+        isExpired: true,
+        message: "This tuition subscription is expired. Switching into an expired tuition's staff is not permitted.",
+      });
+    }
+
+    const superAdminEmail = req.user.email || req.user.superAdminEmail || SUPER_ADMIN_EMAIL || "super_admin";
+    const token = signSessionToken({
+      id: staff._id,
+      email: staff.email,
+      name: staff.name,
+      role: staff.role || "teacher",
+      staffRole: staff.staffRole || "Teacher",
+      institute: staff.institute,
+      isSuperAdmin: true,
+      superAdminEmail,
+    }, "30d");
+
+    const instState = institute ? await buildInstituteState(staff) : null;
+
+    return res.json({
+      success: true,
+      token,
+      user: {
+        id: staff._id,
+        _id: staff._id,
+        name: staff.name,
+        email: staff.email,
+        phone: staff.phone,
+        role: staff.role || "teacher",
+        staffRole: staff.staffRole || "Teacher",
+        allowedFeatures: staff.allowedFeatures || [],
+        isSuperAdmin: true,
+        superAdminEmail,
+        institute: instState,
+      },
+      institute: instState,
+    });
+  } catch (error) {
+    console.error("switchSuperAdminStaff error:", error);
+    return res.status(500).json({ message: "Failed to switch staff: " + error.message });
+  }
+};
+
+export const switchSuperAdminStudent = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) {
+      return res.status(403).json({ message: "Access denied. Exclusively for super admin." });
+    }
+
+    const { id } = req.params;
+    let student = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      student = await Student.findById(id);
+    }
+    if (!student) {
+      student = await Student.findOne({ _id: id });
+    }
+    if (!student) {
+      return res.status(404).json({ message: "Student account not found." });
+    }
+
+    let institute = null;
+    if (student.user) {
+      institute = await Institute.findById(student.user);
+    }
+
+    if (institute && isSubscriptionExpired(institute)) {
+      return res.status(400).json({
+        success: false,
+        isExpired: true,
+        message: "This tuition subscription is expired. Switching into an expired tuition's student is not permitted.",
+      });
+    }
+
+    const superAdminEmail = req.user.email || req.user.superAdminEmail || SUPER_ADMIN_EMAIL || "super_admin";
+    const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+
+    if (student.enrollmentNumber) {
+      await Student.updateMany(
+        { enrollmentNumber: student.enrollmentNumber },
+        { currentSessionId: sessionId }
+      );
+    }
+
+    const token = signSessionToken({
+      id: student._id,
+      role: "student",
+      studentId: student._id,
+      instituteId: student.user,
+      email: student.email,
+      phone: student.phone,
+      enrollmentNumber: student.enrollmentNumber,
+      sessionId,
+      isSuperAdmin: true,
+      superAdminEmail,
+    }, "30d");
+
+    return res.json({
+      success: true,
+      token,
+      student: {
+        id: student._id,
+        _id: student._id,
+        name: student.name,
+        email: student.email,
+        phone: student.phone,
+        enrollmentNumber: student.enrollmentNumber,
+        batch: student.batch,
+        institute: institute ? {
+          id: institute._id,
+          name: institute.name,
+          brandingEnabled: institute.brandingEnabled !== false,
+          logoUrl: (institute.brandingEnabled !== false) ? (institute.logoUrl || null) : null,
+          themeColor: (institute.brandingEnabled !== false) ? (institute.themeColor || "#4C3FBE") : "#4C3FBE",
+          aiStudentEnabled: institute.aiStudentEnabled === true,
+        } : null,
+      },
+      user: {
+        id: student._id,
+        name: student.name,
+        email: student.email,
+        role: "student",
+        isSuperAdmin: true,
+        superAdminEmail,
+      },
+    });
+  } catch (error) {
+    console.error("switchSuperAdminStudent error:", error);
+    return res.status(500).json({ message: "Failed to switch student: " + error.message });
+  }
+};
+
 // ── Storage Increase Packs ──────────────────────────────────────────────
 export const DEFAULT_STORAGE_PACKS = [
   // Monthly Packs
