@@ -23,6 +23,8 @@ import {
   sendStudentCredentialsWhatsApp,
   sendPaymentReceiptWhatsApp,
   sendFeeReminderWhatsApp,
+  aiDetectBulkStudentFields,
+  getAllBatchesDailyAttendanceStatus,
 } from "../controllers/studentController.js";
 import protect from "../middleware/authMiddleware.js";
 
@@ -30,6 +32,8 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(protect);
+router.post("/ai-detect-fields", aiDetectBulkStudentFields);
+router.get("/all-batches-daily-status", getAllBatchesDailyAttendanceStatus);
 router.get("/batch-attendance/status-map", getBatchAttendanceStatusMap);
 router.get("/batch-attendance/monthly", getBatchMonthlyAttendance);
 router.get("/batch-attendance", getBatchAttendanceByDate);

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
+import { callGeminiApi, extractJsonFromText } from "../services/aiService.js";
 import Institute from "../models/Institute.js";
 import Note from "../models/Note.js";
 import TestResult from "../models/TestResult.js";
@@ -702,7 +703,8 @@ export const createStudent = async (req, res) => {
           amount: amountToRecord,
           paymentDate: joinedOn ? new Date(joinedOn) : new Date(),
           paymentType: (feePlanType && allowedFeeTypes.includes(feePlanType)) ? feePlanType : "monthly",
-          note: "Initial paid fees"
+          paymentMode: req.body.paymentMode || req.body.paymentMethod || "Cash",
+          note: req.body.paymentNote || req.body.note || "Initial paid fees"
         });
       }
     }
@@ -3775,6 +3777,7 @@ export const bulkCreateStudents = async (req, res) => {
             amount: paidFeesInput,
             paymentDate: new Date(joinedOn),
             paymentType: feePlanType,
+            paymentMode: row.paymentMode || "Cash",
             note: "Auto-collected on bulk import"
           });
         } else if (cleanFeeStatus === "paid" && totalFees > 0) {
@@ -3783,6 +3786,7 @@ export const bulkCreateStudents = async (req, res) => {
             amount: totalFees,
             paymentDate: new Date(joinedOn),
             paymentType: feePlanType,
+            paymentMode: row.paymentMode || "Cash",
             note: "Auto-collected on bulk import"
           });
         }
@@ -4785,6 +4789,222 @@ export const getBatchMonthlyAttendance = async (req, res) => {
   } catch (error) {
     console.error("getBatchMonthlyAttendance error:", error);
     return res.status(500).json({ message: "Could not fetch batch monthly attendance." });
+  }
+};
+
+// ==============================================================================
+// AI Field Detection for Bulk Student Import
+// ==============================================================================
+export const aiDetectBulkStudentFields = async (req, res) => {
+  try {
+    const { headers = [], sampleRows = [], customFields = [] } = req.body;
+    if (!Array.isArray(headers) || headers.length === 0) {
+      return res.status(400).json({ message: "CSV headers are required." });
+    }
+
+    const customFieldsDesc = Array.isArray(customFields) && customFields.length > 0
+      ? `\nCustom Institute Fields:\n${customFields.map(f => `- "${f.label || f.name}": ${(f.type || "text")}`).join("\n")}`
+      : "";
+
+    const prompt = `You are an AI assistant specialized in CRM student data ingestion.
+A teacher/institute admin uploaded a CSV spreadsheet with custom column headers. Analyze the column headers and sample data rows to map each CSV header to the best matching CRM accepted field.
+
+CSV Column Headers:
+${JSON.stringify(headers)}
+
+Sample Data Rows:
+${JSON.stringify(sampleRows.slice(0, 5))}
+
+CRM Accepted Fields:
+- "name": Student's full name, candidate name, student name
+- "phone": Student's 10-digit mobile number, WhatsApp number, contact
+- "parentName": Father's name, mother's name, guardian name, parent name
+- "parentPhone": Father/mother/guardian contact, parent phone number
+- "email": Student or parent email address
+- "address": Address, city, location, locality, residence
+- "batchName": Batch, class, grade, standard, course, section
+- "joinedOn": Admission date, joining date, enrollment date, registration date (YYYY-MM-DD)
+- "totalFees": Total fee, course fees, annual fees, tuition fee amount (numeric)
+- "paidFees": Amount paid, fees paid, advance payment, initial fee (numeric)
+- "feePlanType": Fee structure or plan type ('monthly', 'full_course', or 'partial')
+- "feeStatus": Fee payment status ('paid', 'unpaid', or 'partial')
+- "dueDate": Fee due date or next due date
+- "ignore": If a column is irrelevant (e.g. S.No, ID, Timestamp, Comments, Remarks, etc.)${customFieldsDesc}
+
+Instructions:
+1. Return a JSON object with:
+   - "mapping": key-value map where key is the EXACT CSV header from CSV Column Headers, and value is one of the CRM Accepted Fields (or exact custom field name if applicable).
+   - "explanation": a concise 1-sentence explanation of what fields were detected.
+2. Only return valid JSON inside a code block.`;
+
+    let aiResult = null;
+    try {
+      const rawResponse = await callGeminiApi({
+        prompt,
+        systemInstruction: "You are an accurate CSV schema detector. Always return clean JSON mapping exact CSV headers to CRM fields.",
+        temperature: 0.1
+      });
+      aiResult = extractJsonFromText(rawResponse);
+    } catch (aiErr) {
+      console.warn("AI bulk mapping error, falling back to heuristic:", aiErr?.message);
+    }
+
+    // Heuristic mapping fallback
+    const fallbackMapping = {};
+    for (const h of headers) {
+      const norm = String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (norm.includes("studentname") || norm === "name" || norm.includes("candidatename") || norm === "fullname" || norm === "student") {
+        fallbackMapping[h] = "name";
+      } else if (norm.includes("studentphone") || norm.includes("studentmobile") || norm === "phone" || norm === "mobile" || norm === "contact" || norm === "whatsapp") {
+        fallbackMapping[h] = "phone";
+      } else if (norm.includes("parentname") || norm.includes("fathername") || norm.includes("mothername") || norm.includes("guardianname")) {
+        fallbackMapping[h] = "parentName";
+      } else if (norm.includes("parentphone") || norm.includes("parentmobile") || norm.includes("fathermobile") || norm.includes("guardianphone") || norm.includes("guardiancontact")) {
+        fallbackMapping[h] = "parentPhone";
+      } else if (norm.includes("email")) {
+        fallbackMapping[h] = "email";
+      } else if (norm.includes("address") || norm.includes("city") || norm.includes("location") || norm.includes("residence")) {
+        fallbackMapping[h] = "address";
+      } else if (norm.includes("batch") || norm.includes("class") || norm.includes("course") || norm.includes("grade") || norm.includes("standard") || norm.includes("section")) {
+        fallbackMapping[h] = "batchName";
+      } else if (norm.includes("join") || norm.includes("admission") || norm.includes("enroll") || norm.includes("registrationdate") || norm.includes("regdate")) {
+        fallbackMapping[h] = "joinedOn";
+      } else if (norm.includes("paidfee") || norm.includes("amountpaid") || norm.includes("paidamount") || norm.includes("feespaid") || norm.includes("advance")) {
+        fallbackMapping[h] = "paidFees";
+      } else if (norm.includes("totalfee") || norm.includes("coursefee") || norm.includes("fees") || norm.includes("fee") || norm.includes("amount")) {
+        fallbackMapping[h] = "totalFees";
+      } else if (norm.includes("plan") || norm.includes("structure")) {
+        fallbackMapping[h] = "feePlanType";
+      } else if (norm.includes("feestatus") || norm.includes("paymentstatus") || norm.includes("status")) {
+        fallbackMapping[h] = "feeStatus";
+      } else if (norm.includes("due")) {
+        fallbackMapping[h] = "dueDate";
+      } else {
+        fallbackMapping[h] = "ignore";
+      }
+    }
+
+    const mapping = (aiResult && typeof aiResult.mapping === "object")
+      ? { ...fallbackMapping, ...aiResult.mapping }
+      : fallbackMapping;
+
+    return res.status(200).json({
+      success: true,
+      mapping,
+      explanation: aiResult?.explanation || "Auto-detected CSV column mapping for student enrollment."
+    });
+  } catch (error) {
+    console.error("aiDetectBulkStudentFields error:", error);
+    return res.status(500).json({ message: "Could not detect CSV fields." });
+  }
+};
+
+// ==============================================================================
+// Daily Attendance Status Overview for All Batches
+// ==============================================================================
+export const getAllBatchesDailyAttendanceStatus = async (req, res) => {
+  try {
+    const userIds = getUserIds(req);
+    const targetDateStr = req.query.date ? getISTDateStr(req.query.date) : getISTDateStr(new Date());
+
+    // 1. Fetch active batches
+    const batches = await Batch.find({
+      user: { $in: userIds },
+      isArchived: { $ne: true }
+    }).select("_id id name startTime endTime scheduleDays days timing");
+
+    // 2. Fetch active students
+    const students = await Student.find({
+      user: { $in: userIds },
+      isArchived: { $ne: true }
+    }).select("_id id name batch batches enrolledBatchIds batchName attendanceRecords");
+
+    // 3. Try to fetch Supabase batch_attendance_records for this date
+    const dbRecordsByBatchId = new Map();
+    try {
+      const { data: dbRecords, error: dbErr } = await supabase
+        .from("batch_attendance_records")
+        .select("batch_id, attendance_map, total_count, present_count, absent_count")
+        .eq("date", targetDateStr);
+      if (!dbErr && Array.isArray(dbRecords)) {
+        for (const rec of dbRecords) {
+          if (rec.batch_id) {
+            dbRecordsByBatchId.set(String(rec.batch_id).toLowerCase(), rec);
+          }
+        }
+      }
+    } catch (_) {}
+
+    const batchStatusList = batches.map(batch => {
+      const bIdStr = String(batch._id || batch.id || "");
+      const bIdLower = bIdStr.toLowerCase();
+      const dbRec = dbRecordsByBatchId.get(bIdLower);
+
+      // Filter students in this batch using standardized helper
+      const batchStudents = students.filter(s => isStudentInBatch(s, batch, bIdStr));
+      const totalStudents = batchStudents.length;
+
+      let isTaken = false;
+      let presentCount = 0;
+      let absentCount = 0;
+      let markedCount = 0;
+
+      if (dbRec && dbRec.attendance_map && Object.keys(dbRec.attendance_map).length > 0) {
+        isTaken = true;
+        const map = dbRec.attendance_map;
+        markedCount = Object.keys(map).length;
+        presentCount = dbRec.present_count !== undefined ? Number(dbRec.present_count) : Object.values(map).filter(v => v === "present").length;
+        absentCount = dbRec.absent_count !== undefined ? Number(dbRec.absent_count) : Object.values(map).filter(v => v === "absent").length;
+      } else {
+        // Fallback: check students' attendanceRecords for targetDateStr
+        for (const s of batchStudents) {
+          const recs = Array.isArray(s.attendanceRecords) ? s.attendanceRecords : [];
+          const recToday = recs.find(r => {
+            if (!r) return false;
+            const rDate = r.date ? getISTDateStr(r.date) : (r.createdAt ? getISTDateStr(r.createdAt) : null);
+            return rDate === targetDateStr;
+          });
+          if (recToday) {
+            markedCount++;
+            const st = String(recToday.status || "").toLowerCase();
+            if (st === "present") presentCount++;
+            else if (st === "absent") absentCount++;
+          }
+        }
+        isTaken = totalStudents > 0 ? (markedCount > 0) : false;
+      }
+
+      const timing = (batch.startTime && batch.endTime)
+        ? `${batch.startTime} - ${batch.endTime}`
+        : (batch.timing || "04:00 PM - 05:30 PM");
+
+      return {
+        batchId: bIdStr,
+        batchName: batch.name || "Batch",
+        timing,
+        totalStudents,
+        markedCount,
+        isTaken,
+        presentCount,
+        absentCount
+      };
+    });
+
+    const takenCount = batchStatusList.filter(b => b.isTaken).length;
+    const pendingCount = batchStatusList.filter(b => !b.isTaken).length;
+
+    return res.status(200).json({
+      date: targetDateStr,
+      summary: {
+        totalBatches: batchStatusList.length,
+        takenCount,
+        pendingCount
+      },
+      batches: batchStatusList
+    });
+  } catch (error) {
+    console.error("getAllBatchesDailyAttendanceStatus error:", error);
+    return res.status(500).json({ message: "Could not fetch batch daily attendance status." });
   }
 };
 
