@@ -58,7 +58,7 @@ export const buildInstituteState = async (user) => {
   }
 
   const liveBalance = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
-  const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+  const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.25);
 
   if (!institute && instIdStr) {
     try {
@@ -111,7 +111,7 @@ export const buildInstituteState = async (user) => {
           whatsappSettings: { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
           studentCustomFields: [],
           walletBalance: Number(reg.wpBalance || 0),
-          perMessageCharge: Number(liveRate ?? 0.10),
+          perMessageCharge: Number(liveRate ?? 0.25),
           isDirectTrial: true,
           trialDaysLeft: daysLeft,
         };
@@ -142,7 +142,7 @@ export const buildInstituteState = async (user) => {
       whatsappSettings: { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
       studentCustomFields: [],
       walletBalance: Number(liveBalance || 0),
-      perMessageCharge: Number(liveRate ?? 0.10),
+      perMessageCharge: Number(liveRate ?? 0.25),
     };
   }
 
@@ -173,7 +173,7 @@ export const buildInstituteState = async (user) => {
     whatsappSettings: institute.whatsappSettings || { absentAlertsEnabled: false, feeRemindersEnabled: false, customMessageTemplate: "" },
     studentCustomFields: institute.studentCustomFields || [],
     walletBalance: Number(liveBalance || 0),
-    perMessageCharge: Number(liveRate ?? 0.10),
+    perMessageCharge: Number(liveRate ?? 0.25),
     aiEnabled: Boolean(institute.aiEnabled ?? institute.ai_enabled ?? false),
     aiStudentEnabled: Boolean(institute.aiStudentEnabled ?? institute.ai_student_enabled ?? false),
     aiWalletBalance: Number(institute.aiWalletBalance ?? institute.ai_wallet_balance ?? 0),

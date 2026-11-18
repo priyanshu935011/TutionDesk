@@ -155,7 +155,7 @@ export const getTeacherDashboard = async (req, res) => {
       }
 
       const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
-      const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+      const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.25);
 
       const { getInstituteAiDetails } = await import("../services/aiService.js");
       const aiDetails = await getInstituteAiDetails(instIdStr).catch(() => null);
@@ -3472,7 +3472,7 @@ export const getQuickSummary = async (req, res) => {
         notesStorageGb: storageInfo.notesStorageGb || 0,
       },
       walletBalance: liveBal,
-      perMessageCharge: institute?.perMessageCharge ?? 0.10,
+      perMessageCharge: institute?.perMessageCharge ?? 0.25,
       whatsappSettings: wpSettings || {},
     });
   } catch (error) {
@@ -3491,7 +3491,7 @@ export const getQuickSummary = async (req, res) => {
         notesStorageGb: 0,
       },
       walletBalance: 0,
-      perMessageCharge: 0.10,
+      perMessageCharge: 0.25,
     });
   }
 };

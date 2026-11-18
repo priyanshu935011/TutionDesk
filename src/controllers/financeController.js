@@ -223,6 +223,42 @@ export const addExpense = async (req, res) => {
   }
 };
 
+export const updateExpense = async (req, res) => {
+  try {
+    if (req.user.role === "teacher") {
+      return res.status(403).json({ message: "Access denied." });
+    }
+
+    const { title, amount, category, date, notes } = req.body;
+    const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+
+    const expense = await InstituteExpense.findOne({
+      _id: req.params.id,
+      institute: instituteId,
+    });
+
+    if (!expense) {
+      return res.status(404).json({ message: "Expense not found." });
+    }
+
+    if (title !== undefined) expense.title = title.trim();
+    if (amount !== undefined) expense.amount = Number(amount);
+    if (category !== undefined) expense.category = String(category).trim();
+    if (date !== undefined) {
+      const targetDate = String(date).split("T")[0];
+      expense.date = targetDate;
+      expense.monthKey = targetDate.slice(0, 7);
+    }
+    if (notes !== undefined) expense.notes = String(notes).trim();
+
+    await expense.save();
+    return res.json(expense);
+  } catch (error) {
+    console.error("updateExpense error:", error);
+    return res.status(500).json({ message: "Could not update expense." });
+  }
+};
+
 export const deleteExpense = async (req, res) => {
   try {
     if (req.user.role === "teacher") {
@@ -272,6 +308,42 @@ export const addIncome = async (req, res) => {
   } catch (error) {
     console.error("addIncome error:", error);
     return res.status(500).json({ message: "Could not add income." });
+  }
+};
+
+export const updateIncome = async (req, res) => {
+  try {
+    if (req.user.role === "teacher") {
+      return res.status(403).json({ message: "Access denied." });
+    }
+
+    const { title, amount, source, date, notes } = req.body;
+    const instituteId = req.user.institute?._id || req.user.institute || req.user._id;
+
+    const income = await InstituteIncome.findOne({
+      _id: req.params.id,
+      institute: instituteId,
+    });
+
+    if (!income) {
+      return res.status(404).json({ message: "Income not found." });
+    }
+
+    if (title !== undefined) income.title = title.trim();
+    if (amount !== undefined) income.amount = Number(amount);
+    if (source !== undefined) income.source = String(source).trim();
+    if (date !== undefined) {
+      const targetDate = String(date).split("T")[0];
+      income.date = targetDate;
+      income.monthKey = targetDate.slice(0, 7);
+    }
+    if (notes !== undefined) income.notes = String(notes).trim();
+
+    await income.save();
+    return res.json(income);
+  } catch (error) {
+    console.error("updateIncome error:", error);
+    return res.status(500).json({ message: "Could not update income." });
   }
 };
 

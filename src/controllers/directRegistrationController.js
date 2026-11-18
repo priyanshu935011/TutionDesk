@@ -18,6 +18,7 @@ import {
   writeFallbackData,
   readInstitutesMetadata,
   writeInstitutesMetadata,
+  updateInstitutePerMessageChargeMetadata,
 } from "../utils/supabaseModel.js";
 import ConsentRecord from "../models/ConsentRecord.js";
 import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
@@ -81,6 +82,7 @@ export const getGlobalTrialDefaults = async () => {
       return {
         trialDays: Number(val.trialDays || 7),
         wpBalance: Number(val.wpBalance ?? 10.0),
+        perMessageCharge: Number(val.perMessageCharge ?? val.wpRate ?? 0.25),
         aiBalance: Number(val.aiBalance ?? 50.0),
         aiEnabled: val.aiEnabled !== undefined ? Boolean(val.aiEnabled) : true,
         aiStudentEnabled: val.aiStudentEnabled !== undefined ? Boolean(val.aiStudentEnabled) : false,
@@ -114,6 +116,7 @@ export const getGlobalTrialDefaults = async () => {
   return {
     trialDays: 7,
     wpBalance: 10.0,
+    perMessageCharge: 0.25,
     aiBalance: 50.0,
     aiEnabled: true,
     aiStudentEnabled: false,
@@ -383,6 +386,7 @@ export const verifyOtpAndRegister = async (req, res) => {
       tuition_type: "solo",
       allowed_features: allFeatures,
       wallet_balance: Number(defaults.wpBalance ?? 10.0),
+      per_message_charge: Number(defaults.perMessageCharge ?? 0.25),
       ai_wallet_balance: Number(defaults.aiBalance ?? 50.0),
       quiz_feature_enabled: defaults.quizFeatureEnabled !== false,
       ai_enabled: defaults.aiEnabled !== false,
@@ -410,6 +414,7 @@ export const verifyOtpAndRegister = async (req, res) => {
       registrationSource: "direct",
       isDirectRegistration: true,
       walletBalance: Number(defaults.wpBalance ?? 10.0),
+      perMessageCharge: Number(defaults.perMessageCharge ?? 0.25),
       aiWalletBalance: Number(defaults.aiBalance ?? 50.0),
       aiEnabled: defaults.aiEnabled !== false,
       aiStudentEnabled: Boolean(defaults.aiStudentEnabled),
@@ -423,6 +428,7 @@ export const verifyOtpAndRegister = async (req, res) => {
       createdByName: "direct_registration",
     };
     writeInstitutesMetadata(metadata);
+    updateInstitutePerMessageChargeMetadata(instId, Number(defaults.perMessageCharge ?? 0.25));
 
     if (!institute) {
       institute = await Institute.findById(instId).catch(() => null);
@@ -645,6 +651,7 @@ export const verifyOtpAndRegister = async (req, res) => {
         if (metadata[instId]) {
           delete metadata[instId];
           writeInstitutesMetadata(metadata);
+    updateInstitutePerMessageChargeMetadata(instId, Number(defaults.perMessageCharge ?? 0.25));
         }
       } catch (_) {}
     }
@@ -1017,6 +1024,7 @@ export const updateAdminDirectRegistration = async (req, res) => {
       allowedFeatures: institute.allowedFeatures,
     };
     writeInstitutesMetadata(metadata);
+    updateInstitutePerMessageChargeMetadata(instId, Number(defaults.perMessageCharge ?? 0.25));
 
     // Sync User AI access
     const cleanPhone = String(institute.adminPhone || "").trim();
@@ -1105,6 +1113,7 @@ export const convertTrialToInstitute = async (req, res) => {
       isDirectRegistration: false,
     };
     writeInstitutesMetadata(metadata);
+    updateInstitutePerMessageChargeMetadata(instId, Number(defaults.perMessageCharge ?? 0.25));
 
     return res.json({
       success: true,

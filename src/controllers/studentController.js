@@ -5008,3 +5008,61 @@ export const getAllBatchesDailyAttendanceStatus = async (req, res) => {
   }
 };
 
+export const updatePaymentMode = async (req, res) => {
+  try {
+    const { id: studentId, paymentId } = req.params;
+    const { paymentMode } = req.body;
+    if (!paymentMode) {
+      return res.status(400).json({ message: "paymentMode is required" });
+    }
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    const history = Array.isArray(student.paymentHistory) ? [...student.paymentHistory] : [];
+    let updated = false;
+
+    for (let i = 0; i < history.length; i++) {
+      const p = history[i];
+      const pId = (p.id || p._id || p.paymentId || "").toString();
+      if (pId === String(paymentId) || String(i) === String(paymentId)) {
+        history[i].paymentMode = paymentMode;
+        history[i].payment_mode = paymentMode;
+        history[i].mode = paymentMode;
+        history[i].paymentType = paymentMode;
+        updated = true;
+        break;
+      }
+    }
+
+    if (!updated && history.length > 0) {
+      // Fallback matching
+      for (let i = 0; i < history.length; i++) {
+        if (history[i]._id?.toString() === paymentId || history[i].id?.toString() === paymentId) {
+          history[i].paymentMode = paymentMode;
+          history[i].payment_mode = paymentMode;
+          history[i].mode = paymentMode;
+          updated = true;
+          break;
+        }
+      }
+    }
+
+    student.paymentHistory = history;
+    if (student.markModified) student.markModified("paymentHistory");
+    await student.save();
+
+    // Also update supabase payments table
+    try {
+      await supabase.from("payments").update({ payment_mode: paymentMode, payment_type: paymentMode }).eq("id", paymentId);
+    } catch (_) {}
+
+    return res.json({ success: true, message: "Payment mode updated successfully", paymentMode });
+  } catch (error) {
+    console.error("updatePaymentMode error:", error);
+    return res.status(500).json({ message: "Failed to update payment mode" });
+  }
+};
+

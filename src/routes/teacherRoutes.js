@@ -40,8 +40,10 @@ import {
 import {
   getFinanceAnalytics,
   addExpense,
+  updateExpense,
   deleteExpense,
   addIncome,
+  updateIncome,
   deleteIncome,
   disburseStaffSalary,
   deleteStaffSalaryDisbursement,
@@ -146,8 +148,12 @@ router.get("/staff-attendance/:staffId", getStaffAttendanceHistory);
 // Finance & Analytics
 router.get("/finance-analytics", getFinanceAnalytics);
 router.post("/finance/expenses", addExpense);
+router.put("/finance/expenses/:id", updateExpense);
+router.patch("/finance/expenses/:id", updateExpense);
 router.delete("/finance/expenses/:id", deleteExpense);
 router.post("/finance/incomes", addIncome);
+router.put("/finance/incomes/:id", updateIncome);
+router.patch("/finance/incomes/:id", updateIncome);
 router.delete("/finance/incomes/:id", deleteIncome);
 router.post("/finance/disburse-salary", disburseStaffSalary);
 router.delete("/finance/disburse-salary/:staffId/:monthKey", deleteStaffSalaryDisbursement);

@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import {
   addPayment,
+  updatePaymentMode,
   archiveStudent,
   bulkCreateStudents,
   createStudent,
@@ -52,6 +53,8 @@ router.put("/:id/archive", archiveStudent);
 router.post("/:id/send-credentials-whatsapp", sendStudentCredentialsWhatsApp);
 router.post("/:id/send-fee-reminder", sendFeeReminderWhatsApp);
 router.post("/:id/payments", addPayment);
+router.patch("/:id/payments/:paymentId/mode", updatePaymentMode);
+router.put("/:id/payments/:paymentId/mode", updatePaymentMode);
 router.post("/:id/payments/:paymentId/send-receipt", upload.single("receipt"), sendPaymentReceiptWhatsApp);
 router.post("/:id/attendance", markAttendance);
 router.route("/:id").put(updateStudent).delete(deleteStudent);

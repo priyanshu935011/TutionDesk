@@ -2002,7 +2002,7 @@ export const getWalletInfo = async (req, res) => {
     }
 
     const liveBal = await getInstituteWalletBalance(instIdStr, institute?.walletBalance || 0);
-    const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.10);
+    const liveRate = await getInstituteMessageCharge(instIdStr, institute?.perMessageCharge ?? 0.25);
 
     let payments = [];
     try {

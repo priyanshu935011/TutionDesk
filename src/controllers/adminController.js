@@ -610,6 +610,7 @@ export const createInstitute = async (req, res) => {
       aiStudentEnabled: Boolean(aiStudentEnabled),
       aiWalletBalance: Number(aiWalletBalance || 0),
       aiCreditsPerRupee: Number(aiCreditsPerRupee || 10),
+      perMessageCharge: req.body.perMessageCharge !== undefined && req.body.perMessageCharge !== null ? Number(req.body.perMessageCharge) : 0.25,
       subscriptionHistory: [
         {
           plan: subscriptionPlan,
@@ -633,6 +634,7 @@ export const createInstitute = async (req, res) => {
 
     institute.adminUser = user._id;
     await institute.save();
+    updateInstitutePerMessageChargeMetadata(institute._id, institute.perMessageCharge || 0.25);
 
     if (tuitionType === "multi_branch") {
       try {
