@@ -284,6 +284,19 @@ export const upgradeToMultiBranch = async (req, res) => {
  */
 export const createBranch = async (req, res) => {
   try {
+    const isSuperAdminUser =
+      Boolean(req.user?.isSuperAdmin) ||
+      req.user?.role === "super_admin" ||
+      req.user?.role === "tech_admin" ||
+      req.headers["x-is-super-admin"] === "true";
+
+    if (!isSuperAdminUser) {
+      return res.status(403).json({
+        success: false,
+        message: "Branch creation is disabled for institutions. Branches can only be added by Super Admin.",
+      });
+    }
+
     const { name, branchCode, city, address, adminEmail, adminPhone } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: "Branch name is required." });
