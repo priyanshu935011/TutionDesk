@@ -54,6 +54,9 @@ import {
   flushSystemCache,
   getAdminAiSettings,
   getAdminOrganizations,
+  getAdminInstituteBranches,
+  addAdminInstituteBranch,
+  deleteAdminInstituteBranch,
   updateAdminAiSettings,
   topupInstituteAiWallet,
   updateInstituteAiConfig,
@@ -176,6 +179,9 @@ router.route("/students/:id")
 
 router.get("/institutes/:id", getInstituteDetail);
 router.get("/institutes/:id/analytics", getInstituteFullAnalytics);
+router.get("/institutes/:id/branches", getAdminInstituteBranches);
+router.post("/institutes/:id/branches", addAdminInstituteBranch);
+router.delete("/institutes/:id/branches/:branchId", deleteAdminInstituteBranch);
 router.post("/institutes/:id/website", updateTuitionWebsite);
 router.post("/institutes", createInstitute);
 router.put("/institutes/:id", updateInstitute);

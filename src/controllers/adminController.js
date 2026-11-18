@@ -100,6 +100,10 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
       const Organization = (await import("../models/Organization.js")).default;
       const org = await Organization.findById(instObj.organization);
       if (org) instObj.organizationName = org.name;
+      const branches = await Institute.find({
+        $or: [{ organization: instObj.organization }, { organization_id: instObj.organization }],
+      }).select("_id name branchCode city address adminPhone isHeadquarters status");
+      instObj.branches = branches;
     } catch (_) {}
   }
   instObj.aiWalletBalance = Number(institute.aiWalletBalance || 0);
@@ -455,6 +459,73 @@ export const createInstitute = async (req, res) => {
     if (req.body.city !== undefined) institute.city = req.body.city;
     if (req.body.address !== undefined) institute.address = req.body.address;
     if (req.body.organization !== undefined) institute.organization = req.body.organization || null;
+    if (tuitionType !== undefined) institute.tuitionType = tuitionType;
+
+    if (tuitionType === "multi_branch") {
+      try {
+        const Organization = (await import("../models/Organization.js")).default;
+        let orgId = institute.organization || institute.organization_id;
+        if (!orgId) {
+          const orgName = req.body.organizationName?.trim() || `${institute.name} Group`;
+          const org = await Organization.create({
+            name: orgName,
+            ownerUser: institute.adminUser,
+            ownerName: institute.ownerName,
+            adminEmail: institute.adminEmail,
+            adminPhone: institute.adminPhone || "",
+            planType: "multi_branch_pro",
+            maxBranches: 15,
+            status: "active",
+          });
+          orgId = org._id;
+          institute.organization = org._id;
+          institute.isHeadquarters = true;
+          institute.branchCode = institute.branchCode || "HQ-01";
+        }
+
+        if (Array.isArray(req.body.branches)) {
+          for (let i = 0; i < req.body.branches.length; i++) {
+            const br = req.body.branches[i];
+            if (!br || !br.name || !br.name.trim()) continue;
+            const brId = br._id || br.id;
+            if (brId) {
+              await Institute.updateOne(
+                { _id: brId },
+                {
+                  name: br.name.trim(),
+                  branchCode: br.branchCode?.trim() || "",
+                  city: br.city ? br.city.trim() : "",
+                  address: br.address ? br.address.trim() : "",
+                  adminPhone: br.adminPhone || "",
+                }
+              );
+            } else {
+              await Institute.create({
+                name: br.name.trim(),
+                ownerName: institute.ownerName,
+                adminEmail: (br.adminEmail || institute.adminEmail || "").toLowerCase().trim(),
+                adminPhone: br.adminPhone || institute.adminPhone || "",
+                adminUser: institute.adminUser,
+                organization: orgId,
+                isHeadquarters: false,
+                branchCode: br.branchCode?.trim() || `BR-0${i + 2}`,
+                city: br.city ? br.city.trim() : "",
+                address: br.address ? br.address.trim() : "",
+                subscriptionPlan: institute.subscriptionPlan || "yearly",
+                subscriptionAmount: 0,
+                subscriptionStart: institute.subscriptionStart || new Date(),
+                subscriptionEnd: institute.subscriptionEnd || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                status: "active",
+                tuitionType: "multi_branch",
+                allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "finances", "whatsapp"],
+              });
+            }
+          }
+        }
+      } catch (orgErr) {
+        console.error("Multi-branch update error in updateInstitute:", orgErr);
+      }
+    }
 
     if (normalizedEmail) {
       const existingUser = await User.findOne({ email: normalizedEmail });
@@ -537,6 +608,59 @@ export const createInstitute = async (req, res) => {
 
     institute.adminUser = user._id;
     await institute.save();
+
+    if (tuitionType === "multi_branch") {
+      try {
+        const Organization = (await import("../models/Organization.js")).default;
+        const orgName = req.body.organizationName?.trim() || `${name.trim()} Group`;
+        const org = await Organization.create({
+          name: orgName,
+          ownerUser: user._id,
+          ownerName: ownerName.trim(),
+          adminEmail: normalizedEmail,
+          adminPhone: adminPhone || "",
+          planType: "multi_branch_pro",
+          maxBranches: 15,
+          status: "active",
+        });
+
+        institute.organization = org._id;
+        institute.isHeadquarters = true;
+        institute.branchCode = req.body.branchCode || "HQ-01";
+        institute.city = req.body.city || "";
+        institute.address = req.body.address || "";
+        institute.tuitionType = "multi_branch";
+        await institute.save();
+
+        if (Array.isArray(req.body.branches) && req.body.branches.length > 0) {
+          for (let i = 0; i < req.body.branches.length; i++) {
+            const br = req.body.branches[i];
+            if (!br || !br.name || !br.name.trim()) continue;
+            await Institute.create({
+              name: br.name.trim(),
+              ownerName: ownerName.trim(),
+              adminEmail: (br.adminEmail || normalizedEmail).toLowerCase().trim(),
+              adminPhone: br.adminPhone || adminPhone || "",
+              adminUser: user._id,
+              organization: org._id,
+              isHeadquarters: false,
+              branchCode: br.branchCode?.trim() || `BR-0${i + 2}`,
+              city: br.city ? br.city.trim() : "",
+              address: br.address ? br.address.trim() : "",
+              subscriptionPlan: subscriptionPlan || "yearly",
+              subscriptionAmount: 0,
+              subscriptionStart: startDate,
+              subscriptionEnd: endDate,
+              status: "active",
+              tuitionType: "multi_branch",
+              allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "finances", "whatsapp"],
+            });
+          }
+        }
+      } catch (orgErr) {
+        console.error("Multi-branch org creation error in createInstitute:", orgErr);
+      }
+    }
 
     const adminEmails = await getAdminEmails();
     const hydrated = await hydrateInstitute(institute, adminEmails);
@@ -3851,6 +3975,117 @@ export const getAdminOrganizations = async (req, res) => {
     );
 
     return res.json({ success: true, count: orgSummaries.length, organizations: orgSummaries });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const getAdminInstituteBranches = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) return res.status(403).json({ message: "Access denied." });
+
+    const institute = await Institute.findById(req.params.id);
+    if (!institute) return res.status(404).json({ message: "Institute not found." });
+
+    let orgId = institute.organization || institute.organization_id;
+    if (!orgId) {
+      return res.json({ success: true, branches: [institute], organization: null });
+    }
+
+    const Organization = (await import("../models/Organization.js")).default;
+    const org = await Organization.findById(orgId);
+    const branches = await Institute.find({
+      $or: [{ organization: orgId }, { organization_id: orgId }],
+    }).sort({ isHeadquarters: -1, createdAt: 1 });
+
+    return res.json({
+      success: true,
+      organization: org,
+      branches,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const addAdminInstituteBranch = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) return res.status(403).json({ message: "Access denied." });
+
+    const { name, branchCode, city, address, adminPhone, adminEmail } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ message: "Branch name is required." });
+
+    const institute = await Institute.findById(req.params.id);
+    if (!institute) return res.status(404).json({ message: "Institute not found." });
+
+    const Organization = (await import("../models/Organization.js")).default;
+    let orgId = institute.organization || institute.organization_id;
+    if (!orgId) {
+      const org = await Organization.create({
+        name: `${institute.name} Group`,
+        ownerUser: institute.adminUser,
+        ownerName: institute.ownerName,
+        adminEmail: institute.adminEmail,
+        adminPhone: institute.adminPhone || "",
+        planType: "multi_branch_pro",
+        maxBranches: 15,
+        status: "active",
+      });
+      orgId = org._id;
+      institute.organization = org._id;
+      institute.isHeadquarters = true;
+      institute.branchCode = "HQ-01";
+      institute.tuitionType = "multi_branch";
+      await institute.save();
+    }
+
+    const existingBranches = await Institute.find({
+      $or: [{ organization: orgId }, { organization_id: orgId }],
+    });
+
+    const newBranch = await Institute.create({
+      name: name.trim(),
+      ownerName: institute.ownerName,
+      adminEmail: (adminEmail || institute.adminEmail || "").toLowerCase().trim(),
+      adminPhone: adminPhone || institute.adminPhone || "",
+      adminUser: institute.adminUser,
+      organization: orgId,
+      isHeadquarters: false,
+      branchCode: branchCode?.trim() || `BR-0${existingBranches.length + 1}`,
+      city: city ? city.trim() : "",
+      address: address ? address.trim() : "",
+      subscriptionPlan: institute.subscriptionPlan || "yearly",
+      subscriptionAmount: 0,
+      subscriptionStart: institute.subscriptionStart || new Date(),
+      subscriptionEnd: institute.subscriptionEnd || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      status: "active",
+      tuitionType: "multi_branch",
+      allowedFeatures: institute.allowedFeatures || ["attendance", "notes", "marks", "tests", "finances", "whatsapp"],
+    });
+
+    return res.status(201).json({ success: true, message: "Branch added successfully", branch: newBranch });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+export const deleteAdminInstituteBranch = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) return res.status(403).json({ message: "Access denied." });
+
+    const { branchId } = req.params;
+    const branch = await Institute.findById(branchId);
+    if (!branch) return res.status(404).json({ message: "Branch not found." });
+
+    if (branch.isHeadquarters) {
+      return res.status(400).json({ message: "Cannot delete the Headquarters branch of an organization." });
+    }
+
+    await Institute.deleteOne({ _id: branchId });
+    return res.json({ success: true, message: "Branch deleted successfully." });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

@@ -123,7 +123,7 @@ const instituteSchema = new mongoose.Schema(
     },
     tuitionType: {
       type: String,
-      enum: ["institution", "solo"],
+      enum: ["institution", "solo", "multi_branch"],
       default: "solo",
     },
     registrationSource: {
