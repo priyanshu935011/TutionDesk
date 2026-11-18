@@ -47,6 +47,13 @@ import {
   deleteStaffSalaryDisbursement,
 } from "../controllers/financeController.js";
 import { registerUserFcmToken, unregisterUserFcmToken } from "../controllers/pushNotificationController.js";
+import {
+  getBranches,
+  upgradeToMultiBranch,
+  createBranch,
+  switchBranch,
+  getHqAnalytics,
+} from "../controllers/multiBranchController.js";
 import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -71,6 +78,13 @@ router.use(protect);
 router.post("/fcm-token", registerUserFcmToken);
 router.post("/fcm-token/unregister", unregisterUserFcmToken);
 router.delete("/fcm-token", unregisterUserFcmToken);
+
+// Multi-Branch endpoints
+router.get("/branches", getBranches);
+router.post("/branches", createBranch);
+router.post("/branches/upgrade", upgradeToMultiBranch);
+router.post("/branches/switch", switchBranch);
+router.get("/branches/hq-analytics", getHqAnalytics);
 
 // Support both /sync and /dashboard
 router.get("/sync", getTeacherDashboard);

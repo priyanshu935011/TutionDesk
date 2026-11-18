@@ -195,7 +195,8 @@ const protect = async (req, res, next) => {
 
     if (req.user && !skipSubscriptionCheck && (req.user.institute || req.user._id)) {
       const isPaymentRoute = req.originalUrl && (req.originalUrl.includes("/payments") || req.originalUrl.includes("/payment"));
-      const rawInst = req.user.institute;
+      const branchHeader = req.headers["x-branch-id"] || req.headers["x-institute-id"] || decoded?.activeInstituteId;
+      const rawInst = branchHeader || req.user.institute;
       const instIdStr = (rawInst && typeof rawInst === "object")
         ? String(rawInst._id || rawInst.id || "").trim()
         : String(rawInst || "").trim();

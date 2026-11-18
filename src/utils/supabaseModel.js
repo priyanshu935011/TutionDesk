@@ -3993,6 +3993,8 @@ const mockMongoose = {
     else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
     else if (modelName === "MarketingTemplate" || modelName === "MarketingTemplates") tableName = "marketing_templates";
     else if (modelName === "MarketingMedia" || modelName === "MarketingMedias") tableName = "marketing_media";
+    else if (modelName === "Organization" || modelName === "Organizations") tableName = "organizations";
+    else if (modelName === "UserBranchMembership" || modelName === "UserBranchMemberships") tableName = "user_branch_memberships";
     else tableName = modelName.toLowerCase() + "s";
 
     if (tableName === "marketingtemplates" || tableName === "marketingtemplate") tableName = "marketing_templates";

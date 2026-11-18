@@ -199,6 +199,27 @@ const instituteSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      default: null,
+    },
+    isHeadquarters: {
+      type: Boolean,
+      default: false,
+    },
+    branchCode: {
+      type: String,
+      default: '',
+    },
+    city: {
+      type: String,
+      default: '',
+    },
+    address: {
+      type: String,
+      default: '',
+    },
     leadApiKey: {
       type: String,
       default: "",
