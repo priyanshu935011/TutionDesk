@@ -114,7 +114,19 @@ const protectStudent = async (req, res, next) => {
       }
     }
 
+    const isSuperAdminAccess =
+      Boolean(decoded?.isSuperAdmin) ||
+      decoded?.role === "super_admin" ||
+      decoded?.role === "tech_admin" ||
+      Boolean(decoded?.superAdminEmail) ||
+      req.headers["x-is-super-admin"] === "true" ||
+      Boolean(req.headers["x-super-admin-email"]) ||
+      Boolean(req.headers["x-impersonated-by-admin"]);
+
     next();
+    
+    // Do NOT count or log student activity if accessed via super admin ID
+    if (!isSuperAdminAccess) {
     
     if (req.student && req.student.enrollmentNumber) {
       Student.updateMany({ enrollmentNumber: req.student.enrollmentNumber }, { lastActiveAt: new Date() }).catch(() => {});
@@ -128,6 +140,7 @@ const protectStudent = async (req, res, next) => {
       }
     }
     updateConcurrentPeak().catch(() => {});
+    }
   } catch (error) {
     return res.status(401).json({ message: "Invalid token" });
   }

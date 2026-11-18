@@ -216,7 +216,12 @@ export const getAdminOverview = async (req, res) => {
     } else {
       const fiveMinsAgo = new Date(now - 5 * 60 * 1000);
       const [activeUsersNow, activeStudentsNowResult] = await Promise.all([
-        User.countDocuments({ lastActiveAt: { $gte: fiveMinsAgo }, isDemoAccount: { $ne: true } }),
+        User.countDocuments({
+          lastActiveAt: { $gte: fiveMinsAgo },
+          isDemoAccount: { $ne: true },
+          email: { $nin: adminEmails },
+          role: { $nin: ["super_admin", "tech_admin"] },
+        }),
         Student.aggregate([
           { $match: { lastActiveAt: { $gte: fiveMinsAgo }, email: { $nin: adminEmails }, isDemoAccount: { $ne: true } } },
           { $group: { _id: "$enrollmentNumber" } },
@@ -227,11 +232,16 @@ export const getAdminOverview = async (req, res) => {
       activeNow = activeUsersNow + activeStudentsNow;
     }
 
-    // Active Today: count users/students active since midnight (excluding demo)
+    // Active Today: count users/students active since midnight (excluding super admin & demo)
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const [activeUsersToday, activeStudentsTodayResult] = await Promise.all([
-      User.countDocuments({ lastActiveAt: { $gte: startOfToday }, isDemoAccount: { $ne: true } }),
+      User.countDocuments({
+        lastActiveAt: { $gte: startOfToday },
+        isDemoAccount: { $ne: true },
+        email: { $nin: adminEmails },
+        role: { $nin: ["super_admin", "tech_admin"] },
+      }),
       Student.aggregate([
         { $match: { lastActiveAt: { $gte: startOfToday }, email: { $nin: adminEmails }, isDemoAccount: { $ne: true } } },
         { $group: { _id: "$enrollmentNumber" } },
@@ -3806,19 +3816,22 @@ export const getActiveTodayUsers = async (req, res) => {
     const startThreshold = startOfTodayIST < localStartOfToday ? startOfTodayIST : localStartOfToday;
 
     // Load institutes map for quick O(1) lookup
-    const allInstitutes = await Institute.find().select("_id name adminUser isDemoAccount adminEmail").lean();
+    const allInstitutes = await Institute.find().select("_id id name adminUser ownerName adminEmail adminPhone city address tuitionType isDemoAccount status isHeadquarters branchCode").lean();
     const instNameMap = {};
     const instByAdminUser = {};
+    const instObjMap = {};
     const demoAdminIds = new Set();
     const demoInstIds = new Set();
 
     for (const inst of allInstitutes) {
       const isDemo = Boolean(inst.isDemoAccount) || (inst.adminEmail && inst.adminEmail.toLowerCase().includes("demo"));
-      const instId = String(inst._id);
+      const instId = String(inst._id || inst.id);
       instNameMap[instId] = inst.name || "ClassTech Institute";
+      instObjMap[instId] = inst;
       if (inst.adminUser) {
         const adminId = String(inst.adminUser);
         instByAdminUser[adminId] = inst.name || "ClassTech Institute";
+        instObjMap[adminId] = inst;
         if (isDemo) demoAdminIds.add(adminId);
       }
       if (isDemo) demoInstIds.add(instId);
@@ -3848,6 +3861,7 @@ export const getActiveTodayUsers = async (req, res) => {
 
     const teachers = [];
     const staff = [];
+    const activeInstitutesMap = new Map();
 
     for (const u of activeUsers) {
       if (u.role === "super_admin" || u.isSuperAdmin) continue;
@@ -3869,6 +3883,40 @@ export const getActiveTodayUsers = async (req, res) => {
         (u.parentAdmin && (instByAdminUser[String(u.parentAdmin)] || instNameMap[String(u.parentAdmin)])) ||
         (instByAdminUser[String(u._id || u.id)]) ||
         "Direct / Independent";
+
+      // Register or update active institute / solo teacher
+      const matchedInst = (instId && instObjMap[instId]) || (instObjMap[String(u._id || u.id)]) || (u.parentAdmin && instObjMap[String(u.parentAdmin)]);
+      if (matchedInst && !demoInstIds.has(String(matchedInst._id || matchedInst.id))) {
+        const mId = String(matchedInst._id || matchedInst.id);
+        if (!activeInstitutesMap.has(mId)) {
+          activeInstitutesMap.set(mId, {
+            id: mId,
+            _id: mId,
+            name: matchedInst.name || instituteName,
+            ownerName: matchedInst.ownerName || (String(matchedInst.adminUser) === String(u._id) ? u.name : "Tuition Admin"),
+            adminEmail: matchedInst.adminEmail || (String(matchedInst.adminUser) === String(u._id) ? u.email : ""),
+            adminPhone: matchedInst.adminPhone || (String(matchedInst.adminUser) === String(u._id) ? u.phone : ""),
+            city: matchedInst.city || "",
+            address: matchedInst.address || "",
+            tuitionType: matchedInst.tuitionType || "solo",
+            isHeadquarters: Boolean(matchedInst.isHeadquarters),
+            branchCode: matchedInst.branchCode || "",
+            status: matchedInst.status || "active",
+            lastActiveAt: u.lastActiveAt,
+            activeStaffCount: 0,
+            activeStudentsCount: 0,
+            isAdminActiveToday: String(matchedInst.adminUser) === String(u._id || u.id),
+          });
+        }
+        const instRecord = activeInstitutesMap.get(mId);
+        instRecord.activeStaffCount += 1;
+        if (new Date(u.lastActiveAt) > new Date(instRecord.lastActiveAt)) {
+          instRecord.lastActiveAt = u.lastActiveAt;
+        }
+        if (String(matchedInst.adminUser) === String(u._id || u.id)) {
+          instRecord.isAdminActiveToday = true;
+        }
+      }
 
       let displayRole = "Teacher";
       if (!isTeacher) {
@@ -3917,6 +3965,34 @@ export const getActiveTodayUsers = async (req, res) => {
       } else {
         studentMap.set(key, s);
       }
+
+      // Link active student to institute
+      const sInst = s.user ? instObjMap[String(s.user)] : null;
+      if (sInst && !demoInstIds.has(String(sInst._id || sInst.id))) {
+        const sInstId = String(sInst._id || sInst.id);
+        if (activeInstitutesMap.has(sInstId)) {
+          activeInstitutesMap.get(sInstId).activeStudentsCount += 1;
+        } else {
+          activeInstitutesMap.set(sInstId, {
+            id: sInstId,
+            _id: sInstId,
+            name: sInst.name || "ClassTech Institute",
+            ownerName: sInst.ownerName || "Tuition Admin",
+            adminEmail: sInst.adminEmail || "",
+            adminPhone: sInst.adminPhone || "",
+            city: sInst.city || "",
+            address: sInst.address || "",
+            tuitionType: sInst.tuitionType || "solo",
+            isHeadquarters: Boolean(sInst.isHeadquarters),
+            branchCode: sInst.branchCode || "",
+            status: sInst.status || "active",
+            lastActiveAt: s.lastActiveAt,
+            activeStaffCount: 0,
+            activeStudentsCount: 1,
+            isAdminActiveToday: false,
+          });
+        }
+      }
     }
 
     const students = Array.from(studentMap.values()).map((s) => {
@@ -3939,14 +4015,32 @@ export const getActiveTodayUsers = async (req, res) => {
       };
     });
 
+    const activeInstitutes = Array.from(activeInstitutesMap.values())
+      .map((inst) => ({
+        ...inst,
+        displayType: inst.tuitionType === "solo"
+          ? "Solo Teacher"
+          : (inst.tuitionType === "multi_branch" ? "Multi Branch" : "Institution"),
+      }))
+      .sort((a, b) => new Date(b.lastActiveAt || 0) - new Date(a.lastActiveAt || 0));
+
+    const soloTeachers = activeInstitutes.filter((i) => i.tuitionType === "solo");
+    const multiTeacherInstitutes = activeInstitutes.filter((i) => i.tuitionType !== "solo");
+
     return res.json({
       success: true,
       summary: {
-        total: teachers.length + staff.length + students.length,
+        total: activeInstitutes.length + teachers.length + staff.length + students.length,
+        institutesCount: activeInstitutes.length,
+        soloTeachersCount: soloTeachers.length,
+        multiTeacherCount: multiTeacherInstitutes.length,
         teachersCount: teachers.length,
         staffCount: staff.length,
         studentsCount: students.length,
       },
+      institutes: activeInstitutes,
+      soloTeachers,
+      multiTeacherInstitutes,
       teachers,
       staff,
       students,

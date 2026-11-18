@@ -580,34 +580,53 @@ export const getHqAnalytics = async (req, res) => {
 
     let totalStudentsAcross = 0;
     let totalBatchesAcross = 0;
+    let totalTeachersAcross = 0;
     let totalCollectedFeesAcross = 0;
     let totalPendingFeesAcross = 0;
+    let totalPresentAcross = 0;
+    let totalAbsentAcross = 0;
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const todayDateStr = now.toISOString().substring(0, 10);
+    const todayISTStr = new Date(now.getTime() + 5.5 * 3600 * 1000).toISOString().substring(0, 10);
 
     const branchAnalytics = await Promise.all(
-      branches.map(async (branch) => {
+      branches.map(async (branch, idx) => {
         const bId = String(branch._id || branch.id);
         const ownerId = branch.adminUser || branch._id;
         const userFilterIds = Array.from(new Set([String(ownerId), bId].filter(Boolean)));
 
         let students = [];
-        let batchesCount = 0;
+        let batches = [];
+        let teachers = [];
 
         try {
           students = await Student.find({
             user: { $in: userFilterIds },
             isArchived: { $ne: true },
-          }).select("_id paidAmount pendingAmount totalFees fees paymentHistory").lean();
+          }).select("_id name phone email enrollmentNumber paidAmount pendingAmount totalFees fees paymentHistory attendanceRecords joinedOn createdAt").lean();
         } catch (_) {}
 
         try {
-          batchesCount = await Batch.countDocuments({
+          batches = await Batch.find({
             user: { $in: userFilterIds },
             status: { $ne: "archived" },
-          });
+          }).select("_id name scheduleDays startTime endTime teacher status").lean();
+        } catch (_) {}
+
+        try {
+          teachers = await User.find({
+            institute: branch._id,
+            role: { $in: ["teacher", "receptionist", "staff", "branch_admin"] },
+          }).select("_id name email phone role staffRole").lean();
         } catch (_) {}
 
         let branchCollected = 0;
         let branchPending = 0;
+        let newAdmissionsCount = 0;
+        let presentTodayCount = 0;
+        let absentTodayCount = 0;
 
         for (const s of students) {
           const total = Number(s.totalFees ?? s.fees ?? 0);
@@ -622,29 +641,95 @@ export const getHqAnalytics = async (req, res) => {
 
           branchCollected += paid;
           branchPending += pending;
+
+          // Check admission within last 30 days
+          const joinTime = s.joinedOn ? new Date(s.joinedOn).getTime() : (s.createdAt ? new Date(s.createdAt).getTime() : 0);
+          if (joinTime >= thirtyDaysAgo.getTime()) {
+            newAdmissionsCount++;
+          }
+
+          // Check today attendance
+          const records = Array.isArray(s.attendanceRecords) ? s.attendanceRecords : [];
+          for (const rec of records) {
+            const rDate = typeof rec.date === "string" ? rec.date.substring(0, 10) : new Date(rec.date).toISOString().substring(0, 10);
+            if (rDate === todayDateStr || rDate === todayISTStr) {
+              if (rec.status === "present") presentTodayCount++;
+              else if (rec.status === "absent") absentTodayCount++;
+            }
+          }
         }
 
         totalStudentsAcross += students.length;
-        totalBatchesAcross += batchesCount;
+        totalBatchesAcross += batches.length;
+        totalTeachersAcross += teachers.length;
         totalCollectedFeesAcross += branchCollected;
         totalPendingFeesAcross += branchPending;
+        totalPresentAcross += presentTodayCount;
+        totalAbsentAcross += absentTodayCount;
+
+        const totalRevenue = branchCollected + branchPending;
+        const collectionEfficiency = totalRevenue > 0 ? Math.round((branchCollected / totalRevenue) * 100) : 0;
+        const totalMarkedToday = presentTodayCount + absentTodayCount;
+        const attendanceRate = totalMarkedToday > 0 ? Math.round((presentTodayCount / totalMarkedToday) * 100) : (students.length > 0 ? 0 : 100);
 
         return {
           branchId: bId,
+          id: bId,
+          _id: bId,
           name: branch.name,
-          branchCode: branch.branchCode || (branch.isHeadquarters ? "HQ-01" : "MAIN"),
+          branchCode: branch.branchCode || (branch.isHeadquarters ? "HQ-01" : `BR-0${idx + 1}`),
           city: branch.city || "",
           address: branch.address || "",
+          phone: branch.adminPhone || "",
+          email: branch.adminEmail || "",
+          ownerName: branch.ownerName || branch.adminName || "",
           isHeadquarters: Boolean(branch.isHeadquarters),
+          tuitionType: branch.tuitionType || "solo",
           status: branch.status || "active",
+          subscriptionEnd: branch.subscriptionEnd || null,
+          walletBalance: Number(branch.walletBalance || 0),
+          perMessageCharge: Number(branch.perMessageCharge || 0.25),
           studentsCount: students.length,
-          batchesCount: batchesCount,
+          newAdmissionsCount,
+          batchesCount: batches.length,
+          teachersCount: teachers.length,
           collectedFees: branchCollected,
           pendingFees: branchPending,
-          totalRevenue: branchCollected + branchPending,
+          totalRevenue,
+          collectionEfficiency,
+          todayAttendance: {
+            presentCount: presentTodayCount,
+            absentCount: absentTodayCount,
+            totalMarked: totalMarkedToday,
+            attendanceRate,
+          },
+          batchesList: batches.slice(0, 12).map((b) => ({
+            id: String(b._id || b.id),
+            name: b.name || "Batch",
+            scheduleDays: Array.isArray(b.scheduleDays) ? b.scheduleDays.join(", ") : (b.scheduleDays || "All Days"),
+            startTime: b.startTime || "",
+            endTime: b.endTime || "",
+          })),
+          teachersList: teachers.slice(0, 10).map((t) => ({
+            id: String(t._id || t.id),
+            name: t.name || "Teacher",
+            email: t.email || "",
+            phone: t.phone || "",
+            role: t.role || "teacher",
+            staffRole: t.staffRole || "Teacher",
+          })),
         };
       })
     );
+
+    const totalGroupRevenue = totalCollectedFeesAcross + totalPendingFeesAcross;
+    const overallCollectionEfficiency = totalGroupRevenue > 0
+      ? Math.round((totalCollectedFeesAcross / totalGroupRevenue) * 100)
+      : 0;
+    const totalMarkedAcross = totalPresentAcross + totalAbsentAcross;
+    const overallAttendanceRate = totalMarkedAcross > 0
+      ? Math.round((totalPresentAcross / totalMarkedAcross) * 100)
+      : (totalStudentsAcross > 0 ? 0 : 100);
 
     return res.json({
       success: true,
@@ -665,9 +750,14 @@ export const getHqAnalytics = async (req, res) => {
         totalBranches: branches.length,
         totalStudentsAcrossBranches: totalStudentsAcross,
         totalBatchesAcrossBranches: totalBatchesAcross,
+        totalTeachersAcrossBranches: totalTeachersAcross,
         totalCollectedFeesAcrossBranches: totalCollectedFeesAcross,
         totalPendingFeesAcrossBranches: totalPendingFeesAcross,
-        totalGroupRevenue: totalCollectedFeesAcross + totalPendingFeesAcross,
+        totalGroupRevenue,
+        overallCollectionEfficiency,
+        totalPresentToday: totalPresentAcross,
+        totalAbsentToday: totalAbsentAcross,
+        overallAttendanceRate,
       },
       branches: branchAnalytics,
     });

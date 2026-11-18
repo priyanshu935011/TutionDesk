@@ -296,15 +296,34 @@ const protect = async (req, res, next) => {
       } catch (_) {}
     }
 
+    const isSuperAdminAccess =
+      Boolean(req.user?.isSuperAdmin) ||
+      Boolean(decoded?.isSuperAdmin) ||
+      req.user?.role === "super_admin" ||
+      decoded?.role === "super_admin" ||
+      req.user?.role === "tech_admin" ||
+      decoded?.role === "tech_admin" ||
+      Boolean(req.user?.superAdminEmail) ||
+      Boolean(decoded?.superAdminEmail) ||
+      req.headers["x-is-super-admin"] === "true" ||
+      Boolean(req.headers["x-super-admin-email"]) ||
+      Boolean(req.headers["x-impersonated-by-admin"]) ||
+      (req.user?.email && process.env.SUPER_ADMIN_EMAIL && req.user.email.toLowerCase() === process.env.SUPER_ADMIN_EMAIL.toLowerCase());
+
+    if (isSuperAdminAccess && req.user) {
+      req.user.isSuperAdmin = true;
+    }
+
     next();
     
-    if (req.user && req.user._id) {
+    // Do NOT count or log activity if dashboard is accessed via super admin ID
+    if (!isSuperAdminAccess && req.user && req.user._id) {
       User.updateOne({ _id: req.user._id }, { lastActiveAt: new Date() }).catch(() => {});
       if (redisClient && redisClient.isReady) {
         redisClient.set(`active:user:${req.user._id}`, req.user.role || "teacher", { EX: 300 }).catch(() => {});
       }
+      updateConcurrentPeak().catch(() => {});
     }
-    updateConcurrentPeak().catch(() => {});
   } catch (error) {
     console.error("Auth middleware verification error:", error.message);
     if (error.name === "TokenExpiredError") {
