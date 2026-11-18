@@ -95,14 +95,22 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
   instObj.branchCode = institute.branchCode || "";
   instObj.city = institute.city || "";
   instObj.address = institute.address || "";
-  if (instObj.organization) {
+  instObj.parentInstitute = institute.parentInstitute || institute.parent_institute || null;
+  const orgRef = instObj.organization || instObj.organization_id;
+  if (orgRef || instObj.tuitionType === "multi_branch") {
     try {
       const Organization = (await import("../models/Organization.js")).default;
-      const org = await Organization.findById(instObj.organization);
+      let org = null;
+      if (orgRef) org = await Organization.findById(orgRef);
       if (org) instObj.organizationName = org.name;
       const branches = await Institute.find({
-        $or: [{ organization: instObj.organization }, { organization_id: instObj.organization }],
-      }).select("_id name branchCode city address adminPhone isHeadquarters status");
+        $or: [
+          ...(orgRef ? [{ organization: orgRef }, { organization_id: orgRef }] : []),
+          { parentInstitute: instObj._id },
+          { parent_institute: instObj._id },
+          { _id: instObj._id },
+        ],
+      }).select("_id id name branchCode city address adminPhone isHeadquarters status tuitionType");
       instObj.branches = branches;
     } catch (_) {}
   }
@@ -367,9 +375,16 @@ export const getAdminOverview = async (req, res) => {
       console.error("Error computing messaging analytics:", e);
     }
 
+    // Child branch campuses belong under their parent / HQ institute and should not appear as standalone rows
+    const primaryInstitutes = hydrated.filter((inst) => {
+      const hasOrg = Boolean(inst.organization || inst.organization_id);
+      const isChild = (hasOrg && inst.isHeadquarters === false) || Boolean(inst.parentInstitute || inst.parent_institute);
+      return !isChild;
+    });
+
     return res.json({
       summary,
-      institutes: hydrated,
+      institutes: primaryInstitutes,
       globalWhatsappAnalytics,
       smsOtpAnalytics,
     });
@@ -3989,14 +4004,22 @@ export const getAdminInstituteBranches = async (req, res) => {
     if (!institute) return res.status(404).json({ message: "Institute not found." });
 
     let orgId = institute.organization || institute.organization_id;
-    if (!orgId) {
-      return res.json({ success: true, branches: [institute], organization: null });
+    let org = null;
+    if (orgId) {
+      try {
+        const Organization = (await import("../models/Organization.js")).default;
+        org = await Organization.findById(orgId);
+      } catch (_) {}
     }
 
-    const Organization = (await import("../models/Organization.js")).default;
-    const org = await Organization.findById(orgId);
     const branches = await Institute.find({
-      $or: [{ organization: orgId }, { organization_id: orgId }],
+      $or: [
+        ...(orgId ? [{ organization: orgId }, { organization_id: orgId }] : []),
+        { parentInstitute: institute._id },
+        { parent_institute: institute._id },
+        { _id: institute._id },
+        { id: institute._id },
+      ],
     }).sort({ isHeadquarters: -1, createdAt: 1 });
 
     return res.json({

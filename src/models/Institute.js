@@ -204,6 +204,21 @@ const instituteSchema = new mongoose.Schema(
       ref: 'Organization',
       default: null,
     },
+    organization_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      default: null,
+    },
+    parentInstitute: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Institute',
+      default: null,
+    },
+    parent_institute: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Institute',
+      default: null,
+    },
     isHeadquarters: {
       type: Boolean,
       default: false,

@@ -53,26 +53,85 @@ export const getBranches = async (req, res) => {
     let rawBranches = [];
 
     // 1. Check if current institute is tied to an organization
-    if (currentInstitute && (currentInstitute.organization || currentInstitute.organization_id)) {
-      const orgId = currentInstitute.organization || currentInstitute.organization_id;
+    const orgId = currentInstitute?.organization || currentInstitute?.organization_id;
+    if (orgId) {
       try {
         org = await Organization.findById(orgId);
         if (org) {
           rawBranches = await Institute.find({
-            $or: [{ organization: org._id }, { organization_id: org._id }]
+            $or: [
+              { organization: org._id },
+              { organization_id: org._id },
+              { parentInstitute: currentInstitute._id },
+              { parent_institute: currentInstitute._id },
+            ]
           }).sort({ isHeadquarters: -1, createdAt: 1 });
         }
       } catch (_) {}
     }
 
-    // 2. If no org found, check if user is admin/owner of multiple institutes
+    // 2. Check if user has memberships across branches
+    if (rawBranches.length === 0 && req.user._id) {
+      try {
+        const memberships = await UserBranchMembership.find({ user: req.user._id });
+        if (memberships && memberships.length > 0) {
+          const mInstIds = memberships.map(m => m.institute).filter(Boolean);
+          rawBranches = await Institute.find({
+            $or: [
+              { _id: { $in: mInstIds } },
+              { id: { $in: mInstIds } },
+            ]
+          }).sort({ isHeadquarters: -1, createdAt: 1 });
+        }
+      } catch (_) {}
+    }
+
+    // 3. Check if user owns an organization
+    if (rawBranches.length === 0 && req.user._id) {
+      try {
+        const userOrg = await Organization.findOne({ ownerUser: req.user._id });
+        if (userOrg) {
+          org = userOrg;
+          rawBranches = await Institute.find({
+            $or: [{ organization: userOrg._id }, { organization_id: userOrg._id }]
+          }).sort({ isHeadquarters: -1, createdAt: 1 });
+        }
+      } catch (_) {}
+    }
+
+    // 4. Check if current institute has child branches via parentInstitute
+    if (rawBranches.length <= 1 && currentInstitute) {
+      try {
+        const childBranches = await Institute.find({
+          $or: [
+            { parentInstitute: currentInstitute._id },
+            { parent_institute: currentInstitute._id },
+          ]
+        }).sort({ createdAt: 1 });
+        if (childBranches.length > 0) {
+          const allB = [currentInstitute, ...childBranches];
+          const unique = [];
+          const seen = new Set();
+          for (const b of allB) {
+            const id = String(b._id || b.id);
+            if (!seen.has(id)) {
+              seen.add(id);
+              unique.push(b);
+            }
+          }
+          rawBranches = unique;
+        }
+      } catch (_) {}
+    }
+
+    // 5. Fallback: check if user is admin of multiple institutes
     if (rawBranches.length === 0 && req.user._id) {
       try {
         rawBranches = await Institute.find({ adminUser: req.user._id }).sort({ createdAt: 1 });
       } catch (_) {}
     }
 
-    // 3. Fallback to just the current institute if exists
+    // 6. Fallback to just the current institute if exists
     if (rawBranches.length === 0 && currentInstitute) {
       rawBranches = [currentInstitute];
     }
@@ -119,8 +178,8 @@ export const getBranches = async (req, res) => {
 
     return res.json({
       success: true,
-      isMultiBranch: Boolean(org),
-      organization: org || null,
+      isMultiBranch: Boolean(org) || branches.length >= 2,
+      organization: org || (branches.length >= 2 ? { name: `${currentInstitute?.name || 'Academy'} Network` } : null),
       activeBranchId: currentInstId,
       branches,
     });
@@ -243,9 +302,11 @@ export const createBranch = async (req, res) => {
       await Institute.updateOne(
         { _id: currentInstitute._id },
         {
-          organization: org._id,
+          organization: orgId,
+          organization_id: orgId,
+          tuitionType: "multi_branch",
           isHeadquarters: true,
-          branchCode: "HQ-01",
+          branchCode: currentInstitute.branchCode || "HQ-01",
           city: currentInstitute.city || "Main Campus",
         }
       );
@@ -259,7 +320,12 @@ export const createBranch = async (req, res) => {
 
     // Check branch count limits
     const existingBranches = await Institute.find({
-      $or: [{ organization: org._id }, { organization_id: org._id }],
+      $or: [
+        { organization: org._id },
+        { organization_id: org._id },
+        { parentInstitute: currentInstitute._id },
+        { parent_institute: currentInstitute._id },
+      ],
     });
     const maxBranches = org.maxBranches || 10;
     if (existingBranches.length >= maxBranches) {
@@ -279,7 +345,11 @@ export const createBranch = async (req, res) => {
       adminEmail: (adminEmail || currentInstitute.adminEmail || "").toLowerCase().trim(),
       adminPhone: adminPhone || currentInstitute.adminPhone || "",
       adminUser: currentInstitute.adminUser || req.user._id,
-      organization: org._id,
+      organization: orgId,
+      organization_id: orgId,
+      parentInstitute: currentInstitute._id,
+      parent_institute: currentInstitute._id,
+      tuitionType: "multi_branch",
       isHeadquarters: false,
       branchCode: finalBranchCode,
       city: city ? city.trim() : "",
@@ -294,12 +364,20 @@ export const createBranch = async (req, res) => {
       ],
     });
 
-    // Add branch membership
+    // Add branch membership for new branch
     await UserBranchMembership.create({
       user: req.user._id,
       institute: newBranch._id,
-      organization: org._id,
+      organization: orgId,
       role: "branch_admin",
+    }).catch(() => {});
+
+    // Ensure org admin membership for the current institute
+    await UserBranchMembership.create({
+      user: req.user._id,
+      institute: currentInstitute._id,
+      organization: orgId,
+      role: "org_admin",
     }).catch(() => {});
 
     return res.status(201).json({
@@ -393,6 +471,10 @@ export const switchBranch = async (req, res) => {
         branchCode: targetBranch.branchCode || "",
         city: targetBranch.city || "",
         isHeadquarters: Boolean(targetBranch.isHeadquarters),
+        tuitionType: "multi_branch",
+        organization: targetBranch.organization || targetBranch.organization_id || orgId,
+        organization_id: targetBranch.organization || targetBranch.organization_id || orgId,
+        parentInstitute: targetBranch.parentInstitute || targetBranch.parent_institute || null,
       },
       user: {
         _id: req.user._id,
@@ -418,27 +500,47 @@ export const getHqAnalytics = async (req, res) => {
     const currentInstitute = await resolveCurrentInstitute(req);
     let orgId = currentInstitute?.organization || currentInstitute?.organization_id;
 
-    if (!orgId) {
+    if (!orgId && req.user._id) {
       // Check if user owns an organization directly
       const userOrg = await Organization.findOne({ ownerUser: req.user._id });
       if (userOrg) orgId = userOrg._id;
     }
 
-    if (!orgId) {
-      return res.status(400).json({
-        success: false,
-        message: "This institute has not upgraded to a Multi-Branch organization yet.",
-      });
+    if (!orgId && req.user._id) {
+      const membership = await UserBranchMembership.findOne({ user: req.user._id, organization: { $ne: null } });
+      if (membership?.organization) orgId = membership.organization;
     }
 
-    const org = await Organization.findById(orgId);
-    if (!org) {
-      return res.status(404).json({ success: false, message: "Organization record not found." });
+    if (!orgId && currentInstitute?.parentInstitute) {
+      const parent = await Institute.findById(currentInstitute.parentInstitute);
+      orgId = parent?.organization || parent?.organization_id;
     }
 
-    const branches = await Institute.find({
-      $or: [{ organization: org._id }, { organization_id: org._id }],
-    }).sort({ isHeadquarters: -1, createdAt: 1 });
+    let org = orgId ? await Organization.findById(orgId) : null;
+    let branches = [];
+    if (org) {
+      branches = await Institute.find({
+        $or: [
+          { organization: org._id },
+          { organization_id: org._id },
+          ...(currentInstitute ? [{ parentInstitute: currentInstitute._id }, { parent_institute: currentInstitute._id }] : []),
+        ],
+      }).sort({ isHeadquarters: -1, createdAt: 1 });
+    } else if (currentInstitute) {
+      branches = await Institute.find({
+        $or: [
+          { _id: currentInstitute._id },
+          { id: currentInstitute._id },
+          { parentInstitute: currentInstitute._id },
+          { parent_institute: currentInstitute._id },
+          { adminUser: req.user._id },
+        ],
+      }).sort({ isHeadquarters: -1, createdAt: 1 });
+    }
+
+    if (branches.length === 0 && currentInstitute) {
+      branches = [currentInstitute];
+    }
 
     let totalStudentsAcross = 0;
     let totalBatchesAcross = 0;
@@ -510,12 +612,18 @@ export const getHqAnalytics = async (req, res) => {
 
     return res.json({
       success: true,
-      organization: {
+      organization: org ? {
         id: String(org._id || org.id),
         name: org.name,
         planType: org.planType || "multi_branch_pro",
         maxBranches: org.maxBranches || 10,
         status: org.status || "active",
+      } : {
+        id: "org_default",
+        name: `${currentInstitute?.name || 'Academy'} Network`,
+        planType: "multi_branch_pro",
+        maxBranches: 10,
+        status: "active",
       },
       summary: {
         totalBranches: branches.length,
