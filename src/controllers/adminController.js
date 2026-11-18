@@ -90,6 +90,18 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
 
   const instObj = typeof institute.toObject === "function" ? institute.toObject() : { ...institute };
   instObj.walletBalance = liveBal;
+  instObj.organization = institute.organization || institute.organization_id || null;
+  instObj.isHeadquarters = Boolean(institute.isHeadquarters);
+  instObj.branchCode = institute.branchCode || "";
+  instObj.city = institute.city || "";
+  instObj.address = institute.address || "";
+  if (instObj.organization) {
+    try {
+      const Organization = (await import("../models/Organization.js")).default;
+      const org = await Organization.findById(instObj.organization);
+      if (org) instObj.organizationName = org.name;
+    } catch (_) {}
+  }
   instObj.aiWalletBalance = Number(institute.aiWalletBalance || 0);
   instObj.aiCreditsPerRupee = Number(institute.aiCreditsPerRupee || 10);
   instObj.perMessageCharge = liveRate;
@@ -164,6 +176,12 @@ export const getAdminOverview = async (req, res) => {
       Institute.countDocuments({ tuitionType: "solo", isDemoAccount: { $ne: true }, registrationSource: { $ne: "direct" }, isDirectRegistration: { $ne: true } }),
       Institute.countDocuments({ tuitionType: "institution", isDemoAccount: { $ne: true }, registrationSource: { $ne: "direct" }, isDirectRegistration: { $ne: true } }),
     ]);
+
+    let totalOrganizations = 0;
+    try {
+      const Organization = (await import("../models/Organization.js")).default;
+      totalOrganizations = await Organization.countDocuments({ status: "active" });
+    } catch (_) {}
 
     const totalStudents = totalStudentsResult[0]?.count || 0;
 
@@ -302,6 +320,7 @@ export const getAdminOverview = async (req, res) => {
         totalTeachers,
         totalSolo,
         totalInstitutions,
+        totalOrganizations,
         activeNow,
         activeToday,
         highestConcurrent,
@@ -431,6 +450,12 @@ export const createInstitute = async (req, res) => {
     }
 
     const normalizedEmail = adminEmail ? adminEmail.toLowerCase().trim() : "";
+    if (req.body.isHeadquarters !== undefined) institute.isHeadquarters = req.body.isHeadquarters === true || String(req.body.isHeadquarters) === "true";
+    if (req.body.branchCode !== undefined) institute.branchCode = req.body.branchCode;
+    if (req.body.city !== undefined) institute.city = req.body.city;
+    if (req.body.address !== undefined) institute.address = req.body.address;
+    if (req.body.organization !== undefined) institute.organization = req.body.organization || null;
+
     if (normalizedEmail) {
       const existingUser = await User.findOne({ email: normalizedEmail });
 
@@ -467,6 +492,11 @@ export const createInstitute = async (req, res) => {
       flexibleDueDate: Boolean(flexibleDueDate),
       studentCustomFields: Array.isArray(studentCustomFields) ? studentCustomFields : [],
       studentPortalEnabled: studentPortalEnabled !== false,
+      isHeadquarters: req.body.isHeadquarters === true || String(req.body.isHeadquarters) === "true",
+      branchCode: req.body.branchCode || req.body.branch_code || "",
+      city: req.body.city || "",
+      address: req.body.address || "",
+      organization: req.body.organization || req.body.organizationId || null,
       quizFeatureEnabled: quizFeatureEnabled !== false,
       recordedLecturesFeatureEnabled: (req.body.recorded_lectures_feature_enabled !== undefined ? Boolean(req.body.recorded_lectures_feature_enabled) : recordedLecturesFeatureEnabled !== false),
       recorded_lectures_feature_enabled: (req.body.recorded_lectures_feature_enabled !== undefined ? Boolean(req.body.recorded_lectures_feature_enabled) : recordedLecturesFeatureEnabled !== false),
@@ -3137,6 +3167,9 @@ export const getSuperAdminTuitionsList = async (req, res) => {
         adminEmail: inst.adminEmail || inst.email || "",
         address: inst.address || inst.city || "",
         city: inst.city || "",
+        isHeadquarters: Boolean(inst.isHeadquarters),
+        branchCode: inst.branchCode || "",
+        organization: inst.organization || inst.organization_id || null,
         tuitionType: inst.tuitionType || "solo",
         logoUrl: inst.logoUrl || "",
         subscriptionPlan: inst.subscriptionPlan || "trial",
@@ -3782,5 +3815,43 @@ export const getActiveTodayUsers = async (req, res) => {
   } catch (error) {
     console.error("getActiveTodayUsers error:", error);
     return res.status(500).json({ success: false, message: "Could not fetch active users list", error: error.message });
+  }
+};
+
+export const getAdminOrganizations = async (req, res) => {
+  try {
+    const isSuper = req.user && (req.user.role === "super_admin" || req.user.isSuperAdmin === true);
+    if (!isSuper) {
+      return res.status(403).json({ message: "Access denied. Exclusively for super admin." });
+    }
+
+    const Organization = (await import("../models/Organization.js")).default;
+    const orgs = await Organization.find({}).sort({ createdAt: -1 });
+
+    const orgSummaries = await Promise.all(
+      orgs.map(async (org) => {
+        const branches = await Institute.find({
+          $or: [{ organization: org._id }, { organization_id: org._id }],
+        }).select("_id name branchCode city isHeadquarters status");
+
+        return {
+          id: String(org._id || org.id),
+          _id: String(org._id || org.id),
+          name: org.name,
+          ownerName: org.ownerName,
+          adminEmail: org.adminEmail,
+          planType: org.planType,
+          maxBranches: org.maxBranches,
+          status: org.status,
+          branchCount: branches.length,
+          branches,
+          createdAt: org.createdAt,
+        };
+      })
+    );
+
+    return res.json({ success: true, count: orgSummaries.length, organizations: orgSummaries });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 };

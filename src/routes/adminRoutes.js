@@ -53,6 +53,7 @@ import {
   updateGlobalWalletSettings,
   flushSystemCache,
   getAdminAiSettings,
+  getAdminOrganizations,
   updateAdminAiSettings,
   topupInstituteAiWallet,
   updateInstituteAiConfig,
@@ -114,6 +115,7 @@ router.post("/switch-institute/:id", switchSuperAdminInstitute);
 router.post("/switch-staff/:id", switchSuperAdminStaff);
 router.post("/switch-student/:id", switchSuperAdminStudent);
 
+router.get("/organizations", getAdminOrganizations);
 router.get("/overview", getAdminOverview);
 router.get("/active-today-users", getActiveTodayUsers);
 router.get("/uptime", getUptimeOverview);
