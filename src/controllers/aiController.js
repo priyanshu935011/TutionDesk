@@ -2,6 +2,7 @@ import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import TestResult from "../models/TestResult.js";
+import TestSeries from "../models/TestSeries.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import {
   getInstituteAiDetails,
@@ -17,11 +18,27 @@ import {
   generateAssignment,
   callGeminiRaw,
   parsePromptWithAi,
+  extractJsonFromText,
 } from "../services/aiService.js";
 import { createStudent } from "./studentController.js";
 import { createTestResultsBulk } from "./teacherController.js";
 import { supabase } from "../utils/supabase.js";
 import { logAiHarvest } from "../utils/aiHarvestLogger.js";
+import { logInstituteActivity } from "../utils/activityLogger.js";
+
+// In-Flight & Completed AI Request Cache to handle app minimization / background socket drops
+const activeAiPromises = new Map();
+const completedAiCache = new Map();
+
+// Periodic cleanup of completed responses older than 15 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of completedAiCache.entries()) {
+    if (now - v.timestamp > 15 * 60 * 1000) {
+      completedAiCache.delete(k);
+    }
+  }
+}, 5 * 60 * 1000);
 
 // Helper to get clean institute ID from req.user
 function getInstituteIdFromReq(req) {
@@ -325,35 +342,49 @@ export const chatWithAi = async (req, res) => {
       return res.status(400).json({ message: "Institute ID required." });
     }
 
-    const details = await getInstituteAiDetails(instituteId);
-    if (!details) {
-      return res.status(404).json({ message: "Institute not found." });
+    const requestId = req.body?.requestId;
+    const reqKey = requestId ? `${instituteId}_${requestId}` : null;
+    if (reqKey && completedAiCache.has(reqKey)) {
+      console.log(`[AI Cache] Returning completed response for ${reqKey}`);
+      return res.json(completedAiCache.get(reqKey).response);
+    }
+    if (reqKey && activeAiPromises.has(reqKey)) {
+      console.log(`[AI Cache] Awaiting in-flight response for ${reqKey}`);
+      const cachedResult = await activeAiPromises.get(reqKey);
+      return res.json(cachedResult);
     }
 
-    const isStudent = req.user.role === "student";
+    const processPromise = (async () => {
+      const details = await getInstituteAiDetails(instituteId);
+      if (!details) {
+        const err = new Error("Institute not found.");
+        err.status = 404;
+        throw err;
+      }
 
-    if (req.user.role === "teacher" && req.user.aiAccessEnabled === false) {
-      return res.status(403).json({
-        message: "AI access has been disabled for your teacher account by the institute admin.",
-        code: "TEACHER_AI_DISABLED",
-        isLocked: true,
-      });
-    }
+      const isStudent = req.user.role === "student";
 
-    // Locked check
-    if (!details.aiEnabled) {
-      return res.status(403).json({
-        message: "AI Assistant is currently locked for this institute by Super Admin.",
-        code: "AI_LOCKED",
-      });
-    }
+      if (req.user.role === "teacher" && req.user.aiAccessEnabled === false) {
+        const err = new Error("AI access has been disabled for your teacher account by the institute admin.");
+        err.status = 403;
+        err.code = "TEACHER_AI_DISABLED";
+        throw err;
+      }
 
-    if (isStudent && !details.aiStudentEnabled) {
-      return res.status(403).json({
-        message: "AI Tutor has not been activated for students by your institute.",
-        code: "STUDENT_AI_LOCKED",
-      });
-    }
+      // Locked check
+      if (!details.aiEnabled) {
+        const err = new Error("AI Assistant is currently locked for this institute by Super Admin.");
+        err.status = 403;
+        err.code = "AI_LOCKED";
+        throw err;
+      }
+
+      if (isStudent && !details.aiStudentEnabled) {
+        const err = new Error("AI Tutor has not been activated for students by your institute.");
+        err.status = 403;
+        err.code = "STUDENT_AI_LOCKED";
+        throw err;
+      }
 
     const {
       message = "",
@@ -850,13 +881,28 @@ export const chatWithAi = async (req, res) => {
     const creditsPerRupee = Number(details.aiCreditsPerRupee || 10);
     const remainingCredits = Math.round(remainingBal * creditsPerRupee);
 
-    return res.json({
-      success: true,
-      taskType,
-      ...replyPayload,
-      remainingCredits,
-      aiCreditsPerRupee: creditsPerRupee,
-    });
+      return {
+        success: true,
+        taskType,
+        ...replyPayload,
+        remainingCredits,
+        aiCreditsPerRupee: creditsPerRupee,
+      };
+    })();
+
+    if (reqKey) activeAiPromises.set(reqKey, processPromise);
+
+    try {
+      const resultData = await processPromise;
+      if (reqKey) {
+        completedAiCache.set(reqKey, { response: resultData, timestamp: Date.now() });
+        activeAiPromises.delete(reqKey);
+      }
+      return res.json(resultData);
+    } catch (err) {
+      if (reqKey) activeAiPromises.delete(reqKey);
+      throw err;
+    }
   } catch (error) {
     console.error("chatWithAi error:", error);
     const status = (error.status && error.status !== 404) ? error.status : 502;
@@ -873,11 +919,33 @@ export const chatWithAi = async (req, res) => {
 export const confirmAiAction = async (req, res) => {
   try {
     const instituteId = getInstituteIdFromReq(req);
+    const requestId = req.body?.requestId;
+    const reqKey = requestId ? `${instituteId}_action_${requestId}` : null;
+    if (reqKey && completedAiCache.has(reqKey)) {
+      console.log(`[AI Cache] Returning completed action response for ${reqKey}`);
+      return res.json(completedAiCache.get(reqKey).response);
+    }
+    if (reqKey && activeAiPromises.has(reqKey)) {
+      console.log(`[AI Cache] Awaiting in-flight action response for ${reqKey}`);
+      const cachedResult = await activeAiPromises.get(reqKey);
+      return res.json(cachedResult);
+    }
+
     const actionType = req.body.actionType || req.body.action;
     const data = req.body.data;
 
     if (!actionType || !data) {
       return res.status(400).json({ message: "Action type and payload data are required." });
+    }
+
+    // Intercept res.json to cache response if requestId is present
+    if (reqKey) {
+      const origJson = res.json.bind(res);
+      res.json = (body) => {
+        completedAiCache.set(reqKey, { response: body, timestamp: Date.now() });
+        activeAiPromises.delete(reqKey);
+        return origJson(body);
+      };
     }
 
     if (actionType === "CREATE_STUDENT_PREVIEW" || actionType === "add_student") {
@@ -1028,10 +1096,303 @@ export const confirmAiAction = async (req, res) => {
       });
     }
 
+    if (actionType === "TEST_SERIES_PREVIEW" || actionType === "PUBLISH_TEST_SERIES" || actionType === "save_test_series") {
+      const {
+        title = "Unit Test Series",
+        category = "General",
+        subject = "General",
+        difficulty = "Medium",
+        durationMinutes = 60,
+        questions = [],
+        instructions = "",
+      } = data;
+
+      const formattedQuestions = (questions || []).map((q, idx) => ({
+        id: q.id || `q_${idx + 1}`,
+        type: q.type || "single_choice",
+        question: q.question || `Question ${idx + 1}`,
+        questionImageUrl: q.questionImageUrl || "",
+        options: (q.options || []).map((o, oIdx) => ({
+          id: o.id || `opt_${oIdx}`,
+          text: String(o.text || o || "").trim(),
+          imageUrl: o.imageUrl || "",
+        })),
+        correctAnswers: Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0
+          ? q.correctAnswers
+          : (typeof q.correctOption === "number" ? [`opt_${q.correctOption}`] : ["opt_0"]),
+        marks: Number(q.marks) || 4,
+        negativeMarks: Number(q.negativeMarks) || 0,
+        explanation: q.explanation || "",
+      }));
+
+      const totalMarks = formattedQuestions.reduce((s, q) => s + (q.marks || 4), 0);
+
+      const createdTest = await TestSeries.create({
+        title,
+        description: `Created via AI Test Series Generator.`,
+        category,
+        subject,
+        topic: title,
+        difficulty,
+        durationMinutes: Number(durationMinutes) || 60,
+        totalMarks,
+        passingMarks: Math.round(totalMarks * 0.4),
+        instructions: instructions || `Attempt all ${formattedQuestions.length} questions.`,
+        questions: formattedQuestions,
+        isGlobal: false,
+        institute: instituteId,
+        createdBy: req.user?._id || req.user?.id,
+        isPublished: true,
+      });
+
+      logInstituteActivity({
+        instituteId,
+        user: req.user,
+        action: "TEST_SERIES_AI_CREATED",
+        category: "ACADEMICS",
+        title: `AI Test Series Created: ${title}`,
+        details: `${req.user?.name || "Teacher"} saved test series "${title}" with ${formattedQuestions.length} questions.`,
+        metadata: {
+          testSeriesId: String(createdTest._id || createdTest.id),
+          questionCount: formattedQuestions.length,
+          totalMarks,
+        },
+      }).catch(() => null);
+
+      return res.status(201).json({
+        success: true,
+        message: `Test series "${title}" published successfully!`,
+        testSeries: createdTest,
+      });
+    }
+
     return res.status(400).json({ message: "Unsupported action type." });
   } catch (error) {
     console.error("confirmAiAction error:", error);
     return res.status(500).json({ message: error.message || "Failed to confirm action." });
+  }
+};
+
+// 3.1 Convert Uploaded PDF to Official Test Series with AI
+export const createTestSeriesFromPdf = async (req, res) => {
+  try {
+    const instituteId = getInstituteIdFromReq(req);
+    if (!instituteId) {
+      return res.status(400).json({ message: "Institute ID required." });
+    }
+
+    const requestId = req.body?.requestId;
+    const reqKey = requestId ? `${instituteId}_pdf_test_${requestId}` : null;
+    if (reqKey && completedAiCache.has(reqKey)) {
+      console.log(`[AI Cache] Returning completed PDF test series for ${reqKey}`);
+      return res.json(completedAiCache.get(reqKey).response);
+    }
+    if (reqKey && activeAiPromises.has(reqKey)) {
+      console.log(`[AI Cache] Awaiting in-flight PDF test series for ${reqKey}`);
+      const cachedResult = await activeAiPromises.get(reqKey);
+      return res.json(cachedResult);
+    }
+
+    const processPromise = (async () => {
+      const details = await getInstituteAiDetails(instituteId);
+      if (!details) {
+        const err = new Error("Institute not found.");
+        err.status = 404;
+        throw err;
+      }
+
+      // Check institute AI feature
+      if (!details.aiEnabled) {
+        const err = new Error("AI features are currently disabled for this institute.");
+        err.status = 403;
+        err.code = "AI_LOCKED";
+        throw err;
+      }
+
+      // Check staff AI permission
+      if (req.user?.role === "teacher" && req.user?.aiAccessEnabled === false) {
+        const err = new Error("AI access has been disabled for your staff account by the institute admin.");
+        err.status = 403;
+        err.code = "TEACHER_AI_DISABLED";
+        throw err;
+      }
+
+      const {
+        pdfBase64,
+        imageBase64,
+        title = "Extracted Test Series",
+        category = "General",
+        subject = "General",
+        durationMinutes = 60,
+        correctMarks = 4,
+        negativeMarks = 1,
+      } = req.body;
+
+      const fileData = pdfBase64 || imageBase64;
+      if (!fileData) {
+        const err = new Error("PDF file data is required to convert into a test series.");
+        err.status = 400;
+        throw err;
+      }
+
+      const userInfo = {
+        userId: req.user?._id || req.user?.id,
+        userName: req.user?.name || "",
+        userRole: req.user?.role || "teacher",
+      };
+
+      // Deduct AI credits for quiz generation
+      const billing = await deductAiCredits(instituteId, "quiz", null, userInfo);
+
+      const prompt = `You are an expert test creator and exam document parser.
+Analyze this exam/test document and convert ALL questions into a complete test series paper.
+Rules:
+- Extract all questions, ensuring question text, options (A, B, C, D), correct option, and detailed step-by-step explanations are accurately parsed.
+- If options are missing or incomplete, formulate appropriate 4 options with one clear correct answer.
+- Marks per question: default to +${correctMarks}, negative marks: -${negativeMarks}.
+- Clean mathematical and scientific notation into standard unicode (e.g., ², ³, √, ∫, ±, π, θ, ÷, ×). Do NOT use raw LaTeX dollar signs.
+- Output ONLY valid JSON in this exact structure:
+{
+  "title": "${title}",
+  "category": "${category}",
+  "subject": "${subject}",
+  "durationMinutes": ${durationMinutes},
+  "instructions": "Attempt all questions. Each correct answer carries +${correctMarks} marks. Each incorrect answer deducts -${negativeMarks} marks.",
+  "questions": [
+    {
+      "id": "q_1",
+      "type": "single_choice",
+      "question": "Question text here",
+      "marks": ${correctMarks},
+      "negativeMarks": ${negativeMarks},
+      "options": [
+        {"id": "opt_0", "text": "Option A text"},
+        {"id": "opt_1", "text": "Option B text"},
+        {"id": "opt_2", "text": "Option C text"},
+        {"id": "opt_3", "text": "Option D text"}
+      ],
+      "correctOption": 0,
+      "correctAnswers": ["opt_0"],
+      "explanation": "Detailed explanation here"
+    }
+  ]
+}`;
+
+      const raw = await callGeminiRaw({
+        prompt,
+        systemInstruction: "You are an expert examiner. Extract and format all questions from this document strictly into the requested JSON.",
+        imageBase64: fileData,
+        imageMimeType: "application/pdf",
+        temperature: 0.2,
+      });
+
+      const parsed = extractJsonFromText(raw) || {};
+      const questionsRaw = Array.isArray(parsed.questions) && parsed.questions.length > 0 ? parsed.questions : [];
+
+      if (questionsRaw.length === 0) {
+        throw new Error("No questions could be extracted from the provided PDF document. Please verify the PDF contains legible questions.");
+      }
+
+      const formattedQuestions = questionsRaw.map((q, idx) => {
+        const qId = q.id || `q_${idx + 1}`;
+        const options = (q.options || []).map((opt, oIdx) => ({
+          id: opt.id || `opt_${oIdx}`,
+          text: String(opt.text || opt || "").trim(),
+          imageUrl: opt.imageUrl || "",
+        }));
+
+        let correctAnswers = [];
+        if (Array.isArray(q.correctAnswers) && q.correctAnswers.length > 0) {
+          correctAnswers = q.correctAnswers;
+        } else if (typeof q.correctOption === "number" && options[q.correctOption]) {
+          correctAnswers = [options[q.correctOption].id];
+        } else if (options.length > 0) {
+          correctAnswers = [options[0].id];
+        }
+
+        return {
+          id: qId,
+          type: q.type || "single_choice",
+          question: q.question || `Question ${idx + 1}`,
+          questionImageUrl: q.questionImageUrl || "",
+          options,
+          correctAnswers,
+          marks: Number(q.marks) || Number(correctMarks) || 4,
+          negativeMarks: Number(q.negativeMarks) || Number(negativeMarks) || 0,
+          explanation: q.explanation || "",
+        };
+      });
+
+      const totalMarks = formattedQuestions.reduce((sum, q) => sum + (q.marks || 4), 0);
+      const testTitle = (parsed.title || title || "PDF Converted Test").trim();
+
+      const newTestSeries = await TestSeries.create({
+        title: testTitle,
+        description: `Generated automatically with AI from PDF on ${new Date().toLocaleDateString("en-IN")}.`,
+        category: parsed.category || category || "General",
+        subject: parsed.subject || subject || "General",
+        topic: testTitle,
+        difficulty: "Medium",
+        durationMinutes: Number(parsed.durationMinutes) || Number(durationMinutes) || 60,
+        totalMarks,
+        passingMarks: Math.round(totalMarks * 0.4),
+        instructions: parsed.instructions || `Attempt all ${formattedQuestions.length} questions.`,
+        questions: formattedQuestions,
+        isGlobal: false,
+        institute: instituteId,
+        createdBy: req.user?._id || req.user?.id,
+        isPublished: true,
+      });
+
+      // Log institute activity
+      logInstituteActivity({
+        instituteId,
+        user: req.user,
+        action: "TEST_SERIES_AI_CREATED",
+        category: "ACADEMICS",
+        title: `AI Test Series Created: ${testTitle}`,
+        details: `${req.user?.name || "Teacher"} generated test series "${testTitle}" with ${formattedQuestions.length} questions from PDF.`,
+        metadata: {
+          testSeriesId: String(newTestSeries._id || newTestSeries.id),
+          questionCount: formattedQuestions.length,
+          totalMarks,
+        },
+      }).catch(() => null);
+
+      const creditsPerRupee = Number(details.aiCreditsPerRupee || 10);
+      const remainingCredits = Math.round(billing.newBalance * creditsPerRupee);
+
+      return {
+        success: true,
+        message: `Successfully created test series "${testTitle}" with ${formattedQuestions.length} questions from PDF!`,
+        testSeries: newTestSeries,
+        creditsDeducted: billing.deducted,
+        remainingBalance: billing.newBalance,
+        remainingCredits,
+      };
+    })();
+
+    if (reqKey) activeAiPromises.set(reqKey, processPromise);
+
+    try {
+      const responseData = await processPromise;
+      if (reqKey) {
+        completedAiCache.set(reqKey, { response: responseData, timestamp: Date.now() });
+        activeAiPromises.delete(reqKey);
+      }
+      return res.status(201).json(responseData);
+    } catch (err) {
+      if (reqKey) activeAiPromises.delete(reqKey);
+      throw err;
+    }
+  } catch (error) {
+    console.error("createTestSeriesFromPdf error:", error);
+    const status = error.status || 500;
+    return res.status(status).json({
+      success: false,
+      message: error.message || "Failed to generate test series from PDF.",
+      code: error.code || "PDF_TEST_SERIES_ERROR",
+    });
   }
 };
 

@@ -31,6 +31,7 @@ import {
   getOutstandingStudents,
   getQuickSummary,
   getWhatsappLogs,
+  getInstituteActivities,
 } from "../controllers/teacherController.js";
 import {
   markStaffAttendance,
@@ -139,6 +140,10 @@ router.get("/teachers/:id/activity", getHiredTeacherActivity);
 router.get("/:id/activity", getHiredTeacherActivity);
 router.patch("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
 router.put("/hired-teachers/:id/ai-access", toggleTeacherAiAccess);
+
+// Institute Activity Feed
+router.get("/activity-feed", getInstituteActivities);
+router.get("/activities", getInstituteActivities);
 
 // Staff Attendance
 router.post("/staff-attendance", markStaffAttendance);

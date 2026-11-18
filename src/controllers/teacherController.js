@@ -10,6 +10,7 @@ import User from "../models/User.js";
 import TestResult from "../models/TestResult.js";
 import StaffAttendance from "../models/StaffAttendance.js";
 import StaffSalary from "../models/StaffSalary.js";
+import ActivityLog from "../models/ActivityLog.js";
 import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher, isInstituteAdmin, getTodayISTDateString } from "../utils/staffPermissionHelper.js";
 import WhatsappLog from "../models/WhatsappLog.js";
 import cloudinary from "../utils/cloudinary.js";
@@ -22,6 +23,7 @@ import { supabase, supabaseBucket } from "../utils/supabase.js";
 import { toValidUUID, readUserMetadata, writeUserMetadata, readBatchesMetadata, writeBatchesMetadata } from "../utils/supabaseModel.js";
 import { isTeacherOfBatch, getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
+import { logInstituteActivity } from "../utils/activityLogger.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { syncInstituteStorage } from "./videoController.js";
@@ -2255,6 +2257,25 @@ export const createTestResultsBulk = async (req, res) => {
       console.warn("createTestResultsBulk notification error:", nErr.message);
     }
 
+    try {
+      const activeInstId = req.instituteId || req.user?.institute || req.user?._id;
+      logInstituteActivity({
+        instituteId: activeInstId,
+        user: req.user,
+        action: "TEST_MARKS_RECORDED",
+        category: "ACADEMICS",
+        title: `Test Marks Recorded: ${formattedTestTitle}`,
+        details: `${req.user?.name || "Teacher"} recorded test marks for ${populatedResults.length} students in "${formattedTestTitle}".`,
+        batchId: batchId ? String(batchId) : null,
+        batchName: batch?.name || "",
+        metadata: {
+          testTitle: formattedTestTitle,
+          subject: subject || "",
+          studentCount: populatedResults.length,
+        },
+      }).catch(() => null);
+    } catch (_) {}
+
     return res.status(201).json(populatedResults);
   } catch (error) {
     console.error("createTestResultsBulk error:", error);
@@ -3591,5 +3612,119 @@ export const getWhatsappLogs = async (req, res) => {
   } catch (error) {
     console.error("getWhatsappLogs error:", error);
     return res.status(500).json({ message: "Could not fetch WhatsApp logs." });
+  }
+};
+
+export const getInstituteActivities = async (req, res) => {
+  try {
+    const rawInst = req.user.institute;
+    let instIdStr = "";
+    if (rawInst) {
+      if (typeof rawInst === "object") {
+        instIdStr = String(rawInst._id || rawInst.id || "").trim();
+      } else {
+        instIdStr = String(rawInst).trim();
+      }
+    }
+    if ((!instIdStr || instIdStr === "[object Object]") && req.user._id) {
+      instIdStr = String(req.user._id).trim();
+    }
+    if (!instIdStr || instIdStr === "[object Object]") {
+      return res.status(400).json({ message: "No institute associated with this account." });
+    }
+
+    const { category, search, page = 1, limit = 60 } = req.query;
+
+    const query = {
+      $or: [
+        { institute: instIdStr },
+        { instituteId: instIdStr },
+        { user: instIdStr },
+      ],
+    };
+
+    if (category && category !== "all") {
+      query.category = category;
+    }
+
+    if (search && String(search).trim().length > 0) {
+      const s = String(search).trim();
+      query.$or = [
+        { title: { $regex: s, $options: "i" } },
+        { details: { $regex: s, $options: "i" } },
+        { studentName: { $regex: s, $options: "i" } },
+        { userName: { $regex: s, $options: "i" } },
+      ];
+    }
+
+    let logs = [];
+    try {
+      logs = await ActivityLog.find(query)
+        .sort({ createdAt: -1 })
+        .limit(Number(limit) || 60)
+        .skip(((Number(page) || 1) - 1) * (Number(limit) || 60))
+        .lean();
+    } catch (_) {}
+
+    // Synthesize real events from Students table if logs are sparse so institutes have an instant rich activity log
+    let combinedLogs = Array.isArray(logs) ? [...logs] : [];
+    if (combinedLogs.length < 20 && (!category || category === "all")) {
+      try {
+        const students = await Student.find({ user: instIdStr }).sort({ createdAt: -1 }).limit(15).lean();
+        const synthesized = [];
+        for (const st of students) {
+          const stId = (st._id || st.id || "").toString();
+          if (!combinedLogs.some(l => (l.studentId === stId || l.metadata?.studentId === stId) && l.action === "STUDENT_ADDED")) {
+            synthesized.push({
+              _id: `synth_st_${stId}`,
+              action: "STUDENT_ADDED",
+              category: "student",
+              title: `Student Enrolled: ${st.name || "Student"}`,
+              details: `Enrolled into ${st.batchName || "Batch"} (${st.phone || "No phone"})`,
+              studentId: stId,
+              studentName: st.name || "Student",
+              userName: "Institute Admin",
+              userRole: "admin",
+              createdAt: st.createdAt || st.joinedOn || new Date(),
+            });
+          }
+          if (Array.isArray(st.paymentHistory)) {
+            for (const p of st.paymentHistory.slice(-2)) {
+              const pAmt = p.amount || 0;
+              const pMode = p.paymentMode || p.mode || "Cash";
+              const pDate = p.date || p.paymentDate || new Date();
+              const pId = p.id || p._id || `${stId}_${pDate}`;
+              if (!combinedLogs.some(l => l.metadata?.paymentId === pId || l.details?.includes(`from ${st.name}`))) {
+                synthesized.push({
+                  _id: `synth_pay_${pId}`,
+                  action: "PAYMENT_RECORDED",
+                  category: "payment",
+                  title: `Payment Recorded: ₹${pAmt}`,
+                  details: `Received ₹${pAmt} via ${pMode} from ${st.name || "Student"}`,
+                  studentId: stId,
+                  studentName: st.name || "Student",
+                  amount: pAmt,
+                  userName: "Institute Admin",
+                  userRole: "admin",
+                  createdAt: pDate,
+                  metadata: { paymentId: pId },
+                });
+              }
+            }
+          }
+        }
+        combinedLogs = [...combinedLogs, ...synthesized];
+        combinedLogs.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      } catch (_) {}
+    }
+
+    return res.json({
+      success: true,
+      activities: combinedLogs.slice(0, Number(limit) || 60),
+      total: combinedLogs.length,
+    });
+  } catch (error) {
+    console.error("getInstituteActivities error:", error);
+    return res.status(500).json({ message: "Could not fetch activity feed." });
   }
 };

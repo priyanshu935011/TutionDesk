@@ -24,6 +24,7 @@ import cloudinary from "../utils/cloudinary.js";
 import Notification from "../models/Notification.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
+import { logInstituteActivity } from "../utils/activityLogger.js";
 import { parseFcmTokens, addFcmToken, removeFcmToken, serializeTokensForDb } from "../utils/fcmTokenHelper.js";
 import { cascadeDeleteStudent } from "../utils/cascadeErasure.js";
 import { isReceptionist, isReceptionistFeatureAllowed, isHiredTeacher } from "../utils/staffPermissionHelper.js";
@@ -949,6 +950,22 @@ export const createStudent = async (req, res) => {
       }
     });
 
+    logInstituteActivity({
+      instituteId: ownerId,
+      userId: req.user?._id,
+      userName: req.user?.name || "Staff",
+      userRole: req.user?.role || "teacher",
+      action: "STUDENT_ADDED",
+      category: "student",
+      title: `Student Enrolled: ${student.name}`,
+      details: `Enrolled ${student.name} (${student.phone || ""}) into ${verifiedBatches.map(b => b.name).join(", ") || "Batch"}`,
+      studentId: student._id?.toString(),
+      studentName: student.name,
+      batchName: verifiedBatches.map(b => b.name).join(", "),
+      amount: Number(student.totalFees || 0),
+      ip: req.ip,
+    });
+
     const obj = populatedStudent ? (populatedStudent.toJSON ? populatedStudent.toJSON() : populatedStudent) : student;
     const enrolledBatchIds = (obj.batches && obj.batches.length > 0)
       ? obj.batches.map((b) => (b?._id || b?.id || b).toString())
@@ -1226,6 +1243,21 @@ export const updateStudent = async (req, res) => {
     }
     obj.batchName = batchName;
 
+    logInstituteActivity({
+      instituteId: ownerId,
+      userId: req.user?._id,
+      userName: req.user?.name || "Staff",
+      userRole: req.user?.role || "teacher",
+      action: "STUDENT_UPDATED",
+      category: "student",
+      title: `Student Updated: ${obj.name || student.name}`,
+      details: `Updated student record for ${obj.name || student.name} (${obj.batchName})`,
+      studentId: student._id?.toString(),
+      studentName: obj.name || student.name,
+      batchName: obj.batchName,
+      ip: req.ip,
+    });
+
     return res.json(obj);
   } catch (error) {
     console.error("updateStudent error:", error);
@@ -1483,6 +1515,22 @@ export const addPayment = async (req, res) => {
       }
       await invalidateStudentCache(student._id);
     } catch (cErr) {}
+
+    logInstituteActivity({
+      instituteId: ownerId,
+      userId: req.user?._id,
+      userName: req.user?.name || "Staff",
+      userRole: req.user?.role || "teacher",
+      action: "PAYMENT_RECORDED",
+      category: "payment",
+      title: `Payment Recorded: ₹${numAmount}`,
+      details: `Received ₹${numAmount} via ${effectivePaymentMode} from ${student.name}`,
+      studentId: student._id?.toString(),
+      studentName: student.name,
+      amount: numAmount,
+      metadata: { paymentId, paymentMode: effectivePaymentMode, paymentType: effectivePaymentType },
+      ip: req.ip,
+    });
 
     return res.json({
       success: true,
@@ -1907,6 +1955,23 @@ export const markBatchAttendance = async (req, res) => {
         batchName: resolvedBatchName,
       });
     }
+
+    const presCountAll = records.filter(r => r.status === "present").length;
+    const absCountAll = records.filter(r => r.status === "absent").length;
+    logInstituteActivity({
+      instituteId,
+      userId: req.user?._id,
+      userName: req.user?.name || "Staff",
+      userRole: req.user?.role || "teacher",
+      action: "ATTENDANCE_MARKED",
+      category: "attendance",
+      title: `Attendance Marked: ${resolvedBatchName}`,
+      details: `${date} • ${presCountAll} Present, ${absCountAll} Absent (${records.length} total) by ${req.user?.name || "Staff"}`,
+      batchId: resolvedBatchIdStr,
+      batchName: resolvedBatchName,
+      metadata: { date, presentCount: presCountAll, absentCount: absCountAll, totalCount: records.length },
+      ip: req.ip,
+    });
 
     // Respond immediately to the client so UI is instant and never times out (<200ms)
     res.json({
@@ -3906,6 +3971,21 @@ export const bulkCreateStudents = async (req, res) => {
       }
     }
 
+    if (results.created.length > 0) {
+      logInstituteActivity({
+        instituteId,
+        userId: req.user?._id,
+        userName: req.user?.name || "Staff",
+        userRole: req.user?.role || "teacher",
+        action: "STUDENTS_BULK_IMPORTED",
+        category: "student",
+        title: `Bulk Imported ${results.created.length} Students`,
+        details: `Successfully imported ${results.created.length} student records from CSV file`,
+        metadata: { count: results.created.length, skipped: results.errors?.length || 0 },
+        ip: req.ip,
+      });
+    }
+
     return res.status(200).json(results);
   } catch (error) {
     console.error("bulkCreateStudents error:", error);
@@ -5058,6 +5138,25 @@ export const updatePaymentMode = async (req, res) => {
     try {
       await supabase.from("payments").update({ payment_mode: paymentMode, payment_type: paymentMode }).eq("id", paymentId);
     } catch (_) {}
+
+    const ownerId = req.user.role === "teacher"
+      ? (req.user.institute?.adminUser || req.user.institute)
+      : (req.user.institute?._id || req.user.institute || student.user || req.user._id);
+
+    logInstituteActivity({
+      instituteId: ownerId,
+      userId: req.user?._id,
+      userName: req.user?.name || "Staff",
+      userRole: req.user?.role || "teacher",
+      action: "PAYMENT_MODE_UPDATED",
+      category: "payment",
+      title: `Payment Mode Updated: ${paymentMode}`,
+      details: `Updated payment mode to ${paymentMode} for ${student.name}`,
+      studentId: student._id?.toString(),
+      studentName: student.name,
+      metadata: { paymentId, paymentMode },
+      ip: req.ip,
+    });
 
     return res.json({ success: true, message: "Payment mode updated successfully", paymentMode });
   } catch (error) {
