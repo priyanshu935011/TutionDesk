@@ -857,6 +857,24 @@ class SupabaseDocument {
       this.branch_code = data.branch_code || data.branchCode || "";
     }
 
+    if (tableName === "user_branch_memberships") {
+      this.user = data.user_id || data.userId || data.user || this.user;
+      this.userId = this.user;
+      this.user_id = this.user;
+      this.institute = data.institute_id || data.instituteId || data.institute || this.institute;
+      this.instituteId = this.institute;
+      this.institute_id = this.institute;
+      this.organization = data.organization_id || data.organizationId || data.organization || this.organization;
+      this.organizationId = this.organization;
+      this.organization_id = this.organization;
+      this.role = data.role || this.role || "staff";
+    }
+
+    if (tableName === "organizations") {
+      this.ownerUser = data.owner_user || data.ownerUser || data.owner || this.ownerUser;
+      this.owner_user = this.ownerUser;
+    }
+
     if (tableName === "direct_registrations") {
       this.aiEnabled = data.ai_enabled !== undefined ? Boolean(data.ai_enabled) : (data.aiEnabled !== undefined ? Boolean(data.aiEnabled) : true);
       this.aiStudentEnabled = Boolean(data.ai_student_enabled ?? data.aiStudentEnabled);
@@ -1415,6 +1433,20 @@ class SupabaseDocument {
       if (this.maxVideoStorageGb !== undefined) payload.max_video_storage_gb = Number(this.maxVideoStorageGb);
     }
 
+    if (this._tableName === "user_branch_memberships") {
+      const uId = this.user || this.userId || this.user_id;
+      const instId = this.institute || this.instituteId || this.institute_id;
+      const orgId = this.organization || this.organizationId || this.organization_id;
+      if (uId) payload.user_id = toValidUUID(uId);
+      if (instId) payload.institute_id = toValidUUID(instId);
+      if (orgId) payload.organization_id = toValidUUID(orgId);
+    }
+
+    if (this._tableName === "organizations") {
+      const oUser = this.ownerUser || this.owner_user || this.owner;
+      if (oUser) payload.owner_user = toValidUUID(oUser);
+    }
+
     if (this._id) {
       payload.id = this._id;
     }
@@ -1840,7 +1872,21 @@ class SupabaseQuery {
         stripStudentNonColumnFields(dbPayload);
       }
 
-      const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute"];
+      if (tableName === "user_branch_memberships") {
+        const uId = payload.user || payload.userId || payload.user_id || dbPayload.user_id;
+        const instId = payload.institute || payload.instituteId || payload.institute_id || dbPayload.institute_id;
+        const orgId = payload.organization || payload.organizationId || payload.organization_id || dbPayload.organization_id;
+        if (uId) dbPayload.user_id = toValidUUID(uId);
+        if (instId) dbPayload.institute_id = toValidUUID(instId);
+        if (orgId) dbPayload.organization_id = toValidUUID(orgId);
+      }
+
+      if (tableName === "organizations") {
+        const oUser = payload.ownerUser || payload.owner_user || payload.owner || dbPayload.owner_user;
+        if (oUser) dbPayload.owner_user = toValidUUID(oUser);
+      }
+
+      const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute", "owner_user"];
       for (const key of uuidPayloadKeys) {
         if (key in dbPayload) {
           if (dbPayload[key] === "" || dbPayload[key] === undefined || dbPayload[key] === "null") {
@@ -2511,6 +2557,16 @@ class SupabaseModel {
               else if (dbSubKey === "test_series" || dbSubKey === "testSeries") dbSubKey = "test_series_id";
             }
 
+            if (this.tableName === "user_branch_memberships") {
+              if (dbSubKey === "user" || dbSubKey === "user_id" || dbSubKey === "userId" || subKey === "user" || subKey === "userId") dbSubKey = "user_id";
+              else if (dbSubKey === "institute" || dbSubKey === "institute_id" || dbSubKey === "instituteId" || subKey === "institute" || subKey === "instituteId") dbSubKey = "institute_id";
+              else if (dbSubKey === "organization" || dbSubKey === "organization_id" || dbSubKey === "organizationId" || subKey === "organization" || subKey === "organizationId") dbSubKey = "organization_id";
+            }
+
+            if (this.tableName === "organizations") {
+              if (dbSubKey === "owner_user" || dbSubKey === "ownerUser" || dbSubKey === "owner" || subKey === "ownerUser" || subKey === "owner") dbSubKey = "owner_user";
+            }
+
             let subVal = cleanValue(rawSubVal);
             if (subVal && typeof subVal === "object" && subVal.$regex !== undefined) {
               const raw = subVal.$regex instanceof RegExp ? subVal.$regex.source : String(subVal.$regex || "");
@@ -2553,7 +2609,7 @@ class SupabaseModel {
                   const cleanItem = cleanValue(item);
                   if (cleanItem && String(cleanItem) !== "[object Object]") {
                     const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
-                    const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute"].includes(dbSubKey);
+                    const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute", "owner_user", "user_id"].includes(dbSubKey);
                     const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbSubKey === "institute_id" || dbSubKey === "created_by");
                     if (isUuidCol && !isUuid && !isTextIdCol) {
                       const targetSubVal = toValidUUID(String(cleanItem));
@@ -2569,7 +2625,7 @@ class SupabaseModel {
                 const cleanItem = cleanValue(subVal);
                 if (cleanItem !== undefined && cleanItem !== null && String(cleanItem) !== "[object Object]") {
                   const isUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cleanItem));
-                  const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute"].includes(dbSubKey);
+                  const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute", "owner_user", "user_id"].includes(dbSubKey);
                   const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbSubKey === "institute_id" || dbSubKey === "created_by");
                   if (isUuidCol && !isUuid && !isTextIdCol) {
                     const targetSubVal = toValidUUID(String(cleanItem));
@@ -2646,6 +2702,16 @@ class SupabaseModel {
         else if (dbKey === "staff") dbKey = "staff_id";
       }
 
+      if (this.tableName === "user_branch_memberships") {
+        if (dbKey === "user" || dbKey === "user_id" || dbKey === "userId" || key === "user" || key === "userId") dbKey = "user_id";
+        else if (dbKey === "institute" || dbKey === "institute_id" || dbKey === "instituteId" || key === "institute" || key === "instituteId") dbKey = "institute_id";
+        else if (dbKey === "organization" || dbKey === "organization_id" || dbKey === "organizationId" || key === "organization" || key === "organizationId") dbKey = "organization_id";
+      }
+
+      if (this.tableName === "organizations") {
+        if (dbKey === "owner_user" || dbKey === "ownerUser" || dbKey === "owner" || key === "ownerUser" || key === "owner") dbKey = "owner_user";
+      }
+
       if (val === null) {
         q = q.is(dbKey, null);
       } else if (val instanceof Date) {
@@ -2660,7 +2726,7 @@ class SupabaseModel {
           } else {
             formattedVal = cleanValue(formattedVal);
           }
-          const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute"].includes(dbKey);
+          const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute", "owner_user", "user_id"].includes(dbKey);
           if (op === "$in") {
             const cleanInVal = Array.isArray(formattedVal)
               ? (isUuidCol
@@ -2711,7 +2777,7 @@ class SupabaseModel {
         } else {
           const cleanItem = cleanValue(val);
           const isInvalidValue = cleanItem === undefined || cleanItem === null || cleanItem === "" || String(cleanItem) === "[object Object]" || String(cleanItem) === "null" || String(cleanItem) === "undefined";
-          const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute"].includes(dbKey);
+          const isUuidCol = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "release_id", "video_id", "admin_user", "organization_id", "organization", "parent_institute", "owner_user", "user_id"].includes(dbKey);
           const isTextIdCol = ["test_series", "test_series_folders", "institute_test_series", "test_series_attempts"].includes(this.tableName) && (dbKey === "institute_id" || dbKey === "created_by");
 
           if (isInvalidValue) {
@@ -3174,7 +3240,21 @@ class SupabaseModel {
       if (!payload.id) delete payload.id;
     }
 
-    const uuidPayloadKeys = ["id", "institute_id", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute"];
+    if (this.tableName === "user_branch_memberships") {
+      const uId = doc.user || doc.userId || doc.user_id || payload.user_id;
+      const instId = doc.institute || doc.instituteId || doc.institute_id || payload.institute_id;
+      const orgId = doc.organization || doc.organizationId || doc.organization_id || payload.organization_id;
+      if (uId) payload.user_id = toValidUUID(uId);
+      if (instId) payload.institute_id = toValidUUID(instId);
+      if (orgId) payload.organization_id = toValidUUID(orgId);
+    }
+
+    if (this.tableName === "organizations") {
+      const oUser = doc.ownerUser || doc.owner_user || doc.owner || payload.owner_user;
+      if (oUser) payload.owner_user = toValidUUID(oUser);
+    }
+
+    const uuidPayloadKeys = ["id", "institute_id", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute", "owner_user"];
     if (this.tableName !== "marketing_templates" && this.tableName !== "marketing_media") {
       uuidPayloadKeys.push("created_by");
     }
@@ -3433,7 +3513,7 @@ class SupabaseModel {
 
     const payload = update.$set ? update.$set : update;
     const dbPayload = {};
-    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute"];
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute", "owner_user"];
     for (const [key, val] of Object.entries(payload)) {
       if (key.startsWith("$")) continue;
       const dbKey = camelToSnake(key);
@@ -3737,7 +3817,7 @@ class SupabaseModel {
       stripStudentNonColumnFields(dbPayload);
     }
 
-    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute"];
+    const uuidPayloadKeys = ["id", "institute_id", "created_by", "batch_id", "teacher_id", "student_id", "user_id", "parent_admin", "admin_user", "test_series_id", "organization_id", "organization", "parent_institute", "owner_user"];
     for (const key of uuidPayloadKeys) {
       if (key in dbPayload) {
         if (dbPayload[key] === "" || dbPayload[key] === undefined || dbPayload[key] === "null") {

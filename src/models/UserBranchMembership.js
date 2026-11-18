@@ -5,14 +5,38 @@ const userBranchMembershipSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
     institute: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Institute",
-      required: true,
+    },
+    instituteId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Institute",
+    },
+    institute_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Institute",
     },
     organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+    },
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+    },
+    organization_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Organization",
       default: null,

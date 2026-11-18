@@ -10,7 +10,10 @@ const organizationSchema = new mongoose.Schema(
     ownerUser: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+    },
+    owner_user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
     ownerName: {
       type: String,

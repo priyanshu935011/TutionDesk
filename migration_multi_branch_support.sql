@@ -1,52 +1,61 @@
 -- =====================================================
 -- ClassTech Multi-Branch Architecture Migration
--- Run this in Supabase SQL Editor if not already applied
+-- Safe & Idempotent: Can be run multiple times safely
 -- =====================================================
 
 -- 1. Organizations Table
-CREATE TABLE IF NOT EXISTS organizations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    owner_user UUID REFERENCES users(id) ON DELETE SET NULL,
-    owner_name VARCHAR(255) DEFAULT '',
-    admin_email VARCHAR(255) DEFAULT '',
-    admin_phone VARCHAR(50) DEFAULT '',
-    plan_type VARCHAR(50) DEFAULT 'multi_branch_pro',
-    max_branches INT DEFAULT 10,
-    status VARCHAR(50) DEFAULT 'active',
-    settings JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 );
 
-CREATE INDEX IF NOT EXISTS idx_organizations_owner_user ON organizations(owner_user);
-CREATE INDEX IF NOT EXISTS idx_organizations_status ON organizations(status);
+-- Ensure all columns exist on organizations even if table already existed
+ALTER TABLE public.organizations
+    ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS owner_user UUID,
+    ADD COLUMN IF NOT EXISTS owner_name TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS admin_email TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS admin_phone TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS plan_type TEXT DEFAULT 'multi_branch_pro',
+    ADD COLUMN IF NOT EXISTS max_branches INTEGER DEFAULT 10,
+    ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+
+-- Create indexes for organizations (only after columns are guaranteed to exist)
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_user ON public.organizations(owner_user);
+CREATE INDEX IF NOT EXISTS idx_organizations_status ON public.organizations(status);
 
 -- 2. Multi-Branch Columns on Institutes Table
-ALTER TABLE institutes
-ADD COLUMN IF NOT EXISTS organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
-ADD COLUMN IF NOT EXISTS organization UUID REFERENCES organizations(id) ON DELETE SET NULL,
-ADD COLUMN IF NOT EXISTS is_headquarters BOOLEAN DEFAULT FALSE,
-ADD COLUMN IF NOT EXISTS branch_code VARCHAR(100) DEFAULT '',
-ADD COLUMN IF NOT EXISTS city VARCHAR(255) DEFAULT '',
-ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '',
-ADD COLUMN IF NOT EXISTS parent_institute UUID REFERENCES institutes(id) ON DELETE SET NULL;
+ALTER TABLE public.institutes
+    ADD COLUMN IF NOT EXISTS organization_id UUID,
+    ADD COLUMN IF NOT EXISTS organization UUID,
+    ADD COLUMN IF NOT EXISTS is_headquarters BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS branch_code TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS city TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '',
+    ADD COLUMN IF NOT EXISTS parent_institute UUID;
 
-CREATE INDEX IF NOT EXISTS idx_institutes_organization_id ON institutes(organization_id);
-CREATE INDEX IF NOT EXISTS idx_institutes_parent_institute ON institutes(parent_institute);
-CREATE INDEX IF NOT EXISTS idx_institutes_is_headquarters ON institutes(is_headquarters);
+-- Create indexes for institutes
+CREATE INDEX IF NOT EXISTS idx_institutes_organization_id ON public.institutes(organization_id);
+CREATE INDEX IF NOT EXISTS idx_institutes_parent_institute ON public.institutes(parent_institute);
+CREATE INDEX IF NOT EXISTS idx_institutes_is_headquarters ON public.institutes(is_headquarters);
 
 -- 3. User Branch Memberships Table
-CREATE TABLE IF NOT EXISTS user_branch_memberships (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    institute_id UUID NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
-    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-    role VARCHAR(50) DEFAULT 'staff',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE IF NOT EXISTS public.user_branch_memberships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ubm_user ON user_branch_memberships(user_id);
-CREATE INDEX IF NOT EXISTS idx_ubm_institute ON user_branch_memberships(institute_id);
-CREATE INDEX IF NOT EXISTS idx_ubm_organization ON user_branch_memberships(organization_id);
+-- Ensure all columns exist on user_branch_memberships even if table already existed
+ALTER TABLE public.user_branch_memberships
+    ADD COLUMN IF NOT EXISTS user_id UUID,
+    ADD COLUMN IF NOT EXISTS institute_id UUID,
+    ADD COLUMN IF NOT EXISTS organization_id UUID,
+    ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff',
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+
+-- Create indexes for user_branch_memberships
+CREATE INDEX IF NOT EXISTS idx_ubm_user ON public.user_branch_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_ubm_institute ON public.user_branch_memberships(institute_id);
+CREATE INDEX IF NOT EXISTS idx_ubm_organization ON public.user_branch_memberships(organization_id);
