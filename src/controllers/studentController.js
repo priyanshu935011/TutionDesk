@@ -3352,15 +3352,8 @@ export const getStudentPortalData = async (req, res) => {
           TestResult.find({ institute: instituteId, student: student._id }).sort({
             createdAt: -1,
           }),
-          isQuizEnabled ? Promise.resolve(getLiveStateForStudent(student)) : Promise.resolve(null),
-          isQuizEnabled ? Quiz.find({
-            institute: instituteId,
-            $or: [
-              { batches: currentBatchIdVal },
-              { batches: { $size: 0 } }
-            ],
-            status: { $ne: "archived" },
-          }).sort({ createdAt: -1 }) : Promise.resolve([]),
+          Promise.resolve(null),
+          Promise.resolve([]),
           isVideosEnabled
             ? VideoLecture.find({
                 institute: instituteId,

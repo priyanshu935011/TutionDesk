@@ -19,6 +19,10 @@ import StudentAddress from "../models/StudentAddress.js";
 import Order from "../models/Order.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import AiHarvestLog from "../models/AiHarvestLog.js";
+import StudentMistakeBook from "../models/StudentMistakeBook.js";
+import FocusSession from "../models/FocusSession.js";
+import StudentEntitlement from "../models/StudentEntitlement.js";
+import AiDoubtHistory from "../models/AiDoubtHistory.js";
 import StaffAttendance from "../models/StaffAttendance.js";
 import ConsentRecord from "../models/ConsentRecord.js";
 import DataAccessLog from "../models/DataAccessLog.js";
@@ -108,6 +112,10 @@ export async function cascadeDeleteStudent({
     StudentAddress.deleteMany({ studentId: sId }).catch(() => {}),
     AiUsageLog.deleteMany({ userId: sId }).catch(() => {}),
     AiHarvestLog.deleteMany({ user: sId }).catch(() => {}),
+    StudentMistakeBook.deleteMany({ studentId: sId }).catch(() => {}),
+    FocusSession.deleteMany({ studentId: sId }).catch(() => {}),
+    StudentEntitlement.deleteMany({ studentId: sId }).catch(() => {}),
+    AiDoubtHistory.deleteMany({ studentId: sId }).catch(() => {}),
   ];
 
   // Scrub shipping/student PII on store orders while keeping invoice totals for GST compliance

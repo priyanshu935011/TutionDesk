@@ -11,6 +11,9 @@ import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
 import UptimeEvent from "../models/UptimeEvent.js";
 import TestResult from "../models/TestResult.js";
+import TestSeries from "../models/TestSeries.js";
+import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
+import { cascadeDeleteStudent } from "../utils/cascadeErasure.js";
 import { signSessionToken } from "../utils/jwtHelper.js";
 import { buildInstituteState, SUPER_ADMIN_EMAIL } from "./authController.js";
 import Student from "../models/Student.js";
@@ -1236,22 +1239,25 @@ export const updateAdminStudent = async (req, res) => {
 
 export const deleteAdminStudent = async (req, res) => {
   try {
-    const student = await Student.findByIdAndDelete(req.params.id);
-    if (!student) {
-      return res.status(404).json({ message: "Student not found" });
-    }
+    const studentId = req.params.id;
+    const student = await Student.findById(studentId);
 
-    await Promise.all([
-      TestResult.deleteMany({ student: student._id }),
-      QuizAttempt.deleteMany({ student: student._id }),
-    ]);
+    await cascadeDeleteStudent({
+      studentId: student?._id || student?.id || studentId,
+      studentDoc: student,
+      retainTaxLedger: true,
+      actorId: req.user?._id || "super_admin",
+      actorRole: req.user?.role || "super_admin",
+      reason: "super_admin_deleted_student",
+    });
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
 
     return res.json({ message: "Student deleted successfully" });
   } catch (error) {
-    return res.status(500).json({ message: "Could not delete student" });
+    console.error("deleteAdminStudent error:", error);
+    return res.status(500).json({ message: error.message || "Could not delete student" });
   }
 };
 
@@ -1567,11 +1573,11 @@ export const getInstituteFullAnalytics = async (req, res) => {
     let quizzesCount = 0;
     let quizAttemptsCount = 0;
     try {
-      const quizzes = await Quiz.find({ institute: institute._id });
-      quizzesCount = quizzes.length;
-      const quizIds = quizzes.map((q) => q._id);
-      if (quizIds.length > 0) {
-        quizAttemptsCount = await QuizAttempt.countDocuments({ quiz: { $in: quizIds } });
+      const tests = await TestSeries.find({ instituteId: institute._id });
+      quizzesCount = tests.length;
+      const testIds = tests.map((q) => q._id);
+      if (testIds.length > 0) {
+        quizAttemptsCount = await TestSeriesAttempt.countDocuments({ testSeriesId: { $in: testIds } });
       }
     } catch (e) {}
 
