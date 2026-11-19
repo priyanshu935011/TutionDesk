@@ -32,7 +32,7 @@ export function generateSvgThumbnail(canonicalData) {
     if (!canonicalData || !canonicalData.canvas) return "";
     const width = canonicalData.canvas.width || 1080;
     const height = canonicalData.canvas.height || 1080;
-    const bg = canonicalData.canvas.backgroundColor || "#1E293B";
+    const bg = canonicalData.canvas.backgroundColor || "#FFFFFF";
     const bgImg = canonicalData.canvas.backgroundImageUrl;
 
     let elementsSvg = "";
@@ -835,6 +835,11 @@ export const getInstituteTemplates = async (req, res) => {
         imageUrl: t.thumbnail_url || t.preview_url,
         image_url: t.thumbnail_url || t.preview_url,
         rendered_caption: caption,
+        canvas: v?.template_json?.canvas || {
+          width: t.canvas_width || 1080,
+          height: t.canvas_height || 1080,
+          backgroundColor: "#FFFFFF",
+        },
         template_json: v?.template_json || null,
         elements: v?.template_json?.elements || [],
       };
