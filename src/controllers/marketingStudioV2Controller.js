@@ -715,7 +715,50 @@ export const getAdminStudioAnalytics = async (req, res) => {
 // ============================================================================
 
 export const getInstituteCategories = async (req, res) => {
-  return getCategories(req, res);
+  try {
+    let categories = await MarketingCategory.find({ is_active: true })
+      .sort({ display_order: 1 })
+      .lean();
+
+    if (!categories || categories.length === 0) {
+      categories = [
+        { id: "admissions", name: "Admissions Open", slug: "admissions", icon: "fi-rr-graduation-cap" },
+        { id: "new_batches", name: "New Batches", slug: "new_batches", icon: "fi-rr-rocket-lunch" },
+        { id: "results", name: "Results & Toppers", slug: "results", icon: "fi-rr-trophy" },
+        { id: "festivals", name: "Festivals & Wishes", slug: "festivals", icon: "fi-rr-party-horn" },
+        { id: "faculty", name: "Faculty & Mentors", slug: "faculty", icon: "fi-rr-user" },
+        { id: "quotes", name: "Daily Quotes", slug: "quotes", icon: "fi-rr-comment-quote" },
+        { id: "offers", name: "Offers & Discounts", slug: "offers", icon: "fi-rr-sparkles" },
+        { id: "announcements", name: "Announcements", slug: "announcements", icon: "fi-rr-megaphone" },
+        { id: "social_media", name: "Social Media & Stories", slug: "social_media", icon: "fi-rr-share" },
+      ];
+    }
+
+    // Calculate published template counts per category
+    const counts = {};
+    try {
+      const templates = await MarketingTemplateV2.find({ status: "published" }).select("category_id").lean();
+      (templates || []).forEach((t) => {
+        if (t.category_id) {
+          counts[String(t.category_id)] = (counts[String(t.category_id)] || 0) + 1;
+        }
+      });
+    } catch (_) {}
+
+    const enriched = (categories || []).map((c) => {
+      const cid = String(c.id || c._id);
+      return {
+        ...c,
+        id: cid,
+        template_count: counts[cid] || (c.slug ? counts[c.slug] : 0) || 0,
+      };
+    });
+
+    return res.json({ success: true, categories: enriched });
+  } catch (error) {
+    console.error("getInstituteCategories error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 export const getInstituteBrandingSnapshot = async (req, res) => {
@@ -735,10 +778,21 @@ export const getInstituteTemplates = async (req, res) => {
     const filter = { status: "published" };
 
     if (category && category !== "all") {
-      filter.category_id = category;
+      const resolvedCatId = await resolveCategoryId(category);
+      if (resolvedCatId && resolvedCatId !== category) {
+        filter.$or = [
+          { category_id: category },
+          { category_id: resolvedCatId },
+        ];
+      } else {
+        filter.category_id = category;
+      }
     }
     if (aspect_ratio && aspect_ratio !== "all") {
       filter.aspect_ratio = aspect_ratio;
+    }
+    if (search && search.trim()) {
+      filter.name = new RegExp(search.trim(), "i");
     }
 
     const templates = await MarketingTemplateV2.find(filter)
@@ -750,7 +804,21 @@ export const getInstituteTemplates = async (req, res) => {
     const instituteId = getInstituteIdFromReq(req);
     const branding = await fetchInstituteBranding(instituteId);
 
-    // Enforce safe default share caption interpolation
+    // Batch-fetch current template versions to attach elements/canonical JSON
+    const templateIds = (templates || []).map((t) => t.id || t._id);
+    const versionMap = new Map();
+    if (templateIds.length > 0) {
+      try {
+        const versions = await MarketingTemplateVersion.find({
+          template_id: { $in: templateIds },
+        }).lean();
+        (versions || []).forEach((v) => {
+          versionMap.set(String(v.template_id), v);
+        });
+      } catch (_) {}
+    }
+
+    // Enforce safe default share caption interpolation and attach version JSON
     const enriched = (templates || []).map((t) => {
       let caption = t.default_share_caption || "Warm wishes from {institute.name}! Contact us: {institute.phone}.";
       caption = caption
@@ -758,12 +826,17 @@ export const getInstituteTemplates = async (req, res) => {
         .replace(/\{institute\.phone\}|\{phone\}/gi, branding.phone)
         .replace(/\{institute\.address\}|\{address\}/gi, branding.address);
 
+      const tid = String(t.id || t._id);
+      const v = versionMap.get(tid);
+
       return {
         ...t,
         title: t.name || t.title,
         imageUrl: t.thumbnail_url || t.preview_url,
         image_url: t.thumbnail_url || t.preview_url,
         rendered_caption: caption,
+        template_json: v?.template_json || null,
+        elements: v?.template_json?.elements || [],
       };
     });
 
