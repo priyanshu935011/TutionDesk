@@ -29,6 +29,11 @@ import {
   requestDesignExport,
   getExportStatus,
   trackTemplateAction,
+  generateAiTemplate,
+  deconstructFlyerWithAi,
+  generateAiBackground,
+  refineAiTemplate,
+  generateAiVariations,
 } from "../controllers/marketingStudioV2Controller.js";
 
 const upload = multer({
@@ -76,5 +81,12 @@ router.delete(["/admin/assets/:id", "/admin/v2/assets/:id", "/admin/media/:id"],
 
 // Super Admin Studio Analytics
 router.get(["/admin/analytics", "/admin/v2/analytics", "/admin/stats"], protect, superAdminOnly, getAdminStudioAnalytics);
+
+// Super Admin Gemini AI Engine Endpoints (Templates, Vision Layouts, Backgrounds, Refinement)
+router.post(["/admin/ai/generate", "/admin/v2/ai/generate"], protect, superAdminOnly, generateAiTemplate);
+router.post(["/admin/ai/deconstruct-flyer", "/admin/v2/ai/deconstruct-flyer"], protect, superAdminOnly, upload.single("image"), deconstructFlyerWithAi);
+router.post(["/admin/ai/generate-background", "/admin/v2/ai/generate-background"], protect, superAdminOnly, generateAiBackground);
+router.post(["/admin/ai/refine", "/admin/v2/ai/refine"], protect, superAdminOnly, refineAiTemplate);
+router.post(["/admin/ai/variations", "/admin/v2/ai/variations"], protect, superAdminOnly, generateAiVariations);
 
 export default router;
