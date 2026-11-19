@@ -36,12 +36,13 @@ export function generateSvgThumbnail(canonicalData) {
     const bgImg = canonicalData.canvas.backgroundImageUrl;
 
     let elementsSvg = "";
-    if (bgImg) {
+    if (bgImg && typeof bgImg === "string" && bgImg.startsWith("http")) {
       elementsSvg += `<image href="${bgImg}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
     }
 
     if (Array.isArray(canonicalData.elements)) {
-      canonicalData.elements.forEach((el) => {
+      const sorted = [...canonicalData.elements].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+      sorted.forEach((el) => {
         if (!el || el.isVisible === false) return;
         const x = el.x || 0;
         const y = el.y || 0;
@@ -50,22 +51,27 @@ export function generateSvgThumbnail(canonicalData) {
         const opacity = el.opacity !== undefined ? el.opacity : 1;
 
         if (el.type === "rectangle" || el.type === "shape") {
-          const fill = el.styling?.fill || el.styling?.backgroundColor || "#3B82F6";
+          const fill = el.styling?.fill || el.styling?.backgroundColor || "#2563EB";
           const stroke = el.styling?.stroke || "none";
           const rx = el.styling?.borderRadius || 0;
           elementsSvg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}" stroke="${stroke}" opacity="${opacity}" />`;
         } else if (el.type === "circle") {
           const r = Math.min(w, h) / 2;
-          const fill = el.styling?.fill || "#3B82F6";
+          const fill = el.styling?.fill || el.styling?.backgroundColor || "#2563EB";
           elementsSvg += `<circle cx="${x + r}" cy="${y + r}" r="${r}" fill="${fill}" opacity="${opacity}" />`;
         } else if (el.type === "text") {
           const fontSize = el.styling?.fontSize || 36;
-          const fill = el.styling?.color || "#FFFFFF";
+          const fill = el.styling?.color || "#1E293B";
           const fontWeight = el.styling?.fontWeight || "bold";
+          const fontFamily = el.styling?.fontFamily || "Inter, sans-serif";
+          const align = (el.styling?.textAlign || "center").toLowerCase();
+          const textAnchor = align === "center" ? "middle" : align === "right" ? "end" : "start";
+          const textX = align === "center" ? x + w / 2 : align === "right" ? x + w : x;
+          const textY = y + h / 2;
           const text = (el.content || el.placeholder || "").replace(/[<>&"]/g, " ");
-          elementsSvg += `<text x="${x + 10}" y="${y + fontSize}" font-size="${fontSize}" font-family="sans-serif" font-weight="${fontWeight}" fill="${fill}" opacity="${opacity}">${text.substring(0, 50)}</text>`;
-        } else if (el.type === "image" && el.content) {
-          elementsSvg += `<image href="${el.content}" x="${x}" y="${y}" width="${w}" height="${h}" opacity="${opacity}" preserveAspectRatio="xMidYMid slice" />`;
+          elementsSvg += `<text x="${textX}" y="${textY}" text-anchor="${textAnchor}" dominant-baseline="central" font-size="${fontSize}" font-family="${fontFamily}" font-weight="${fontWeight}" fill="${fill}" opacity="${opacity}">${text.substring(0, 80)}</text>`;
+        } else if ((el.type === "image" || el.type === "logo") && el.content) {
+          elementsSvg += `<image href="${el.content}" x="${x}" y="${y}" width="${w}" height="${h}" opacity="${opacity}" preserveAspectRatio="xMidYMid meet" />`;
         }
       });
     }
@@ -269,12 +275,38 @@ export const getAdminTemplatesV2 = async (req, res) => {
 
     const templates = await query.lean();
 
-    const enriched = (templates || []).map((t) => ({
-      ...t,
-      title: t.name || t.title,
-      imageUrl: t.thumbnail_url || t.preview_url,
-      image_url: t.thumbnail_url || t.preview_url,
-    }));
+    // Batch-fetch current template versions to attach elements & canonical JSON
+    const templateIds = (templates || []).map((t) => t.id || t._id);
+    const versionMap = new Map();
+    if (templateIds.length > 0) {
+      try {
+        const versions = await MarketingTemplateVersion.find({
+          template_id: { $in: templateIds },
+        }).lean();
+        (versions || []).forEach((v) => {
+          versionMap.set(String(v.template_id), v);
+        });
+      } catch (_) {}
+    }
+
+    const enriched = (templates || []).map((t) => {
+      const tid = String(t.id || t._id);
+      const v = versionMap.get(tid);
+
+      return {
+        ...t,
+        title: t.name || t.title,
+        imageUrl: t.thumbnail_url || t.preview_url,
+        image_url: t.thumbnail_url || t.preview_url,
+        canvas: v?.template_json?.canvas || {
+          width: t.canvas_width || 1080,
+          height: t.canvas_height || 1080,
+          backgroundColor: "#FFFFFF",
+        },
+        template_json: v?.template_json || null,
+        elements: v?.template_json?.elements || [],
+      };
+    });
 
     return res.json({
       success: true,
