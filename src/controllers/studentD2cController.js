@@ -110,10 +110,10 @@ export const verifyDirectStudentOtp = async (req, res) => {
     }
 
     // 2. Find or create Student profile
-    let student = await Student.findOne({ user: user._id });
+    let student = await Student.findOne({ $or: [{ phone: user.phone || phone }, { email: user.email }] });
     if (!student) {
       student = await Student.create({
-        user: user._id,
+        user: null,
         name: user.name || name,
         phone: user.phone || phone,
         email: user.email,
@@ -134,6 +134,9 @@ export const verifyDirectStudentOtp = async (req, res) => {
       {
         id: user._id,
         studentId,
+        email: user.email,
+        phone: user.phone || phone,
+        enrollmentNumber: student.enrollmentNumber,
         role: "student",
         student_type: entitlement.studentType,
         tier: entitlement.tier,

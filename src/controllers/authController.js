@@ -872,13 +872,19 @@ async function createIndependentStudentDirect(cleanPhone, name = "Self-Study Stu
     await user.save().catch(() => {});
   }
 
-  let student = await Student.findOne({ $or: [{ user: user._id }, { phone: cleanPhone }] });
+  let student = await Student.findOne({
+    $or: [
+      { phone: cleanPhone },
+      { email: user.email || email },
+      ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone.slice(-10) }] : []),
+    ],
+  });
   if (!student) {
     student = await Student.create({
-      user: user._id,
+      user: null,
       name: user.name || name,
       phone: cleanPhone,
-      email: user.email,
+      email: user.email || email,
       parentName: "Parent",
       parentPhone: cleanPhone,
       parent_name: "Parent",
@@ -1207,13 +1213,41 @@ export const verifyLoginOtp = async (req, res) => {
 
       // Student Account in Users
       if (role === "student") {
-        const studentDoc = await Student.findOne({ $or: [{ user: user._id }, { phone }] });
+        const cleanP = (user.phone || phone || "").replace(/\D/g, "");
+        let studentDoc = await Student.findOne({
+          $or: [
+            ...(user.email ? [{ email: user.email }] : []),
+            ...(phone ? [{ phone }] : []),
+            ...(cleanP ? [{ phone: cleanP }, { phone: cleanP.slice(-10) }] : []),
+          ],
+        });
+
+        if (!studentDoc) {
+          try {
+            studentDoc = await Student.create({
+              user: null,
+              name: user.name || "Self-Study Student",
+              phone: user.phone || phone || cleanP,
+              email: user.email || `direct_${cleanP}@classtech.selfstudy`,
+              parentName: "Parent",
+              parentPhone: user.phone || phone || cleanP,
+              parent_name: "Parent",
+              parent_phone: user.phone || phone || cleanP,
+              enrollmentNumber: `STU-D2C-${Date.now().toString().slice(-6)}`,
+            });
+          } catch (createErr) {
+            console.warn("Auto-create Student row in verifyLoginOtp error:", createErr.message);
+          }
+        }
+
         const studentType = (studentDoc && studentDoc.user && studentDoc.batch) ? "institute_enrolled" : (user.student_type || "independent_direct");
         const token = generateToken({
           id: user._id,
           studentId: studentDoc?._id || user._id,
-          email: user.email,
-          name: user.name,
+          email: user.email || studentDoc?.email,
+          phone: user.phone || studentDoc?.phone || phone,
+          name: user.name || studentDoc?.name,
+          enrollmentNumber: studentDoc?.enrollmentNumber || "",
           role: "student",
           student_type: studentType,
           sessionId,
@@ -1231,8 +1265,10 @@ export const verifyLoginOtp = async (req, res) => {
             _id: user._id,
             name: user.name,
             phone: user.phone || phone,
+            email: user.email,
             role: "student",
             student_type: studentType,
+            enrollmentNumber: studentDoc?.enrollmentNumber || "",
           },
         });
       }
@@ -1378,6 +1414,10 @@ export const verifyLoginOtp = async (req, res) => {
       const token = generateToken({
         id: newStudentUser._id,
         studentId: newStudentDoc._id,
+        name: newStudentUser.name,
+        email: newStudentUser.email || newStudentDoc.email,
+        phone: newStudentUser.phone || phone,
+        enrollmentNumber: newStudentDoc.enrollmentNumber,
         role: "student",
         student_type: "independent_direct",
         sessionId,
@@ -1396,8 +1436,10 @@ export const verifyLoginOtp = async (req, res) => {
           _id: newStudentUser._id,
           name: newStudentUser.name,
           phone,
+          email: newStudentUser.email,
           role: "student",
           student_type: "independent_direct",
+          enrollmentNumber: newStudentDoc.enrollmentNumber,
         },
       });
     }

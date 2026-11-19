@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import Institute from "../models/Institute.js";
 import Student from "../models/Student.js";
+import User from "../models/User.js";
 import { updateConcurrentPeak } from "../utils/activityTracker.js";
 import redisClient from "../config/redis.js";
 
@@ -15,12 +16,21 @@ const protectStudent = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.role !== "student" || (!decoded.email && !decoded.enrollmentNumber)) {
+    if (
+      decoded.role !== "student" ||
+      (!decoded.email && !decoded.enrollmentNumber && !decoded.phone && !decoded.studentId && !decoded.id)
+    ) {
       return res.status(401).json({ message: "Invalid student token" });
     }
 
     // Fetch all sibling student records for this identity so portal contains all enrolled profiles
     const siblingQueries = [];
+    if (decoded.studentId) {
+      siblingQueries.push({ _id: decoded.studentId });
+    }
+    if (decoded.id) {
+      siblingQueries.push({ _id: decoded.id });
+    }
     if (decoded.email && String(decoded.email).trim() !== "") {
       siblingQueries.push({ email: String(decoded.email).toLowerCase().trim() });
     }
@@ -55,7 +65,7 @@ const protectStudent = async (req, res, next) => {
 
     const query = siblingQueries.length > 0 ? { $or: siblingQueries } : {};
 
-    const students = await Student.find(query)
+    let students = await Student.find(query)
       .populate({
         path: "batch",
         select: "name scheduleDays startTime endTime teacher",
@@ -73,14 +83,50 @@ const protectStudent = async (req, res, next) => {
         },
       });
 
+    // Auto-recover/heal: If student row is missing in students table for this user
+    if (!students || students.length === 0) {
+      if (decoded.id || decoded.phone || decoded.email) {
+        try {
+          const userDoc = await User.findOne({
+            $or: [
+              ...(decoded.id ? [{ _id: decoded.id }] : []),
+              ...(decoded.phone ? [{ phone: decoded.phone }] : []),
+              ...(decoded.email ? [{ email: decoded.email }] : []),
+            ],
+          });
+          if (userDoc && (userDoc.role === "student" || userDoc.student_type === "independent_direct")) {
+            const cleanP = (userDoc.phone || decoded.phone || "").replace(/\D/g, "");
+            const newStudent = await Student.create({
+              user: null,
+              name: userDoc.name || decoded.name || "Self-Study Student",
+              phone: userDoc.phone || decoded.phone || cleanP,
+              email: userDoc.email || decoded.email || `direct_${cleanP}@classtech.selfstudy`,
+              parentName: "Parent",
+              parentPhone: userDoc.phone || decoded.phone || cleanP,
+              parent_name: "Parent",
+              parent_phone: userDoc.phone || decoded.phone || cleanP,
+              enrollmentNumber: decoded.enrollmentNumber || `STU-D2C-${Date.now().toString().slice(-6)}`,
+            });
+            if (newStudent) {
+              students = [newStudent];
+            }
+          }
+        } catch (recoverErr) {
+          console.warn("[protectStudent] Auto-recover student error:", recoverErr.message);
+        }
+      }
+    }
+
     if (!students || students.length === 0) {
       return res.status(401).json({ message: "Student not found" });
     }
 
-    // Verify student portal is enabled for this institute
-    const inst = await Institute.findById(students[0].user).select("studentPortalEnabled");
-    if (inst && inst.studentPortalEnabled === false) {
-      return res.status(403).json({ message: "Student portal is disabled for this institute" });
+    // Verify student portal is enabled for this institute (if student is attached to an institute)
+    if (students[0].user) {
+      const inst = await Institute.findById(students[0].user).select("studentPortalEnabled");
+      if (inst && inst.studentPortalEnabled === false) {
+        return res.status(403).json({ message: "Student portal is disabled for this institute" });
+      }
     }
 
     req.students = students;
@@ -88,9 +134,9 @@ const protectStudent = async (req, res, next) => {
 
     // Determine active student context for single-record endpoints
     const targetStudentId =
-      req.headers["x-student-id"] ||
-      req.query.studentId ||
-      req.body.studentId ||
+      req.headers?.["x-student-id"] ||
+      req.query?.studentId ||
+      req.body?.studentId ||
       decoded.studentId;
 
     if (targetStudentId) {
@@ -123,25 +169,9 @@ const protectStudent = async (req, res, next) => {
       Boolean(req.headers["x-super-admin-email"]) ||
       Boolean(req.headers["x-impersonated-by-admin"]);
 
-    next();
-    
-    // Do NOT count or log student activity if accessed via super admin ID
-    if (!isSuperAdminAccess) {
-    
-    if (req.student && req.student.enrollmentNumber) {
-      Student.updateMany({ enrollmentNumber: req.student.enrollmentNumber }, { lastActiveAt: new Date() }).catch(() => {});
-      if (redisClient.isReady) {
-        redisClient.set(`active:user:${req.student.enrollmentNumber}`, "student", { EX: 300 }).catch(() => {});
-      }
-    } else if (req.student && req.student._id) {
-      Student.updateOne({ _id: req.student._id }, { lastActiveAt: new Date() }).catch(() => {});
-      if (redisClient.isReady) {
-        redisClient.set(`active:user:${req.student._id}`, "student", { EX: 300 }).catch(() => {});
-      }
-    }
-    updateConcurrentPeak().catch(() => {});
-    }
+    return next();
   } catch (error) {
+    console.error("[protectStudent error]:", error);
     return res.status(401).json({ message: "Invalid token" });
   }
 };
