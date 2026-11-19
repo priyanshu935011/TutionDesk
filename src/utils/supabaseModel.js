@@ -760,6 +760,13 @@ function stripStudentNonColumnFields(payload) {
   for (const key of STUDENT_NON_COLUMN_KEYS) {
     delete payload[key];
   }
+  // Guarantee parent_name and parent_phone are never null to satisfy PostgreSQL NOT NULL constraints
+  if (!payload.parent_name && !payload.parentName) {
+    payload.parent_name = "Parent";
+  }
+  if (payload.parent_phone === undefined || payload.parent_phone === null) {
+    payload.parent_phone = payload.parentPhone || "";
+  }
   return payload;
 }
 

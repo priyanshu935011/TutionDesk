@@ -800,6 +800,10 @@ async function createIndependentStudentDirect(cleanPhone, name = "Self-Study Stu
       name: user.name || name,
       phone: cleanPhone,
       email: user.email,
+      parentName: "Parent",
+      parentPhone: cleanPhone,
+      parent_name: "Parent",
+      parent_phone: cleanPhone,
       enrollmentNumber: `STU-D2C-${Date.now().toString().slice(-6)}`,
       targetExam: "Boards / JEE / NEET",
     });

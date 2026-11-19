@@ -117,6 +117,10 @@ export const verifyDirectStudentOtp = async (req, res) => {
         name: user.name || name,
         phone: user.phone || phone,
         email: user.email,
+        parentName: "Parent",
+        parentPhone: user.phone || phone,
+        parent_name: "Parent",
+        parent_phone: user.phone || phone,
         enrollmentNumber: `STU-D2C-${Date.now().toString().slice(-6)}`,
         targetExam,
       });
