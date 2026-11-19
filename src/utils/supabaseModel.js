@@ -4099,6 +4099,13 @@ const mockMongoose = {
     else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
     else if (modelName === "MarketingTemplate" || modelName === "MarketingTemplates") tableName = "marketing_templates";
     else if (modelName === "MarketingMedia" || modelName === "MarketingMedias") tableName = "marketing_media";
+    else if (modelName === "MarketingCategory" || modelName === "MarketingCategories") tableName = "marketing_categories";
+    else if (modelName === "MarketingTemplateV2" || modelName === "MarketingTemplatesV2") tableName = "marketing_templates_v2";
+    else if (modelName === "MarketingTemplateVersion" || modelName === "MarketingTemplateVersions") tableName = "marketing_template_versions";
+    else if (modelName === "MarketingAsset" || modelName === "MarketingAssets") tableName = "marketing_assets";
+    else if (modelName === "InstituteMarketingDesign" || modelName === "InstituteMarketingDesigns") tableName = "institute_marketing_designs";
+    else if (modelName === "MarketingExport" || modelName === "MarketingExports") tableName = "marketing_exports";
+    else if (modelName === "MarketingTemplateUsage" || modelName === "MarketingTemplateUsages") tableName = "marketing_template_usage";
     else if (modelName === "Organization" || modelName === "Organizations") tableName = "organizations";
     else if (modelName === "UserBranchMembership" || modelName === "UserBranchMemberships") tableName = "user_branch_memberships";
     else tableName = modelName.toLowerCase() + "s";

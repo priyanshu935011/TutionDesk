@@ -1,4 +1,5 @@
 import "dotenv/config";
+import path from "path";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -87,6 +88,7 @@ app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ limit: "15mb", extended: true }));
 app.use(globalLimiter);
 app.use(errorLoggerMiddleware);
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.get("/", (_, res) => {
   res.json({ message: "Coaching CRM API is running" });
