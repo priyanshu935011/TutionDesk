@@ -1429,7 +1429,7 @@ export const verifyLoginOtp = async (req, res) => {
         role: "student",
         userType: "student",
         studentType: "independent_direct",
-        message: "Account created! Welcome to ClassTech Self-Study.",
+        message: "Account created! Welcome to ClassTech.",
         student: newStudentDoc,
         user: {
           id: newStudentUser._id,

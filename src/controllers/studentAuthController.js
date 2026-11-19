@@ -547,7 +547,43 @@ export const updateStudentProfile = async (req, res) => {
       return res.status(401).json({ message: "Student not found" });
     }
 
-    const { email, parentName, parentPhone, address, profilePicture, customFields } = req.body;
+    const {
+      name,
+      email,
+      parentName,
+      parentPhone,
+      address,
+      profilePicture,
+      customFields,
+      targetExam,
+      gender,
+      dob,
+    } = req.body;
+
+    if (name !== undefined && String(name).trim() !== "") {
+      student.name = String(name).trim();
+      try {
+        await User.updateMany(
+          { $or: [{ phone: student.phone }, { email: student.email }] },
+          { name: student.name }
+        );
+      } catch (_) {}
+    }
+
+    if (targetExam !== undefined && String(targetExam).trim() !== "") {
+      student.targetExam = String(targetExam).trim();
+      student.customFields = { ...(student.customFields || {}), targetExam: student.targetExam };
+    }
+
+    if (gender !== undefined && String(gender).trim() !== "") {
+      student.gender = String(gender).trim();
+      student.customFields = { ...(student.customFields || {}), gender: student.gender };
+    }
+
+    if (dob !== undefined && String(dob).trim() !== "") {
+      student.dob = String(dob).trim();
+      student.customFields = { ...(student.customFields || {}), dob: student.dob };
+    }
 
     if (email !== undefined) student.email = email.toLowerCase().trim();
     if (parentName !== undefined) student.parentName = parentName.trim();
@@ -575,6 +611,9 @@ export const updateStudentProfile = async (req, res) => {
         parentPhone: student.parentPhone,
         address: student.address,
         profilePicture: student.profilePicture,
+        targetExam: student.targetExam || student.customFields?.targetExam,
+        gender: student.gender || student.customFields?.gender,
+        dob: student.dob || student.customFields?.dob,
         customFields: student.customFields,
       },
     });
