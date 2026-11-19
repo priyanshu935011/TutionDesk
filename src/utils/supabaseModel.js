@@ -3292,7 +3292,9 @@ class SupabaseModel {
           "test_series_folders", "institute_test_series", "test_series_categories",
           "test_series_attempts", "support_tickets", "support_faqs", "support_tutorials",
           "institute_expenses", "institute_incomes", "staff_salaries", "staff_attendances",
-          "marketing_templates", "marketing_media"
+          "marketing_templates", "marketing_media",
+          "marketing_templates_v2", "marketing_template_versions", "marketing_categories",
+          "marketing_assets", "institute_marketing_designs", "marketing_exports", "marketing_template_usage"
         ];
         const isStrictTable = strictTables.includes(this.tableName) || this.tableName.startsWith("video_");
 

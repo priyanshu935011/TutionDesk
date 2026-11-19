@@ -22,6 +22,29 @@ import {
 } from "../utils/templateEngine.js";
 import { processExportJob } from "../services/marketingExportService.js";
 
+// Helper to validate UUIDs
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (val) => typeof val === "string" && UUID_REGEX.test(val);
+
+// Helper to resolve category ID whether provided as UUID or category slug
+async function resolveCategoryId(categoryIdOrSlug) {
+  if (!categoryIdOrSlug) return null;
+  if (isUuid(categoryIdOrSlug)) return categoryIdOrSlug;
+  if (typeof categoryIdOrSlug === "string" && categoryIdOrSlug.trim() !== "") {
+    const clean = categoryIdOrSlug.trim().toLowerCase();
+    try {
+      const cat = await MarketingCategory.findOne({ slug: clean }).lean();
+      if (cat) {
+        const id = cat.id || cat._id;
+        if (isUuid(id)) return id;
+      }
+    } catch (err) {
+      console.warn("[MarketingStudioV2] Error resolving category slug:", err.message);
+    }
+  }
+  return null;
+}
+
 // Helper to extract institute ID from authenticated user or request
 function getInstituteIdFromReq(req) {
   if (!req.user) return null;
@@ -123,9 +146,14 @@ export const createCategoryAdmin = async (req, res) => {
 export const updateCategoryAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = { ...req.body };
-    delete updateData.id;
-    delete updateData._id;
+    const { name, slug, description, icon, display_order, is_active } = req.body;
+    const updateData = {};
+    if (name) updateData.name = name.trim();
+    if (slug) updateData.slug = slug.trim().toLowerCase();
+    if (description !== undefined) updateData.description = description;
+    if (icon) updateData.icon = icon;
+    if (display_order !== undefined) updateData.display_order = Number(display_order);
+    if (is_active !== undefined) updateData.is_active = Boolean(is_active);
 
     const category = await MarketingCategory.findByIdAndUpdate(id, updateData, { new: true });
     if (!category) {
@@ -142,8 +170,22 @@ export const updateCategoryAdmin = async (req, res) => {
 export const deleteCategoryAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    await MarketingCategory.findByIdAndUpdate(id, { is_active: false });
-    return res.json({ success: true, message: "Category deactivated successfully." });
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Category ID is required." });
+    }
+
+    // Unlink any templates associated with this category
+    try {
+      await MarketingTemplateV2.updateMany({ category_id: id }, { category_id: null });
+    } catch (_) {}
+
+    try {
+      await MarketingCategory.findByIdAndDelete(id);
+    } catch (delErr) {
+      console.warn("[deleteCategoryAdmin] Hard delete failed, setting is_active=false:", delErr.message);
+      await MarketingCategory.findByIdAndUpdate(id, { is_active: false });
+    }
+    return res.json({ success: true, message: "Category deleted successfully." });
   } catch (error) {
     console.error("deleteCategoryAdmin error:", error);
     return res.status(500).json({ success: false, message: error.message });
@@ -250,11 +292,13 @@ export const createAdminTemplateV2 = async (req, res) => {
       return res.status(400).json({ success: false, message: `Template validation error: ${vErr.message}` });
     }
 
+    const resolvedCatId = await resolveCategoryId(category_id);
+
     // 1. Create master template record
     const template = await MarketingTemplateV2.create({
       name: name.trim(),
       slug: slug.trim(),
-      category_id: category_id || null,
+      category_id: resolvedCatId,
       description: description || "",
       aspect_ratio,
       canvas_width: canonicalData.canvas.width || 1080,
@@ -338,10 +382,12 @@ export const updateAdminTemplateV2 = async (req, res) => {
       });
     }
 
+    const resolvedCatId = category_id !== undefined ? await resolveCategoryId(category_id) : undefined;
+
     const updateFields = {
       ...(name ? { name: name.trim() } : {}),
       ...(description !== undefined ? { description } : {}),
-      ...(category_id !== undefined ? { category_id } : {}),
+      ...(resolvedCatId !== undefined ? { category_id: resolvedCatId } : {}),
       ...(status ? { status } : {}),
       ...(priority !== undefined ? { priority: Number(priority) } : {}),
       ...(tags ? { tags } : {}),
@@ -383,7 +429,7 @@ export const duplicateAdminTemplateV2 = async (req, res) => {
     const newTemplate = await MarketingTemplateV2.create({
       name: newName,
       slug: newSlug,
-      category_id: sourceTemplate.category_id,
+      category_id: (sourceTemplate.category_id && isUuid(sourceTemplate.category_id)) ? sourceTemplate.category_id : null,
       description: sourceTemplate.description,
       aspect_ratio: sourceTemplate.aspect_ratio,
       canvas_width: sourceTemplate.canvas_width,
@@ -417,6 +463,41 @@ export const duplicateAdminTemplateV2 = async (req, res) => {
     });
   } catch (error) {
     console.error("duplicateAdminTemplateV2 error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const deleteAdminTemplateV2 = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Template ID is required." });
+    }
+
+    try {
+      await MarketingTemplateVersion.deleteMany({ template_id: id });
+    } catch (vErr) {
+      console.warn("[deleteAdminTemplateV2] Error deleting template versions:", vErr.message);
+    }
+
+    try {
+      await MarketingTemplateUsage.deleteMany({ template_id: id });
+    } catch (uErr) {
+      console.warn("[deleteAdminTemplateV2] Error deleting template usage:", uErr.message);
+    }
+
+    const deleted = await MarketingTemplateV2.findByIdAndDelete(id);
+    if (!deleted) {
+      const checkExists = await MarketingTemplateV2.findById(id);
+      if (!checkExists) {
+        return res.json({ success: true, message: "Template deleted successfully." });
+      }
+      return res.status(404).json({ success: false, message: "Template not found." });
+    }
+
+    return res.json({ success: true, message: "Template deleted successfully." });
+  } catch (error) {
+    console.error("deleteAdminTemplateV2 error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

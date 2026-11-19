@@ -27,6 +27,7 @@ import {
   createAdminTemplateV2,
   updateAdminTemplateV2,
   duplicateAdminTemplateV2,
+  deleteAdminTemplateV2,
   getAdminTemplateVersions,
   getAdminAssets,
   uploadAdminAsset,
@@ -77,6 +78,7 @@ router.get("/admin/v2/templates", protect, superAdminOnly, getAdminTemplatesV2);
 router.get("/admin/v2/templates/:id", protect, superAdminOnly, getAdminTemplateV2ById);
 router.post("/admin/v2/templates", protect, superAdminOnly, createAdminTemplateV2);
 router.put("/admin/v2/templates/:id", protect, superAdminOnly, updateAdminTemplateV2);
+router.delete("/admin/v2/templates/:id", protect, superAdminOnly, deleteAdminTemplateV2);
 router.post("/admin/v2/templates/:id/duplicate", protect, superAdminOnly, duplicateAdminTemplateV2);
 router.get("/admin/v2/templates/:id/versions", protect, superAdminOnly, getAdminTemplateVersions);
 
