@@ -26,6 +26,57 @@ import { processExportJob } from "../services/marketingExportService.js";
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (val) => typeof val === "string" && UUID_REGEX.test(val);
 
+// Helper to generate a lightweight SVG thumbnail if no background image is uploaded
+export function generateSvgThumbnail(canonicalData) {
+  try {
+    if (!canonicalData || !canonicalData.canvas) return "";
+    const width = canonicalData.canvas.width || 1080;
+    const height = canonicalData.canvas.height || 1080;
+    const bg = canonicalData.canvas.backgroundColor || "#1E293B";
+    const bgImg = canonicalData.canvas.backgroundImageUrl;
+
+    let elementsSvg = "";
+    if (bgImg) {
+      elementsSvg += `<image href="${bgImg}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+    }
+
+    if (Array.isArray(canonicalData.elements)) {
+      canonicalData.elements.forEach((el) => {
+        if (!el || el.isVisible === false) return;
+        const x = el.x || 0;
+        const y = el.y || 0;
+        const w = el.width || 100;
+        const h = el.height || 100;
+        const opacity = el.opacity !== undefined ? el.opacity : 1;
+
+        if (el.type === "rectangle" || el.type === "shape") {
+          const fill = el.styling?.fill || el.styling?.backgroundColor || "#3B82F6";
+          const stroke = el.styling?.stroke || "none";
+          const rx = el.styling?.borderRadius || 0;
+          elementsSvg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}" stroke="${stroke}" opacity="${opacity}" />`;
+        } else if (el.type === "circle") {
+          const r = Math.min(w, h) / 2;
+          const fill = el.styling?.fill || "#3B82F6";
+          elementsSvg += `<circle cx="${x + r}" cy="${y + r}" r="${r}" fill="${fill}" opacity="${opacity}" />`;
+        } else if (el.type === "text") {
+          const fontSize = el.styling?.fontSize || 36;
+          const fill = el.styling?.color || "#FFFFFF";
+          const fontWeight = el.styling?.fontWeight || "bold";
+          const text = (el.content || el.placeholder || "").replace(/[<>&"]/g, " ");
+          elementsSvg += `<text x="${x + 10}" y="${y + fontSize}" font-size="${fontSize}" font-family="sans-serif" font-weight="${fontWeight}" fill="${fill}" opacity="${opacity}">${text.substring(0, 50)}</text>`;
+        } else if (el.type === "image" && el.content) {
+          elementsSvg += `<image href="${el.content}" x="${x}" y="${y}" width="${w}" height="${h}" opacity="${opacity}" preserveAspectRatio="xMidYMid slice" />`;
+        }
+      });
+    }
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${bg}"/>${elementsSvg}</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  } catch (err) {
+    return "";
+  }
+}
+
 // Helper to resolve category ID whether provided as UUID or category slug
 async function resolveCategoryId(categoryIdOrSlug) {
   if (!categoryIdOrSlug) return null;
@@ -218,9 +269,16 @@ export const getAdminTemplatesV2 = async (req, res) => {
 
     const templates = await query.lean();
 
+    const enriched = (templates || []).map((t) => ({
+      ...t,
+      title: t.name || t.title,
+      imageUrl: t.thumbnail_url || t.preview_url,
+      image_url: t.thumbnail_url || t.preview_url,
+    }));
+
     return res.json({
       success: true,
-      templates: templates || [],
+      templates: enriched,
       presets: CANONICAL_PRESETS,
     });
   } catch (error) {
@@ -293,6 +351,7 @@ export const createAdminTemplateV2 = async (req, res) => {
     }
 
     const resolvedCatId = await resolveCategoryId(category_id);
+    const finalThumbnail = thumbnail_url || canonicalData.canvas?.backgroundImageUrl || generateSvgThumbnail(canonicalData);
 
     // 1. Create master template record
     const template = await MarketingTemplateV2.create({
@@ -303,8 +362,8 @@ export const createAdminTemplateV2 = async (req, res) => {
       aspect_ratio,
       canvas_width: canonicalData.canvas.width || 1080,
       canvas_height: canonicalData.canvas.height || 1080,
-      thumbnail_url: thumbnail_url || canonicalData.canvas.backgroundImageUrl || "",
-      preview_url: preview_url || thumbnail_url || "",
+      thumbnail_url: finalThumbnail,
+      preview_url: preview_url || finalThumbnail,
       schema_version: "2.0",
       current_version_number: 1,
       status: status || "published",
@@ -321,7 +380,7 @@ export const createAdminTemplateV2 = async (req, res) => {
       template_id: templateId,
       version_number: 1,
       template_json: canonicalData,
-      preview_url: preview_url || thumbnail_url || "",
+      preview_url: preview_url || finalThumbnail,
       publication_status: status || "published",
       change_summary: "Initial master version creation",
       published_by: req.user?.email || "super_admin",
@@ -383,11 +442,13 @@ export const updateAdminTemplateV2 = async (req, res) => {
     }
 
     const resolvedCatId = category_id !== undefined ? await resolveCategoryId(category_id) : undefined;
+    const finalThumbnail = validatedJson ? (thumbnail_url || validatedJson.canvas?.backgroundImageUrl || generateSvgThumbnail(validatedJson)) : thumbnail_url;
 
     const updateFields = {
       ...(name ? { name: name.trim() } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(resolvedCatId !== undefined ? { category_id: resolvedCatId } : {}),
+      ...(finalThumbnail ? { thumbnail_url: finalThumbnail, preview_url: finalThumbnail } : {}),
       ...(status ? { status } : {}),
       ...(priority !== undefined ? { priority: Number(priority) } : {}),
       ...(tags ? { tags } : {}),
@@ -699,6 +760,9 @@ export const getInstituteTemplates = async (req, res) => {
 
       return {
         ...t,
+        title: t.name || t.title,
+        imageUrl: t.thumbnail_url || t.preview_url,
+        image_url: t.thumbnail_url || t.preview_url,
         rendered_caption: caption,
       };
     });
