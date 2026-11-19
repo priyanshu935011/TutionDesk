@@ -27,7 +27,7 @@ export const POSTER_STYLES = {
   "swiss-editorial": {
     name: "Swiss Editorial",
     vibe: "Clean typographic grid, asymmetric structure, high contrast sans-serif, bold color blocking",
-    promptModifier: "clean Swiss style typography grid, asymmetric layout, minimal crisp geometric shapes, elegant whitespace, high contrast, clean architectural vibe, no text",
+    promptModifier: "clean Swiss design editorial grid, asymmetric balance, bold high-contrast color blocking, clean architectural aesthetic, ultra-clean commercial poster art",
     preferredFonts: ["Inter", "Helvetica", "Arial"],
     accentColor: "#DC2626",
     cardBg: "rgba(255, 255, 255, 0.95)",
@@ -36,7 +36,7 @@ export const POSTER_STYLES = {
   "luxury-minimal": {
     name: "Luxury Minimal",
     vibe: "Muted dark tones, gold & champagne warm lighting, generous whitespace, refined elegance",
-    promptModifier: "luxury high-end minimalist composition, deep velvet dark background, subtle floating warm golden bokeh lights, delicate gold dust particles, cinematic premium atmosphere, no text",
+    promptModifier: "luxury high-end aesthetic, deep rich velvet dark background, champagne gold warm ambient lighting, delicate floating golden dust particles, cinematic premium atmosphere",
     preferredFonts: ["Cinzel", "Playfair Display", "serif"],
     accentColor: "#F59E0B",
     cardBg: "rgba(15, 23, 42, 0.85)",
@@ -45,7 +45,7 @@ export const POSTER_STYLES = {
   "cinematic-key-art": {
     name: "Cinematic Key Art",
     vibe: "Dramatic ambient lighting, deep atmospheric shadows, cinematic depth, volumetric light beams",
-    promptModifier: "cinematic dramatic lighting, deep atmospheric shadows, volumetric light beams, epic commercial scale key visual, striking ambient depth, no text",
+    promptModifier: "cinematic lighting, dramatic ambient depth, volumetric light beams, epic commercial key visual scale, rich color grading, high aesthetic impact",
     preferredFonts: ["Inter", "Montserrat", "sans-serif"],
     accentColor: "#38BDF8",
     cardBg: "rgba(11, 19, 43, 0.82)",
@@ -54,7 +54,7 @@ export const POSTER_STYLES = {
   "art-deco-luxe": {
     name: "Art Deco Luxe",
     vibe: "Symmetrical geometry, fine golden accents, opulent celebration, rich dark emerald or burgundy backdrop",
-    promptModifier: "luxurious Art Deco festive illumination, glowing golden diyas and warm candlelight, ornamental gold lines, deep royal burgundy and dark emerald ambient gradient, radiant festive celebration, no text",
+    promptModifier: "luxurious Art Deco celebration, glowing golden motifs and warm candlelight, ornate gold lines, deep royal burgundy and dark emerald ambient gradient, radiant festive illumination",
     preferredFonts: ["Playfair Display", "serif"],
     accentColor: "#F59E0B",
     cardBg: "rgba(24, 24, 27, 0.85)",
@@ -63,7 +63,7 @@ export const POSTER_STYLES = {
   "futurist-gradient": {
     name: "Futurist Gradient",
     vibe: "Luminescent neon glows, cyan/violet/magenta gradients, sleek dark glassmorphism, high-tech modern energy",
-    promptModifier: "futuristic sleek gradient background, glowing mesh light waves, deep indigo and electric cyan tones, 4k digital aesthetic, high-tech modernity, no text",
+    promptModifier: "futuristic sleek gradient atmosphere, glowing mesh light waves, deep indigo and electric cyan tones, 4k digital aesthetic, high-tech modernity",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#06B6D4",
     cardBg: "rgba(15, 23, 42, 0.78)",
@@ -72,7 +72,7 @@ export const POSTER_STYLES = {
   "pop-commercial": {
     name: "Pop Commercial",
     vibe: "Bright punchy pop colors, playful sticker-like badges, rounded soft cards, cheerful energetic commercial appeal",
-    promptModifier: "vibrant dynamic commercial background, bright playful geometric floats, high energy cheerful gradient, sunny joyful vibe, no text",
+    promptModifier: "vibrant dynamic commercial artwork, high energy cheerful gradient, bright playful geometric elements, sunny joyful vibe, bold commercial appeal",
     preferredFonts: ["Inter", "Poppins", "sans-serif"],
     accentColor: "#EA580C",
     cardBg: "rgba(255, 255, 255, 0.96)",
@@ -81,7 +81,7 @@ export const POSTER_STYLES = {
   "neo-brutalist": {
     name: "Neo Brutalist",
     vibe: "Raw shapes, heavy solid black borders, vibrant solid color blocks, unapologetic modern contrast",
-    promptModifier: "neo-brutalist bold high-contrast background, solid geometric angular framing, crisp bold edges, vibrant modern pop, no text",
+    promptModifier: "neo-brutalist bold high-contrast poster artwork, solid geometric framing, crisp bold edges, vibrant modern pop, graphic design poster",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#FACC15",
     cardBg: "#FFFFFF",
@@ -90,7 +90,7 @@ export const POSTER_STYLES = {
   "bauhaus-modular": {
     name: "Bauhaus Modular",
     vibe: "Primary geometric shapes: circle, square, triangle; functional grid, primary red/blue/yellow + black/white",
-    promptModifier: "bauhaus modern artistic background, bold primary geometric elements, clean cream paper texture, architectural balance, no text",
+    promptModifier: "bauhaus modern artistic poster visual, bold primary geometric elements, clean cream paper texture, architectural balance, modernist graphic design",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#2563EB",
     cardBg: "rgba(255, 255, 255, 0.94)",
@@ -99,7 +99,7 @@ export const POSTER_STYLES = {
   "glassmorphism-ui": {
     name: "Glassmorphism UI",
     vibe: "Translucent frosted glass cards, soft blurred refraction, luminous ambient backdrops, modern digital sheen",
-    promptModifier: "soft colorful ambient sphere gradient background, fluid organic color transitions, dreamy modern glow, frosted glass aesthetic, no text",
+    promptModifier: "soft colorful ambient sphere gradient background, fluid organic color transitions, dreamy modern glow, frosted glass aesthetic",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#6366F1",
     cardBg: "rgba(255, 255, 255, 0.85)",
@@ -108,7 +108,7 @@ export const POSTER_STYLES = {
   "organic-craft": {
     name: "Organic Craft",
     vibe: "Earthy warm tones, terracotta, sage green, handcrafted motifs, natural warmth and authenticity",
-    promptModifier: "warm earthy textured background, terracotta and sage organic gradients, gentle craft atmosphere, natural paper texture, no text",
+    promptModifier: "warm earthy textured poster aesthetic, terracotta and sage organic gradients, gentle craft atmosphere, natural paper texture, handcrafted elegance",
     preferredFonts: ["serif"],
     accentColor: "#C2410C",
     cardBg: "rgba(254, 252, 246, 0.92)",
@@ -117,7 +117,7 @@ export const POSTER_STYLES = {
   "constructivist-impact": {
     name: "Constructivist Impact",
     vibe: "Dynamic diagonal energy, heavy crimson red and black geometric composition, monumental visual impact",
-    promptModifier: "constructivist dynamic diagonal energy, heavy crimson red and black geometric composition, monumental visual impact, no text",
+    promptModifier: "constructivist dynamic diagonal energy, heavy crimson red and black geometric composition, monumental visual impact, bold graphic poster",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#DC2626",
     cardBg: "rgba(255, 255, 255, 0.92)",
@@ -126,7 +126,7 @@ export const POSTER_STYLES = {
   "data-editorial": {
     name: "Data Editorial",
     vibe: "Precision data editorial grid, subtle fine technological lines, dark navy background with laser-sharp cyan highlights",
-    promptModifier: "precision data editorial grid, subtle fine technological lines, dark navy background with laser-sharp cyan highlights, intellectual clean aesthetic, no text",
+    promptModifier: "precision data editorial grid, subtle fine technological lines, dark navy background with laser-sharp cyan highlights, intellectual clean aesthetic",
     preferredFonts: ["Inter", "monospace"],
     accentColor: "#38BDF8",
     cardBg: "rgba(15, 23, 42, 0.88)",
@@ -135,7 +135,7 @@ export const POSTER_STYLES = {
   "editorial-collage": {
     name: "Editorial Collage",
     vibe: "Editorial mixed-media magazine aesthetic, layered textured paper framing, soft neutral gradients",
-    promptModifier: "editorial mixed-media magazine aesthetic, layered textured paper framing, soft neutral gradients, artistic high fashion look, no text",
+    promptModifier: "editorial mixed-media magazine aesthetic, layered textured paper framing, soft neutral gradients, artistic high fashion look",
     preferredFonts: ["Playfair Display", "serif"],
     accentColor: "#D97706",
     cardBg: "rgba(255, 255, 255, 0.95)",
@@ -144,7 +144,7 @@ export const POSTER_STYLES = {
   "japanese-ma": {
     name: "Japanese Ma",
     vibe: "Negative space mastery, quiet balanced composition, zen minimalism, refined harmony",
-    promptModifier: "japanese zen negative space, subtle warm stone texture, peaceful minimalist composition, generous breathing space, soft natural light, no text",
+    promptModifier: "japanese zen negative space, subtle warm stone texture, peaceful minimalist composition, generous breathing space, soft natural light",
     preferredFonts: ["sans-serif"],
     accentColor: "#B91C1C",
     cardBg: "rgba(250, 250, 249, 0.95)",
@@ -153,7 +153,7 @@ export const POSTER_STYLES = {
   "monochrome-typographic": {
     name: "Monochrome Typographic",
     vibe: "Striking high contrast black and charcoal monochrome background, architectural studio spotlight, silver nuances",
-    promptModifier: "striking high contrast black and charcoal monochrome background, architectural studio spotlight, silver and white nuances, no text",
+    promptModifier: "striking high contrast black and charcoal monochrome background, architectural studio spotlight, silver and white nuances, bold graphic art",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#FFFFFF",
     cardBg: "rgba(24, 24, 27, 0.9)",
@@ -162,7 +162,7 @@ export const POSTER_STYLES = {
   "risograph-zine": {
     name: "Risograph Zine",
     vibe: "Vibrant risograph dual-tone ink print texture, warm halftone dots, teal and fluorescent coral ink blend",
-    promptModifier: "vibrant risograph dual-tone ink print texture, warm halftone dots, teal and fluorescent coral ink blend, indie creative print feel, no text",
+    promptModifier: "vibrant risograph dual-tone ink print texture, warm halftone dots, teal and fluorescent coral ink blend, indie creative print feel",
     preferredFonts: ["sans-serif"],
     accentColor: "#F43F5E",
     cardBg: "rgba(255, 255, 255, 0.92)",
@@ -171,7 +171,7 @@ export const POSTER_STYLES = {
   "surreal-3d-editorial": {
     name: "Surreal 3D Editorial",
     vibe: "Surreal 3D abstract floating sculptural geometric spheres, soft directional studio lighting, jewel tones",
-    promptModifier: "surreal 3D abstract floating sculptural geometric spheres, soft directional studio lighting, pastel and deep jewel tones, creative dreamscape, no text",
+    promptModifier: "surreal 3D abstract floating sculptural geometric spheres, soft directional studio lighting, pastel and deep jewel tones, creative dreamscape",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#8B5CF6",
     cardBg: "rgba(15, 23, 42, 0.8)",
@@ -180,7 +180,7 @@ export const POSTER_STYLES = {
   "retro-futurism": {
     name: "Retro Futurism",
     vibe: "Retro futurism 80s synthwave perspective grid, glowing sunset horizon, deep purple and chrome cyan lighting",
-    promptModifier: "retro futurism 80s synthwave perspective grid, glowing sunset horizon, deep purple and chrome cyan lighting, nostalgic electronic warmth, no text",
+    promptModifier: "retro futurism 80s synthwave perspective grid, glowing sunset horizon, deep purple and chrome cyan lighting, nostalgic electronic warmth",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#EC4899",
     cardBg: "rgba(15, 23, 42, 0.85)",
@@ -189,7 +189,7 @@ export const POSTER_STYLES = {
   "botanical-premium": {
     name: "Botanical Premium",
     vibe: "Lush deep forest green botanical backdrop, elegant golden leaf filigree, natural organic luxury",
-    promptModifier: "lush deep forest green botanical backdrop, elegant golden leaf filigree, natural organic luxury, soft warm lighting, no text",
+    promptModifier: "lush deep forest green botanical backdrop, elegant golden leaf filigree, natural organic luxury, soft warm lighting",
     preferredFonts: ["Playfair Display", "serif"],
     accentColor: "#F59E0B",
     cardBg: "rgba(20, 30, 25, 0.88)",
@@ -198,7 +198,7 @@ export const POSTER_STYLES = {
   "hyperreal-product": {
     name: "Hyperreal Product",
     vibe: "Crisp studio stage podium, immaculate directional lighting, subtle reflection, pristine clean commercial atmosphere",
-    promptModifier: "crisp studio stage podium, immaculate directional lighting, subtle reflection, pristine clean commercial atmosphere, ultra-high resolution, no text",
+    promptModifier: "crisp studio stage podium, immaculate directional lighting, subtle reflection, pristine clean commercial atmosphere, ultra-high resolution",
     preferredFonts: ["Inter", "sans-serif"],
     accentColor: "#2563EB",
     cardBg: "rgba(255, 255, 255, 0.95)",
@@ -207,66 +207,98 @@ export const POSTER_STYLES = {
 };
 
 /**
- * Intelligent Thematic Visual Subject & Style Resolver (from poster-generator skill)
+ * Intelligent Master Poster Visual Prompt Builder (adhering to poster-generator skill)
+ * Crafts a complete graphic poster key visual prompt for Google Gemini in ONE unified step.
  */
-export function resolveThematicVisualSubject(prompt = "", category = "admissions") {
+export function buildMasterPosterVisualPrompt({
+  prompt = "",
+  category = "admissions",
+  visualStyle = "auto",
+  themeColor = "#1E3A8A",
+  aspectRatio = "1:1",
+}) {
   const p = prompt.toLowerCase();
-  
-  if (p.includes("diwali") || p.includes("deepawali")) {
-    return {
-      style: "art-deco-luxe",
-      themeColor: "#831843",
-      imagePrompt: "Traditional glowing golden clay diyas with warm flickering flames, elegant floral rangoli motifs, warm golden festive bokeh lights, ambient celebration sparkles, rich royal burgundy and deep navy gradient backdrop, radiant celebration lighting, commercial editorial grade, 4k ultra-high resolution, no text, no words, no letters, no typography, clean center area for text",
-    };
-  }
-  if (p.includes("holi")) {
-    return {
-      style: "pop-commercial",
-      themeColor: "#EA580C",
-      imagePrompt: "Artistic explosion of vibrant festive organic color powders in mid-air, dynamic celebratory energy, clean joyful aesthetic, high commercial photography, no text, 4k",
-    };
-  }
-  if (p.includes("eid")) {
-    return {
-      style: "luxury-minimal",
-      themeColor: "#065F46",
-      imagePrompt: "Illuminated golden crescent moon and subtle ornate lanterns glowing gently in dark emerald sky with soft ambient stars, serene festive celebration, no text, 4k",
-    };
-  }
-  if (p.includes("christmas") || p.includes("new year")) {
-    return {
-      style: "luxury-minimal",
-      themeColor: "#1E3A8A",
-      imagePrompt: "Elegant celebration background with subtle golden sparkles, festive ambient light bokeh, deep midnight blue, no text, 4k",
-    };
-  }
-  if (p.includes("jee") || p.includes("neet") || p.includes("iit") || p.includes("dropper") || p.includes("repeater")) {
-    return {
-      style: "futurist-gradient",
-      themeColor: "#1E3A8A",
-      imagePrompt: "Inspiring futuristic educational background, glowing abstract geometry, subtle atom and scientific energy waves, deep indigo and electric cyan lighting, sleek modern studio depth of field, no text, 4k",
-    };
-  }
-  if (p.includes("scholarship") || p.includes("stse") || p.includes("talent") || p.includes("topper") || p.includes("result") || p.includes("rank") || p.includes("award")) {
-    return {
-      style: "cinematic-key-art",
-      themeColor: "#1E3A8A",
-      imagePrompt: "Gleaming golden victory trophy with sparkling light reflections, triumphant celebratory particles, deep royal navy stage lighting, grand atmospheric depth, no text, 4k",
-    };
-  }
-  if (p.includes("crash course") || p.includes("board") || p.includes("class 10") || p.includes("class 12") || p.includes("exam")) {
-    return {
-      style: "swiss-editorial",
-      themeColor: "#0F172A",
-      imagePrompt: "Modern architectural minimalist studio space, crisp angular geometry, bright clean lighting with subtle ambient shadows, premium educational feel, no text, 4k",
-    };
+
+  // 1. Resolve Style & Theme Color
+  let resolvedStyle = visualStyle;
+  let dominantColor = themeColor;
+  let titleText = "Admissions Open";
+  let promptBody = "";
+
+  if (p.includes("christmas") || p.includes("xmas") || p.includes("holiday")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "luxury-minimal";
+    dominantColor = "#1A0F2E";
+    titleText = "Merry Christmas";
+    promptBody = `A stunning commercial graphic poster key visual for Christmas holiday celebration. Top features lush hanging green pine tree garland branches decorated with shiny golden jingle bells, red satin ribbons, and hanging festive Christmas stockings filled with gingerbread man and candy canes. Center has elegant glowing artistic calligraphy lettering Merry Christmas against a deep violet and royal navy starry night sky with sparkling golden star dust. Bottom features a delightful stylized 3D Santa Claus in a flying red rocket sleigh with gifts and a cute penguin companion zooming over purple clouds with a flying elf. Top header area and bottom footer area have clean designated open space for institute branding. High-end commercial poster artwork, 4k resolution, ultra crisp.`;
+  } else if (p.includes("diwali") || p.includes("deepawali")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "art-deco-luxe";
+    dominantColor = "#4A041E";
+    titleText = "Happy Diwali";
+    promptBody = `A magnificent festive commercial graphic poster key visual for Diwali celebration. Top features strings of warm glowing fairy lights, traditional marigold flower toran garland, and ornate hanging golden lanterns. Center features radiant artistic festive calligraphy lettering Happy Diwali with glowing golden diya flames, sparkling light rays, and celebratory warmth. Bottom features glowing traditional clay diyas with golden flames, intricate colorful floral rangoli on marble, and ambient fireworks sparkles. Deep royal burgundy and navy gradient backdrop. Top header and bottom footer areas have clean designated open space for branding. High commercial graphic poster, 4k.`;
+  } else if (p.includes("new year")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "luxury-minimal";
+    dominantColor = "#0B132B";
+    titleText = "Happy New Year 2026";
+    promptBody = `A spectacular commercial graphic poster key visual for New Year celebration. Top features shimmering golden celebration streamers, sparkling champagne bubbles, and festive golden confetti. Center features gleaming 3D metallic golden typography Happy New Year 2026 with radiant lens flares and celebratory sparkles. Bottom features magnificent midnight fireworks illumination over an inspiring skyline and celebratory 3D elements. Deep obsidian and midnight blue background with golden bokeh. Top and bottom areas have clean space for branding. 4k resolution.`;
+  } else if (p.includes("holi")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "pop-commercial";
+    dominantColor = "#7C2D12";
+    titleText = "Happy Holi";
+    promptBody = `A joyful and energetic commercial graphic poster key visual for Holi festival. Dynamic explosion of vibrant organic powder colors in mid-air in vivid magenta, sunny yellow, cyan, and royal purple. Center features playful artistic festive lettering Happy Holi surrounded by water splash droplets and color bursts. Bottom features traditional brass bowls filled with vibrant gulal powder and festive energy. Clean open space at top and bottom for branding. High commercial photography and digital art, 4k.`;
+  } else if (p.includes("eid")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "luxury-minimal";
+    dominantColor = "#064E3B";
+    titleText = "Eid Mubarak";
+    promptBody = `An elegant and serene commercial graphic poster key visual for Eid Mubarak celebration. Top features delicate glowing ornate Islamic arabesque patterns and hanging golden crescent lanterns. Center features radiant calligraphy lettering Eid Mubarak with gentle warm starlight. Bottom features an illuminated golden crescent moon, serene mosque silhouette with glowing domes and minarets in a deep emerald night sky. Clean space at top and bottom for branding. 4k luxury aesthetic.`;
+  } else if (p.includes("jee") || p.includes("neet") || p.includes("iit") || p.includes("dropper") || p.includes("repeater")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "futurist-gradient";
+    dominantColor = "#0F172A";
+    titleText = "Target JEE & NEET 2026-27";
+    promptBody = `A powerful commercial graphic poster key visual for coaching institute admissions. Top features modern high-tech geometric framing with subtle glowing cyan accents. Center features prominent bold 3D typography TARGET JEE & NEET ADMISSIONS OPEN with radiant rim lighting and futuristic glow. Bottom features an inspiring 3D student standing victoriously with books, glowing atomic orbits, DNA double helix, and laboratory telescope motifs. Deep indigo and royal blue background. Clean header and footer space for branding. High-end commercial art, 4k.`;
+  } else if (p.includes("scholarship") || p.includes("stse") || p.includes("talent") || p.includes("award") || p.includes("olympiad")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "cinematic-key-art";
+    dominantColor = "#1E3A8A";
+    titleText = "National Scholarship Exam";
+    promptBody = `A triumphant commercial graphic poster key visual for Scholarship and Talent Exam. Top features golden victory laurel branches, celebration ribbons, and bright spotlight rays. Center features gleaming 3D golden typography SCHOLARSHIP EXAM WIN UP TO 100% SCHOLARSHIP with sparkling light rays. Bottom features a gleaming golden victory trophy cup, achievement medals, and celebratory confetti particles on a winner podium. Deep sapphire blue and gold background. Clean space for branding at top and bottom. 4k commercial grade.`;
+  } else if (p.includes("crash course") || p.includes("board") || p.includes("class 10") || p.includes("class 12")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "swiss-editorial";
+    dominantColor = "#0F172A";
+    titleText = "Board Exam Booster";
+    promptBody = `An impactful commercial graphic poster key visual for Academic Board Exam Crash Course. Top features clean modern architectural header framing. Center features bold high-contrast typography BOARD EXAM CRASH COURSE SCORE 95%+ with energetic highlight accents. Bottom features a vibrant 3D educational composition with stack of premium books, target bullseye with dart, stopwatch, and graduation cap. Deep modern slate and royal blue aesthetic. Clean branding space at top and bottom. 4k.`;
+  } else if (p.includes("result") || p.includes("topper") || p.includes("rank") || p.includes("congratulation")) {
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "luxury-minimal";
+    dominantColor = "#2E1065";
+    titleText = "Congratulations Toppers";
+    promptBody = `A grand celebratory commercial poster key visual honoring Top Rankers and Results. Top features a shower of golden confetti and champion banners. Center features glowing celebratory typography CONGRATULATIONS TO OUR TOPPERS with radiant golden sparkles. Bottom features a golden champion podium with giant shiny stars, victory laurel wreaths, and triumphant 3D student character holding a certificate. Deep imperial purple and gold atmosphere. Clean space for branding at top and bottom. 4k.`;
+  } else {
+    // General creative prompt
+    resolvedStyle = visualStyle !== "auto" ? visualStyle : "cinematic-key-art";
+    dominantColor = themeColor || "#1E3A8A";
+    titleText = prompt.substring(0, 40);
+    const styleObj = POSTER_STYLES[resolvedStyle] || POSTER_STYLES["cinematic-key-art"];
+    promptBody = `High-end commercial graphic poster key visual for: ${prompt}. Category: ${category}. Top features elegant decorative framing and ambient lighting. Center features bold, stylish artistic typography lettering expressing the main theme with celebratory depth and sparkling highlights. Bottom features rich 3D thematic illustrations and commercial graphic art representing the subject. Style: ${styleObj.name}, ${styleObj.promptModifier}. Reserved clean designated open space at top header and bottom footer for dynamic institute branding overlays. 4k ultra-high resolution, commercial advertising grade.`;
   }
 
-  // Default educational key visual
+  const finalStyle = POSTER_STYLES[resolvedStyle] || POSTER_STYLES["cinematic-key-art"];
+
   return {
-    style: "cinematic-key-art",
-    themeColor: "#1E3A8A",
-    imagePrompt: `High-end commercial poster key visual art for educational coaching institute: ${prompt}. Atmospheric lighting, striking aesthetic composition, deep elegant colors, clean space for typography, no text, 4k`,
+    masterPrompt: promptBody,
+    styleKey: resolvedStyle,
+    styleConfig: finalStyle,
+    dominantColor,
+    titleText,
+  };
+}
+
+/**
+ * Backward compatibility resolver for thematic visual subject
+ */
+export function resolveThematicVisualSubject(prompt = "", category = "admissions") {
+  const resolved = buildMasterPosterVisualPrompt({ prompt, category });
+  return {
+    style: resolved.styleKey,
+    themeColor: resolved.dominantColor,
+    imagePrompt: resolved.masterPrompt,
   };
 }
 
@@ -297,8 +329,12 @@ async function recordMarketingAiUsage({ taskType, prompt, metadata = {}, user = 
 }
 
 /**
- * 1. Generate a Complete Canonical V2.0 Marketing Template from Natural Language
- * Equipped with the Poster Generator Skill and optional Thematic Image Generation.
+ * 1. Single-Step Master Poster Generation via Google Generative AI (Imagen/Gemini 2.5 Flash Image)
+ * Adheres strictly to the Poster Generator Skill:
+ * - Direct one-step generation of complete commercial poster artwork
+ * - Uploads to Cloudinary
+ * - Stamps clean dynamic branding overlays ({institute.logo}, {institute.name}, {institute.phone}, {institute.address})
+ * - Eliminates cluttered wireframe boxes, card grids, and dashboard shapes
  */
 export async function generateMarketingTemplateWithAi({
   prompt,
@@ -306,7 +342,7 @@ export async function generateMarketingTemplateWithAi({
   aspectRatio = "1:1",
   targetAudience = "students and parents",
   themeColor = "#1E3A8A",
-  includeImage = false,
+  includeImage = true,
   visualStyle = "auto",
   user = null,
 }) {
@@ -318,102 +354,249 @@ export async function generateMarketingTemplateWithAi({
   const canvasWidth = dims.width;
   const canvasHeight = dims.height;
 
-  // 1. Resolve Visual Style & Thematic Image requirements via Poster Generator Skill
-  const thematic = resolveThematicVisualSubject(prompt, category);
-  const resolvedStyleKey = visualStyle && visualStyle !== "auto" && POSTER_STYLES[visualStyle]
-    ? visualStyle
-    : thematic.style;
-  const styleConfig = POSTER_STYLES[resolvedStyleKey] || POSTER_STYLES["cinematic-key-art"];
-  const activeThemeColor = themeColor || thematic.themeColor || styleConfig.accentColor;
+  // Build the master poster prompt and resolve style
+  const { masterPrompt, styleKey, styleConfig, dominantColor } = buildMasterPosterVisualPrompt({
+    prompt,
+    category,
+    visualStyle,
+    themeColor,
+    aspectRatio,
+  });
 
-  let generatedBgImageUrl = "";
+  const pLower = prompt.toLowerCase();
+  const isHolidayOrCelebration =
+    pLower.includes("christmas") ||
+    pLower.includes("diwali") ||
+    pLower.includes("new year") ||
+    pLower.includes("holi") ||
+    pLower.includes("eid") ||
+    pLower.includes("wishes") ||
+    pLower.includes("greeting") ||
+    pLower.includes("congratulation");
 
-  // 2. Generate AI Thematic Background Image if requested
+  let uploadedPosterUrl = "";
+
+  // 1. Single-Step Poster Image Generation (When includeImage is enabled)
   if (includeImage) {
     try {
-      const refinedImagePrompt = `${thematic.imagePrompt}. Aesthetic Style: ${styleConfig.name}, ${styleConfig.promptModifier}. Dominant tones: ${activeThemeColor}. Ensure ample clear space for poster typography and badges. Absolutely NO text, words, or letters. High commercial production quality, 4k.`;
-      
       const imgResult = await generateMarketingBackgroundImage({
-        prompt: refinedImagePrompt,
+        prompt: masterPrompt,
         aspectRatio,
-        style: resolvedStyleKey,
-        themeColor: activeThemeColor,
+        style: styleKey,
+        themeColor: dominantColor,
+        isMasterPoster: true,
         user,
       });
 
       if (imgResult?.url) {
-        generatedBgImageUrl = imgResult.url;
+        uploadedPosterUrl = imgResult.url;
       }
     } catch (imgErr) {
-      console.warn("[marketingAiService] Warning: Image generation fallback triggered:", imgErr.message);
+      console.warn("[marketingAiService] Poster image generation warning:", imgErr.message);
     }
   }
 
-  // 3. Construct System Prompt with Poster Generator Skill rules
-  const systemInstruction = `You are an elite Creative Director and Master Poster Graphic Designer adhering to the "Poster Generator" design system.
-You specialize in high-converting promotional creatives for coaching institutes, tuition academies, and test-prep centers.
+  // 2. If a complete poster artwork was generated, construct the Canonical V2.0 template directly in ONE STEP
+  if (uploadedPosterUrl) {
+    // Dynamic coordinate calculations for the chosen aspect ratio
+    const logoSize = 100;
+    const logoX = Math.round((canvasWidth - logoSize) / 2);
+    const logoY = aspectRatio === "9:16" ? 80 : 35;
+
+    const nameWidth = Math.min(canvasWidth - 80, 960);
+    const nameHeight = 45;
+    const nameX = Math.round((canvasWidth - nameWidth) / 2);
+    const nameY = logoY + logoSize + 15;
+
+    const phoneWidth = Math.min(canvasWidth - 80, 960);
+    const phoneHeight = 40;
+    const phoneX = Math.round((canvasWidth - phoneWidth) / 2);
+    const phoneY = canvasHeight - (aspectRatio === "9:16" ? 140 : 100);
+
+    const addrWidth = Math.min(canvasWidth - 80, 960);
+    const addrHeight = 35;
+    const addrX = Math.round((canvasWidth - addrWidth) / 2);
+    const addrY = canvasHeight - (aspectRatio === "9:16" ? 85 : 55);
+
+    const singleStepTemplate = {
+      name: `${isHolidayOrCelebration ? "Celebration" : "Marketing"} Poster: ${prompt.substring(0, 32)}`,
+      category,
+      aspectRatio,
+      canvas: {
+        width: canvasWidth,
+        height: canvasHeight,
+        backgroundColor: dominantColor || "#0F172A",
+        backgroundImageUrl: uploadedPosterUrl,
+      },
+      elements: [
+        {
+          id: "elem_institute_logo",
+          type: "logo",
+          name: "Institute Logo",
+          x: logoX,
+          y: logoY,
+          width: logoSize,
+          height: logoSize,
+          rotation: 0,
+          opacity: 1,
+          zIndex: 10,
+          isLocked: false,
+          isEditable: true,
+          isVisible: true,
+          placeholder: "{institute.logo}",
+          content: "",
+          styling: {
+            borderRadius: 50,
+            objectFit: "contain",
+            backgroundColor: "rgba(255, 255, 255, 0.15)",
+            borderColor: "rgba(255, 255, 255, 0.3)",
+            borderWidth: 1,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+          },
+        },
+        {
+          id: "elem_institute_name",
+          type: "text",
+          name: "Institute Name",
+          x: nameX,
+          y: nameY,
+          width: nameWidth,
+          height: nameHeight,
+          rotation: 0,
+          opacity: 1,
+          zIndex: 11,
+          isLocked: false,
+          isEditable: true,
+          isVisible: true,
+          placeholder: "{institute.name}",
+          content: isHolidayOrCelebration ? "{institute.name} WISHES YOU" : "{institute.name}",
+          styling: {
+            fontFamily: "Inter",
+            fontSize: 24,
+            fontWeight: "800",
+            color: "#FFFFFF",
+            textAlign: "center",
+            letterSpacing: 2,
+            textTransform: "uppercase",
+            lineHeight: 1.2,
+          },
+        },
+        {
+          id: "elem_institute_phone",
+          type: "text",
+          name: "Contact Phone",
+          x: phoneX,
+          y: phoneY,
+          width: phoneWidth,
+          height: phoneHeight,
+          rotation: 0,
+          opacity: 1,
+          zIndex: 12,
+          isLocked: false,
+          isEditable: true,
+          isVisible: true,
+          placeholder: "{institute.phone}",
+          content: "Call / WhatsApp: {institute.phone}",
+          styling: {
+            fontFamily: "Inter",
+            fontSize: 22,
+            fontWeight: "700",
+            color: "#FFFFFF",
+            textAlign: "center",
+            lineHeight: 1.2,
+          },
+        },
+        {
+          id: "elem_institute_address",
+          type: "text",
+          name: "Address & Website",
+          x: addrX,
+          y: addrY,
+          width: addrWidth,
+          height: addrHeight,
+          rotation: 0,
+          opacity: 1,
+          zIndex: 13,
+          isLocked: false,
+          isEditable: true,
+          isVisible: true,
+          placeholder: "{institute.address}",
+          content: "{institute.address} | {institute.website}",
+          styling: {
+            fontFamily: "Inter",
+            fontSize: 16,
+            fontWeight: "500",
+            color: "rgba(255, 255, 255, 0.85)",
+            textAlign: "center",
+            lineHeight: 1.2,
+          },
+        },
+      ],
+    };
+
+    const validated = validateCanonicalTemplate(singleStepTemplate);
+
+    await recordMarketingAiUsage({
+      taskType: "single_step_master_poster",
+      prompt,
+      metadata: {
+        category,
+        aspectRatio,
+        visualStyle: styleKey,
+        hasBackgroundImage: true,
+        elementCount: validated.elements.length,
+      },
+      user,
+    });
+
+    return validated;
+  }
+
+  // 3. Fallback: If includeImage was false or image model was unavailable,
+  // synthesize a clean, spacious typography layout adhering to the Poster Generator Skill (NO wireframe grids or 12 cards).
+  const systemInstruction = `You are a Master Graphic Poster Designer adhering to the "Poster Generator" design system (Swiss Editorial & Minimalist).
+Design a clean, spacious, high-contrast poster layout for a coaching institute.
 
 CANVAS SPECIFICATIONS:
 - Width: ${canvasWidth}px | Height: ${canvasHeight}px
 - Aspect Ratio: "${aspectRatio}"
 - Category: "${category}"
-- Target Audience: "${targetAudience}"
-- Visual Style: "${styleConfig.name}" (${styleConfig.vibe})
-- Primary Accent: "${activeThemeColor}"
-${generatedBgImageUrl ? `- THEMATIC BACKGROUND VISUAL: "${generatedBgImageUrl}" has been generated and set as the canvas background!` : "- BACKGROUND: Clean solid or vector gradient canvas."}
+- Visual Style: "${styleConfig.name}"
+- Dominant Accent: "${dominantColor}"
 
-POSTER GENERATOR DESIGN RULES:
-1. CANONICAL COORDINATE GRID:
-   - Coordinates (x, y) must strictly be within 0 to ${canvasWidth} (x) and 0 to ${canvasHeight} (y).
-   - Safe margins: Leave at least 40px padding from every edge.
-   - Hierarchy: Top brand identity bar -> Hero headline -> Key offer / feature cards -> Bottom CTA & contact anchor.
-2. BACKGROUND & CONTRAST HARMONY:
-   ${generatedBgImageUrl ? `- CRITICAL: Because a vivid background visual is active ("${generatedBgImageUrl}"), you MUST wrap text groups and feature bullet points inside semi-transparent backing container cards (type: "shape", backgroundColor: "${styleConfig.cardBg || 'rgba(15, 23, 42, 0.78)'}", borderRadius: 16) or high-contrast pills so every letter is 100% crisp, legible, and unhindered by the image!
-   - Use high-contrast font colors: "${styleConfig.textColor || '#FFFFFF'}" for body copy, and radiant accents like "${styleConfig.accentColor || '#F59E0B'}" for headlines and badges.` : `- Use clean high-contrast color scheme (${styleConfig.textColor || '#0F172A'} on light or #FFFFFF on dark).`}
-3. DYNAMIC PLACEHOLDER SYSTEM (MANDATORY FOR INSTITUTE BRANDING):
-   - Every template MUST feature dynamic placeholders:
-     a) Institute Logo:
-        { "id": "elem_institute_logo", "type": "logo", "name": "Institute Logo", "x": 60, "y": 50, "width": 120, "height": 120, "placeholder": "{institute.logo}", "styling": { "borderRadius": 60, "objectFit": "contain" } }
-     b) Institute Name:
-        { "id": "elem_institute_name", "type": "text", "name": "Institute Name", "x": 200, "y": 75, "width": ${canvasWidth - 280}, "height": 60, "placeholder": "{institute.name}", "content": "{institute.name}", "styling": { "fontSize": 34, "fontWeight": "800", "color": "${styleConfig.textColor || '#FFFFFF'}", "textAlign": "left" } }
-     c) Bottom Call to Action Button:
-        Shape: { "id": "elem_cta_box", "type": "shape", "name": "CTA Container", "x": 80, "y": ${canvasHeight - 160}, "width": ${canvasWidth - 160}, "height": 80, "styling": { "backgroundColor": "${activeThemeColor || '#2563EB'}", "borderRadius": 40 } }
-     d) Institute Contact Phone:
-        { "id": "elem_institute_phone", "type": "text", "name": "Contact Phone", "x": 100, "y": ${canvasHeight - 145}, "width": ${canvasWidth - 200}, "height": 50, "placeholder": "{institute.phone}", "content": "Call: {institute.phone}", "styling": { "fontSize": 28, "fontWeight": "700", "color": "#FFFFFF", "textAlign": "center" } }
-     e) Institute Address:
-        { "id": "elem_institute_address", "type": "text", "name": "Campus Address", "x": 80, "y": ${canvasHeight - 65}, "width": ${canvasWidth - 160}, "height": 40, "placeholder": "{institute.address}", "content": "{institute.address}", "styling": { "fontSize": 20, "fontWeight": "500", "color": "${generatedBgImageUrl ? '#CBD5E1' : '#64748B'}", "textAlign": "center" } }
-4. CONTENT SYNTHESIS:
-   - Primary Headline: Bold, impactful (fontSize: 48-64px, uppercase, high contrast).
-   - Subheadline / Offer Hook: (e.g. for Diwali: "Celebrate the Festival of Lights with a 25% Scholarship Waiver on All Foundation Batches!").
-   - Feature Highlights: 2 to 4 structured badges with rounded shape containers (e.g., "Experienced Kota Faculty", "Small Batch Sizes", "Daily Doubt Counters", "Comprehensive Test Series").
+CRITICAL DESIGN RULES:
+1. SPATIOUS & ELEGANT:
+   - DO NOT create 10-15 cluttered cards, wireframe boxes, or 4-column card grids.
+   - Keep it clean, bold, and focused like an authentic print poster.
+   - Maximum 4 to 6 elements total: Top Brand Header, 1 Large Bold Headline, 1 Subheadline, 1 Key Callout, and Bottom Contact Bar.
+2. DYNAMIC PLACEHOLDERS:
+   - Top Logo: { "id": "elem_institute_logo", "type": "logo", "name": "Institute Logo", "x": ${Math.round((canvasWidth - 100) / 2)}, "y": 40, "width": 100, "height": 100, "placeholder": "{institute.logo}", "styling": { "borderRadius": 50 } }
+   - Top Institute Name: { "id": "elem_institute_name", "type": "text", "name": "Institute Name", "x": 60, "y": 150, "width": ${canvasWidth - 120}, "height": 45, "placeholder": "{institute.name}", "content": "{institute.name}", "styling": { "fontSize": 26, "fontWeight": "800", "color": "#FFFFFF", "textAlign": "center" } }
+   - Bottom Phone: { "id": "elem_institute_phone", "type": "text", "name": "Contact Phone", "x": 60, "y": ${canvasHeight - 110}, "width": ${canvasWidth - 120}, "height": 45, "placeholder": "{institute.phone}", "content": "Call: {institute.phone}", "styling": { "fontSize": 24, "fontWeight": "700", "color": "#FFFFFF", "textAlign": "center" } }
+   - Bottom Address: { "id": "elem_institute_address", "type": "text", "name": "Campus Address", "x": 60, "y": ${canvasHeight - 60}, "width": ${canvasWidth - 120}, "height": 35, "placeholder": "{institute.address}", "content": "{institute.address}", "styling": { "fontSize": 18, "fontWeight": "500", "color": "#CBD5E1", "textAlign": "center" } }
 
 OUTPUT FORMAT:
-Strictly return a single valid JSON object adhering to Canonical V2.0:
+Return strictly a single valid JSON object adhering to Canonical V2.0:
 {
-  "name": "Catchy Creative Title",
+  "name": "Creative Poster Title",
   "category": "${category}",
   "aspectRatio": "${aspectRatio}",
   "canvas": {
     "width": ${canvasWidth},
     "height": ${canvasHeight},
-    "backgroundColor": "${generatedBgImageUrl ? '#0B1329' : '#FFFFFF'}",
-    "backgroundImageUrl": "${generatedBgImageUrl}"
+    "backgroundColor": "${dominantColor || '#0B1329'}",
+    "backgroundImageUrl": ""
   },
-  "elements": [
-    ...
-  ]
+  "elements": [ ... ]
 }
+No markdown, no commentary. Pure JSON only.`;
 
-No markdown tags, no markdown codeblocks, no explanations. Pure JSON only.`;
-
-  const userPrompt = `Create a complete, stunning, professional poster creative based on this instruction:
+  const userPrompt = `Create a clean, elegant poster creative based on this instruction:
 "${prompt}"
-
 Category: ${category}
 Aspect Ratio: ${aspectRatio} (${canvasWidth}x${canvasHeight} px)
-Visual Style: ${styleConfig.name}
-Thematic Image Attached: ${generatedBgImageUrl ? "YES (Active in background)" : "NO"}
-Remember to include institute identity placeholders ({institute.logo}, {institute.name}, {institute.phone}, {institute.address}) and compelling educational selling points!`;
+Accent Color: ${dominantColor}
+Style: ${styleConfig.name}`;
 
   const raw = await callGeminiRaw({
     prompt: userPrompt,
@@ -426,27 +609,20 @@ Remember to include institute identity placeholders ({institute.logo}, {institut
     throw new Error("AI returned an unparseable template format. Please try again with a more detailed prompt.");
   }
 
-  // Ensure canvas dimensions & background image URL match
   if (!parsed.canvas) parsed.canvas = {};
   parsed.canvas.width = canvasWidth;
   parsed.canvas.height = canvasHeight;
   parsed.aspectRatio = aspectRatio;
-  if (generatedBgImageUrl) {
-    parsed.canvas.backgroundImageUrl = generatedBgImageUrl;
-  }
 
-  // Validate and normalize using canonical template engine
   const validated = validateCanonicalTemplate(parsed);
 
   await recordMarketingAiUsage({
-    taskType: includeImage ? "generate_template_with_image" : "generate_template",
+    taskType: "generate_vector_template",
     prompt,
     metadata: {
       category,
       aspectRatio,
-      visualStyle: resolvedStyleKey,
-      includeImage,
-      hasBackgroundImage: Boolean(generatedBgImageUrl),
+      visualStyle: styleKey,
       elementCount: validated.elements.length,
     },
     user,
@@ -545,17 +721,18 @@ Additional customization notes from user: ${notes || "Preserve original colors a
 }
 
 /**
- * 3. Generate AI Background Artwork / Graphic Asset via Google Generative AI + Cloudinary
+ * 3. Generate AI Background / Master Poster Artwork via Google Generative AI + Cloudinary
  */
 export async function generateMarketingBackgroundImage({
   prompt,
   aspectRatio = "1:1",
   style = "vector",
   themeColor = "#1E3A8A",
+  isMasterPoster = false,
   user = null,
 }) {
   if (!prompt || !prompt.trim()) {
-    throw new Error("Prompt is required for background generation.");
+    throw new Error("Prompt is required for image generation.");
   }
 
   const globalSettings = await getAiGlobalSettings();
@@ -567,8 +744,10 @@ export async function generateMarketingBackgroundImage({
     throw err;
   }
 
-  // Refine user prompt for premium coaching background art
-  const refinedPrompt = `Minimalist premium educational marketing background artwork for coaching institute poster. ${prompt}. Style: ${style}, high resolution, professional commercial design, dominant colors: ${themeColor || '#1E3A8A'}, clean abstract geometric composition, modern aesthetic, NO readable typography, NO text, pristine quality, 4k.`;
+  // Refine prompt: if isMasterPoster is true, use prompt directly (already mastercrafted); else refine as background
+  const finalPrompt = isMasterPoster
+    ? prompt
+    : `Minimalist educational marketing background artwork for coaching institute poster. ${prompt}. Style: ${style}, high resolution, professional commercial design, dominant colors: ${themeColor || '#1E3A8A'}, clean abstract geometric composition, modern aesthetic, 4k.`;
 
   const candidateModels = [
     "gemini-2.5-flash-image",
@@ -589,7 +768,7 @@ export async function generateMarketingBackgroundImage({
         {
           contents: [
             {
-              parts: [{ text: refinedPrompt }],
+              parts: [{ text: finalPrompt }],
             },
           ],
           generationConfig: {
@@ -642,7 +821,7 @@ export async function generateMarketingBackgroundImage({
     publicUrl = uploadRes.secure_url || uploadRes.url;
   } catch (cErr) {
     console.warn("[marketingAiService] Cloudinary upload failed, using local storage fallback:", cErr.message);
-    const filename = `ai_bg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.png`;
+    const filename = `ai_poster_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.png`;
     const localDir = path.join(process.cwd(), "uploads", "marketing_assets");
     fs.mkdirSync(localDir, { recursive: true });
     const localPath = path.join(localDir, filename);
@@ -651,7 +830,7 @@ export async function generateMarketingBackgroundImage({
   }
 
   await recordMarketingAiUsage({
-    taskType: "generate_background_image",
+    taskType: isMasterPoster ? "generate_master_poster_image" : "generate_background_image",
     prompt,
     metadata: { aspectRatio, style, publicUrl },
     user,
@@ -684,7 +863,7 @@ YOUR TASK:
 - Examples of modifications you should handle:
   * "Make the headline bolder and gold color" -> update styling.fontWeight and styling.color of the main headline.
   * "Change background to dark navy blue" -> update canvas.backgroundColor: "#0B1329" and adjust text colors for contrast.
-  * "Translate text to Hindi/Hinglish" -> translate headline, highlights, and CTA into catchy Hinglish (e.g. "Admissions Shuru 2026-27! Kota ke top faculty se padhein").
+  * "Translate text to Hindi/Hinglish" -> translate headline, highlights, and CTA into catchy Hinglish.
   * "Add a 20% Early Bird Scholarship badge" -> add a new shape badge element and a text element at a harmonious position.
   * "Move the CTA button to the bottom right" -> adjust x and y coordinates.
 - PRESERVE existing dynamic placeholders ({institute.name}, {institute.phone}, {institute.logo}, {institute.address}) unless explicitly asked to remove.
@@ -748,9 +927,9 @@ Adapt the provided Canonical V2.0 marketing template to a new aspect ratio: ${ta
 
 REFLOW RULES FOR ${targetRatio}:
 - Reposition elements gracefully so they do not look stretched or cramped.
-- For 9:16 (Story/Vertical): You have much more vertical height (${targetHeight}px). Spread elements out vertically. Increase spacing between hero headline, feature badges, and bottom contact anchor.
-- For 16:9 (Landscape/Banner): You have wide horizontal space (${targetWidth}px) and less height (${targetHeight}px). Arrange into a two-column or split layout: Left side = Logo, Headline, Offer hook; Right side = Feature badges, CTA button, Phone.
-- For 4:5 (Instagram Feed): Slightly taller than 1:1. Expand feature list and padding.
+- For 9:16 (Story/Vertical): You have much more vertical height (${targetHeight}px). Spread elements out vertically.
+- For 16:9 (Landscape/Banner): Wide horizontal space (${targetWidth}px) and less height (${targetHeight}px). Arrange into a two-column or split layout.
+- For 4:5 (Instagram Feed): Slightly taller than 1:1.
 - Retain all dynamic placeholders ({institute.name}, {institute.phone}, {institute.logo}, {institute.address}) and colors.
 
 RETURN STRICTLY THE UPDATED CANONICAL V2.0 TEMPLATE JSON FOR THE TARGET ASPECT RATIO.`;
