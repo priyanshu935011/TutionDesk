@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import Institute from "../models/Institute.js";
 import User from "../models/User.js";
+import Student from "../models/Student.js";
 import ContactMessage from "../models/ContactMessage.js";
 import redisClient from "../config/redis.js";
 import { sendResetEmail, sendDemoRequestEmail, sendOTPEmail } from "../utils/mailer.js";
@@ -12,7 +13,11 @@ import { signSessionToken } from "../utils/jwtHelper.js";
 import ConsentRecord from "../models/ConsentRecord.js";
 import { DPDP_NOTICE_VERSION } from "../utils/dpdpConfig.js";
 import { maskIp } from "../utils/piiSanitizer.js";
+import { supabase } from "../utils/supabaseModel.js";
+import { getOrCreateStudentEntitlement } from "../services/studentEntitlementService.js";
+import { getGlobalTrialDefaults } from "./directRegistrationController.js";
 
+export const SUPER_ADMIN_PHONE = "9310280167";
 export const SUPER_ADMIN_EMAIL = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
 export const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "";
 
@@ -688,18 +693,136 @@ export const appResetUserPassword = async (req, res) => {
 const loginOtpIpTracker = new Map();
 const loginOtpPhoneCooldown = new Map();
 
+// Helper to create 7-day trial educator
+async function createTrialEducatorDirect(cleanPhone, name = "Educator") {
+  const defaults = await getGlobalTrialDefaults().catch(() => ({
+    trialDays: 7,
+    wpBalance: 10.0,
+    perMessageCharge: 0.25,
+    aiBalance: 50.0,
+    aiEnabled: true,
+  }));
+
+  const instId = crypto.randomUUID();
+  const trialEnds = new Date(Date.now() + (Number(defaults.trialDays) || 7) * 24 * 60 * 60 * 1000);
+  const regInstName = (name ? `${name.trim()}'s Classes` : "My Coaching Institute").trim();
+  const allFeatures = [
+    "attendance", "notes", "marks", "tests", "notices", "whatsapp",
+    "finances", "homework", "quizzes", "leads", "recorded_lectures", "release_videos", "test_series"
+  ];
+
+  const instPayload = {
+    id: instId,
+    name: regInstName,
+    owner_name: name || "Educator",
+    admin_email: `${cleanPhone}@direct.classtech.in`,
+    admin_phone: cleanPhone,
+    subscription_plan: "trial",
+    subscription_amount: 0,
+    trial_days: Number(defaults.trialDays || 7),
+    subscription_start: new Date().toISOString(),
+    subscription_end: trialEnds.toISOString(),
+    status: "active",
+    tuition_type: "solo",
+    allowed_features: allFeatures,
+    wallet_balance: Number(defaults.wpBalance ?? 10.0),
+    per_message_charge: Number(defaults.perMessageCharge ?? 0.25),
+    ai_wallet_balance: Number(defaults.aiBalance ?? 50.0),
+    quiz_feature_enabled: true,
+    ai_enabled: true,
+    ai_student_enabled: false,
+    recorded_lectures_feature_enabled: true,
+    release_videos_feature_enabled: true,
+    test_series_feature_enabled: true,
+    branding_enabled: true,
+    registration_source: "direct",
+    is_direct_registration: true,
+  };
+
+  try {
+    await supabase.from("institutes").upsert(instPayload, { onConflict: "id" });
+  } catch (err) {
+    console.warn("[UnifiedAuth] trial institute upsert warning:", err.message);
+  }
+
+  const dummyPassword = crypto.randomBytes(16).toString("hex");
+  const hashedPassword = await bcrypt.hash(dummyPassword, 10);
+  let user;
+  try {
+    user = await User.create({
+      name: name || "Educator",
+      phone: cleanPhone,
+      email: `${cleanPhone}@direct.classtech.in`,
+      password: hashedPassword,
+      role: "institute_admin",
+      institute: instId,
+      institute_id: instId,
+      isTrialRegistration: true,
+    });
+  } catch (_) {
+    user = (await User.findOne({ phone: cleanPhone })) || {
+      _id: crypto.randomUUID(),
+      name: name || "Educator",
+      phone: cleanPhone,
+      email: `${cleanPhone}@direct.classtech.in`,
+      role: "institute_admin",
+      institute: instId,
+      isTrialRegistration: true,
+    };
+  }
+
+  return { user, instPayload };
+}
+
+// Helper to create independent D2C student
+async function createIndependentStudentDirect(cleanPhone, name = "Self-Study Student") {
+  const email = `direct_${cleanPhone}@classtech.selfstudy`;
+
+  let user = await User.findOne({ $or: [{ phone: cleanPhone }, { email }] });
+  if (!user) {
+    user = await User.create({
+      name,
+      email,
+      phone: cleanPhone,
+      role: "student",
+      student_type: "independent_direct",
+      password: crypto.randomBytes(16).toString("hex"),
+    });
+  } else {
+    user.student_type = "independent_direct";
+    await user.save().catch(() => {});
+  }
+
+  let student = await Student.findOne({ $or: [{ user: user._id }, { phone: cleanPhone }] });
+  if (!student) {
+    student = await Student.create({
+      user: user._id,
+      name: user.name || name,
+      phone: cleanPhone,
+      email: user.email,
+      enrollmentNumber: `STU-D2C-${Date.now().toString().slice(-6)}`,
+      targetExam: "Boards / JEE / NEET",
+    });
+  }
+
+  const studentId = String(student._id || user._id);
+  const entitlement = await getOrCreateStudentEntitlement(studentId, "independent_direct");
+
+  return { user, student, entitlement };
+}
+
 export const sendLoginOtp = async (req, res) => {
   try {
     const clientIp = (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || req.ip || "unknown").toString().split(",")[0].trim();
     const now = Date.now();
 
-    // 1. IP-level Rate Limiting: max 5 requests per 10 minutes per IP
+    // 1. IP-level Rate Limiting
     const ipRecord = loginOtpIpTracker.get(clientIp) || { count: 0, resetAt: now + 10 * 60 * 1000 };
     if (now > ipRecord.resetAt) {
       ipRecord.count = 0;
       ipRecord.resetAt = now + 10 * 60 * 1000;
     }
-    if (ipRecord.count >= 5) {
+    if (ipRecord.count >= 15) {
       const waitSec = Math.ceil((ipRecord.resetAt - now) / 1000);
       return res.status(429).json({
         success: false,
@@ -709,11 +832,17 @@ export const sendLoginOtp = async (req, res) => {
 
     const rawIdentifier = (req.body.identifier || req.body.email || req.body.phone || "").toString().trim();
     if (!rawIdentifier) {
-      return res.status(400).json({ success: false, message: "Email or Mobile Number is required." });
+      return res.status(400).json({ success: false, message: "Mobile Number is required." });
     }
 
-    // 2. Cooldown per identifier: 60 seconds interval
-    const cleanCooldownKey = rawIdentifier.toLowerCase();
+    const cleanPhone = rawIdentifier.replace(/\D/g, "");
+    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+    if (last10.length < 10) {
+      return res.status(400).json({ success: false, message: "Please enter a valid 10-digit mobile number." });
+    }
+
+    // 2. Cooldown per phone number: 60 seconds interval
+    const cleanCooldownKey = last10;
     const lastSentTime = loginOtpPhoneCooldown.get(cleanCooldownKey) || 0;
     if (now - lastSentTime < 60 * 1000) {
       const remainingSec = Math.ceil((60 * 1000 - (now - lastSentTime)) / 1000);
@@ -727,17 +856,19 @@ export const sendLoginOtp = async (req, res) => {
     loginOtpIpTracker.set(clientIp, ipRecord);
     loginOtpPhoneCooldown.set(cleanCooldownKey, now);
 
-    const isEmail = rawIdentifier.includes("@");
-    const cleanPhone = rawIdentifier.replace(/\D/g, "");
-    const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
+    let userType = "new_user";
+    let studentType = null;
+    let isNewUser = false;
+    let existingUser = null;
 
-    let user = null;
-    if (isEmail) {
-      user = await User.findOne({ email: rawIdentifier.toLowerCase() });
-    } else if (cleanPhone.length >= 7) {
-      user = await User.findOne({
+    // A. Check if Super Admin
+    if (last10 === SUPER_ADMIN_PHONE) {
+      userType = "super_admin";
+      isNewUser = false;
+    } else {
+      // B. Check User collection
+      existingUser = await User.findOne({
         $or: [
-          { phone: cleanPhone },
           { phone: last10 },
           { phone: `+91${last10}` },
           { phone: `91${last10}` },
@@ -745,117 +876,90 @@ export const sendLoginOtp = async (req, res) => {
           { email: `${last10}@direct.classtech.in` },
         ],
       });
-    }
 
-    // Fallback search Institute adminPhone
-    if (!user && cleanPhone.length >= 7) {
-      try {
-        const inst = await Institute.findOne({
+      // Fallback check Institute adminPhone
+      if (!existingUser) {
+        try {
+          const inst = await Institute.findOne({
+            $or: [
+              { adminPhone: last10 },
+              { adminPhone: `+91${last10}` },
+              { adminPhone: `91${last10}` },
+            ],
+          });
+          if (inst && inst.adminUser) {
+            existingUser = await User.findById(inst.adminUser);
+          }
+        } catch (_) {}
+      }
+
+      if (existingUser) {
+        isNewUser = false;
+        const role = (existingUser.role || "").toLowerCase();
+        if (role === "super_admin") {
+          userType = "super_admin";
+        } else if (["receptionist", "staff", "sales_admin", "sales_person", "marketing_admin", "marketing_person", "tech_admin"].includes(role)) {
+          userType = "staff";
+        } else if (role === "student") {
+          userType = "student";
+          const studentDoc = await Student.findOne({ user: existingUser._id });
+          studentType = (studentDoc && studentDoc.user && studentDoc.batch) ? "institute_enrolled" : (existingUser.student_type || "independent_direct");
+        } else {
+          userType = "teacher";
+        }
+      } else {
+        // C. Check Student collection
+        const studentDoc = await Student.findOne({
           $or: [
-            { adminPhone: cleanPhone },
-            { adminPhone: last10 },
-            { adminPhone: `+91${last10}` },
-            { adminPhone: `91${last10}` },
+            { phone: last10 },
+            { parentPhone: last10 },
+            { phone: `+91${last10}` },
+            { parentPhone: `+91${last10}` },
           ],
         });
-        if (inst && inst.adminUser) {
-          user = await User.findById(inst.adminUser);
+
+        if (studentDoc) {
+          isNewUser = false;
+          userType = "student";
+          studentType = studentDoc.user ? "institute_enrolled" : "independent_direct";
+        } else {
+          isNewUser = true;
+          userType = "new_user";
         }
-      } catch (_) {}
+      }
     }
 
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "Educator account not found for this mobile number or email. Please check or register a new trial.",
-      });
-    }
-
-    const allowedAppRoles = [
-      "institute_admin",
-      "admin",
-      "teacher",
-      "receptionist",
-      "super_admin",
-      "tech_admin",
-      "sales_admin",
-      "sales_person",
-      "marketing_admin",
-      "marketing_person",
-      "owner",
-    ];
-    if (!allowedAppRoles.includes(user.role?.toLowerCase())) {
-      return res.status(403).json({
-        success: false,
-        message: "This account is registered as a student. Please log in using the Student Portal.",
-      });
-    }
-
+    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
 
     const otpToken = jwt.sign(
-      { userId: user._id, email: user.email, phone: user.phone, otpHash, purpose: "educator_otp_login" },
-      process.env.JWT_SECRET,
+      {
+        phone: last10,
+        otpHash,
+        userType,
+        studentType,
+        isNewUser,
+        purpose: "unified_login_otp",
+      },
+      process.env.JWT_SECRET || "classtech_secret_key_jwt_2026",
       { expiresIn: "10m" }
     );
 
-    const recipientPhone = cleanPhone || user.phone?.trim();
+    // Send SMS OTP via gateway
+    await sendSMSOTP(last10, otp).catch((smsErr) => {
+      console.warn(`[UnifiedAuth] SMS OTP warning for ${last10}:`, smsErr.message);
+    });
 
-    // 1. If mobile number entered or present, send SMS OTP via TextBee SMS Gateway
-    if (!isEmail && recipientPhone) {
-      try {
-        await sendSMSOTP(recipientPhone, otp);
-        return res.json({
-          success: true,
-          message: `A 6-digit verification code has been sent via SMS to ${recipientPhone}.`,
-          otpToken,
-          method: "phone",
-          phone: recipientPhone,
-        });
-      } catch (smsErr) {
-        console.error("SMS OTP login dispatch error:", smsErr.message);
-        if (user.email && !user.email.endsWith("@classtech.local")) {
-          await sendOTPEmail(user.email, user.name || "Educator", otp);
-          return res.json({
-            success: true,
-            message: `SMS failed. A 6-digit verification code was sent to your email (${user.email}).`,
-            otpToken,
-            method: "email",
-            email: user.email,
-          });
-        }
-        throw smsErr;
-      }
-    }
-
-    // 2. If email entered, send email OTP
-    if (user.email && !user.email.endsWith("@classtech.local")) {
-      await sendOTPEmail(user.email, user.name || "Educator", otp);
-      return res.json({
-        success: true,
-        message: `A 6-digit verification code has been sent to your email (${user.email}).`,
-        otpToken,
-        method: "email",
-        email: user.email,
-      });
-    }
-
-    // Fallback if recipientPhone is available
-    if (recipientPhone) {
-      await sendSMSOTP(recipientPhone, otp);
-      return res.json({
-        success: true,
-        message: `A 6-digit verification code has been sent via SMS to ${recipientPhone}.`,
-        otpToken,
-        method: "phone",
-        phone: recipientPhone,
-      });
-    }
-
-    return res.status(400).json({
-      success: false,
-      message: "No valid mobile number or email address found for this educator account.",
+    return res.json({
+      success: true,
+      message: `A 6-digit verification code has been sent via SMS to ${last10}.`,
+      otpToken,
+      phone: last10,
+      isNewUser,
+      userType,
+      studentType,
+      ...(process.env.NODE_ENV !== "production" ? { debugOtp: otp } : {}),
     });
   } catch (error) {
     console.error("sendLoginOtp error:", error);
@@ -868,14 +972,14 @@ export const sendLoginOtp = async (req, res) => {
 
 export const verifyLoginOtp = async (req, res) => {
   try {
-    const { otp, otpToken, fcmToken } = req.body;
+    const { otp, otpToken, chosenRole, name, fcmToken } = req.body;
     if (!otp || !otpToken) {
       return res.status(400).json({ success: false, message: "Verification code and session token are required." });
     }
 
     let decoded;
     try {
-      decoded = jwt.verify(otpToken, process.env.JWT_SECRET);
+      decoded = jwt.verify(otpToken, process.env.JWT_SECRET || "classtech_secret_key_jwt_2026");
     } catch (err) {
       return res.status(400).json({
         success: false,
@@ -883,68 +987,314 @@ export const verifyLoginOtp = async (req, res) => {
       });
     }
 
-    if (decoded.purpose !== "educator_otp_login") {
-      return res.status(400).json({ success: false, message: "Invalid verification purpose." });
-    }
-
     const inputHash = crypto.createHash("sha256").update(String(otp).trim()).digest("hex");
     if (decoded.otpHash !== inputHash) {
       return res.status(400).json({ success: false, message: "Incorrect verification code. Please check and try again." });
     }
 
-    const user = await User.findById(decoded.userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "Educator account not found." });
+    let phone = (decoded.phone || "").replace(/\D/g, "").slice(-10);
+    if (!phone && decoded.userId) {
+      const u = await User.findById(decoded.userId);
+      if (u && u.phone) phone = u.phone.replace(/\D/g, "").slice(-10);
     }
 
-    if (fcmToken) {
+    // =========================================================================
+    // CASE 1: SUPER ADMIN (9310280167)
+    // =========================================================================
+    if (phone === SUPER_ADMIN_PHONE) {
+      let superAdmin = await User.findOne({
+        $or: [
+          { phone: SUPER_ADMIN_PHONE },
+          { email: SUPER_ADMIN_EMAIL || "superadmin@classtech.in" },
+        ],
+      });
+
+      if (!superAdmin) {
+        superAdmin = await User.create({
+          name: "Super Admin",
+          phone: SUPER_ADMIN_PHONE,
+          email: SUPER_ADMIN_EMAIL || "superadmin@classtech.in",
+          role: "super_admin",
+          isSuperAdmin: true,
+          password: crypto.randomBytes(16).toString("hex"),
+        });
+      } else {
+        superAdmin.role = "super_admin";
+        superAdmin.isSuperAdmin = true;
+        superAdmin.phone = SUPER_ADMIN_PHONE;
+        await superAdmin.save().catch(() => {});
+      }
+
+      const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+      const token = generateToken({
+        id: superAdmin._id,
+        email: superAdmin.email,
+        name: superAdmin.name,
+        role: "super_admin",
+        isSuperAdmin: true,
+        phone: SUPER_ADMIN_PHONE,
+        sessionId,
+      });
+
+      return res.json({
+        success: true,
+        token,
+        role: "super_admin",
+        userType: "super_admin",
+        user: {
+          id: superAdmin._id,
+          _id: superAdmin._id,
+          name: superAdmin.name,
+          email: superAdmin.email,
+          phone: SUPER_ADMIN_PHONE,
+          role: "super_admin",
+          isSuperAdmin: true,
+        },
+      });
+    }
+
+    // =========================================================================
+    // CASE 2: EXISTING USER IN USER COLLECTION
+    // =========================================================================
+    let user = await User.findOne({
+      $or: [
+        { phone },
+        { phone: `+91${phone}` },
+        { phone: `91${phone}` },
+        { email: `teacher_${phone}@classtech.local` },
+        { email: `${phone}@direct.classtech.in` },
+        ...(decoded.userId ? [{ _id: decoded.userId }] : []),
+      ],
+    });
+
+    if (!user && phone) {
       try {
-        const tokens = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
-        if (!tokens.includes(fcmToken)) {
-          tokens.push(fcmToken);
-          user.fcmTokens = tokens;
-          user.fcmToken = fcmToken;
+        const inst = await Institute.findOne({
+          $or: [
+            { adminPhone: phone },
+            { adminPhone: `+91${phone}` },
+            { adminPhone: `91${phone}` },
+          ],
+        });
+        if (inst && inst.adminUser) {
+          user = await User.findById(inst.adminUser);
         }
       } catch (_) {}
     }
 
-    const institute = await buildInstituteState(user);
+    if (user) {
+      if (fcmToken) {
+        try {
+          const tokens = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
+          if (!tokens.includes(fcmToken)) {
+            tokens.push(fcmToken);
+            user.fcmTokens = tokens;
+            user.fcmToken = fcmToken;
+          }
+        } catch (_) {}
+      }
 
-    const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
-    user.currentSessionId = sessionId;
-    user.lastActiveAt = new Date();
-    await user.save().catch(() => {});
+      const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+      user.currentSessionId = sessionId;
+      user.lastActiveAt = new Date();
+      await user.save().catch(() => {});
 
-    if (redisClient && redisClient.isReady) {
-      try {
-        await redisClient.set(`active_session:user:${user._id}`, sessionId);
-      } catch (redisError) {
-        console.error("Redis set active session error:", redisError);
+      const role = (user.role || "").toLowerCase();
+
+      // Student Account in Users
+      if (role === "student") {
+        const studentDoc = await Student.findOne({ $or: [{ user: user._id }, { phone }] });
+        const studentType = (studentDoc && studentDoc.user && studentDoc.batch) ? "institute_enrolled" : (user.student_type || "independent_direct");
+        const token = generateToken({
+          id: user._id,
+          studentId: studentDoc?._id || user._id,
+          email: user.email,
+          name: user.name,
+          role: "student",
+          student_type: studentType,
+          sessionId,
+        });
+
+        return res.json({
+          success: true,
+          token,
+          role: "student",
+          userType: "student",
+          studentType,
+          student: studentDoc || { id: user._id, name: user.name, phone },
+          user: {
+            id: user._id,
+            _id: user._id,
+            name: user.name,
+            phone: user.phone || phone,
+            role: "student",
+            student_type: studentType,
+          },
+        });
+      }
+
+      // Educator or Staff
+      const institute = await buildInstituteState(user);
+      const isStaff = ["receptionist", "staff", "sales_admin", "sales_person", "marketing_admin", "marketing_person", "tech_admin"].includes(role);
+      const userType = isStaff ? "staff" : "teacher";
+
+      const token = generateToken({
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        userType,
+        sessionId,
+      });
+
+      return res.json({
+        success: true,
+        token,
+        role: user.role,
+        userType,
+        isTrial: Boolean(user.isTrialRegistration || institute?.isDirectTrial),
+        user: {
+          id: user._id,
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone || phone,
+          role: user.role,
+          isTrialRegistration: Boolean(user.isTrialRegistration || institute?.isDirectTrial),
+          institute,
+        },
+      });
+    }
+
+    // =========================================================================
+    // CASE 3: EXISTING STUDENT IN STUDENT COLLECTION
+    // =========================================================================
+    if (phone) {
+      const studentDoc = await Student.findOne({
+        $or: [
+          { phone },
+          { parentPhone: phone },
+          { phone: `+91${phone}` },
+          { parentPhone: `+91${phone}` },
+        ],
+      });
+
+      if (studentDoc) {
+        const studentType = studentDoc.user ? "institute_enrolled" : "independent_direct";
+        let studentUser = studentDoc.user ? await User.findById(studentDoc.user) : null;
+        if (!studentUser) {
+          studentUser = await User.create({
+            name: studentDoc.name,
+            phone,
+            email: studentDoc.email || `student_${phone}@classtech.student`,
+            role: "student",
+            student_type: studentType,
+            password: crypto.randomBytes(16).toString("hex"),
+          }).catch(() => null);
+        }
+
+        const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+        const token = generateToken({
+          id: studentUser?._id || studentDoc._id,
+          studentId: studentDoc._id,
+          email: studentDoc.email,
+          name: studentDoc.name,
+          role: "student",
+          student_type: studentType,
+          sessionId,
+        });
+
+        return res.json({
+          success: true,
+          token,
+          role: "student",
+          userType: "student",
+          studentType,
+          student: studentDoc,
+          user: {
+            id: studentUser?._id || studentDoc._id,
+            _id: studentUser?._id || studentDoc._id,
+            name: studentDoc.name,
+            phone: studentDoc.phone || phone,
+            role: "student",
+            student_type: studentType,
+          },
+        });
       }
     }
 
-    const token = generateToken({
-      id: user._id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      sessionId,
-    });
+    // =========================================================================
+    // CASE 4: NEW USER - ACCOUNT DOES NOT EXIST
+    // =========================================================================
+    if (!chosenRole) {
+      return res.json({
+        success: true,
+        isNewUser: true,
+        requiresRoleSelection: true,
+        phone,
+      });
+    }
 
-    return res.json({
-      success: true,
-      token,
-      user: {
-        id: user._id,
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        isTrialRegistration: Boolean(user.isTrialRegistration || institute?.isDirectTrial),
-        institute,
-      },
-    });
+    if (chosenRole === "teacher") {
+      const { user: newEducator, instPayload } = await createTrialEducatorDirect(phone, name);
+      const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+      const token = generateToken({
+        id: newEducator._id,
+        role: "institute_admin",
+        userType: "teacher",
+        sessionId,
+      });
+
+      return res.json({
+        success: true,
+        token,
+        role: "institute_admin",
+        userType: "teacher",
+        isTrial: true,
+        message: "Account created! Welcome to your 7-Day Free Trial.",
+        user: {
+          id: newEducator._id,
+          _id: newEducator._id,
+          name: newEducator.name,
+          phone,
+          role: "institute_admin",
+          isTrialRegistration: true,
+          institute: instPayload,
+        },
+      });
+    }
+
+    if (chosenRole === "student") {
+      const { user: newStudentUser, student: newStudentDoc } = await createIndependentStudentDirect(phone, name);
+      const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+      const token = generateToken({
+        id: newStudentUser._id,
+        studentId: newStudentDoc._id,
+        role: "student",
+        student_type: "independent_direct",
+        sessionId,
+      });
+
+      return res.json({
+        success: true,
+        token,
+        role: "student",
+        userType: "student",
+        studentType: "independent_direct",
+        message: "Account created! Welcome to ClassTech Self-Study.",
+        student: newStudentDoc,
+        user: {
+          id: newStudentUser._id,
+          _id: newStudentUser._id,
+          name: newStudentUser.name,
+          phone,
+          role: "student",
+          student_type: "independent_direct",
+        },
+      });
+    }
+
+    return res.status(400).json({ success: false, message: "Invalid role selected." });
   } catch (error) {
     console.error("verifyLoginOtp error:", error);
     return res.status(500).json({
