@@ -1253,12 +1253,16 @@ export const verifyLoginOtp = async (req, res) => {
           sessionId,
         });
 
+        const isSelfStudyPlaceholder = (studentDoc?.name === "Self-Study Student" || user.name === "Self-Study Student" || !studentDoc?.targetExam);
+        const needsOnboardingDetails = studentType === "independent_direct" && isSelfStudyPlaceholder;
+
         return res.json({
           success: true,
           token,
           role: "student",
           userType: "student",
           studentType,
+          needsOnboardingDetails,
           student: studentDoc || { id: user._id, name: user.name, phone },
           user: {
             id: user._id,
@@ -1348,12 +1352,16 @@ export const verifyLoginOtp = async (req, res) => {
           sessionId,
         });
 
+        const isSelfStudyPlaceholder = (studentDoc?.name === "Self-Study Student" || !studentDoc?.targetExam);
+        const needsOnboardingDetails = studentType === "independent_direct" && isSelfStudyPlaceholder;
+
         return res.json({
           success: true,
           token,
           role: "student",
           userType: "student",
           studentType,
+          needsOnboardingDetails,
           student: studentDoc,
           user: {
             id: studentUser?._id || studentDoc._id,
@@ -1395,6 +1403,7 @@ export const verifyLoginOtp = async (req, res) => {
         role: "institute_admin",
         userType: "teacher",
         isTrial: true,
+        isNewUser: true,
         message: "Account created! Welcome to your 7-Day Free Trial.",
         user: {
           id: newEducator._id,
@@ -1429,6 +1438,8 @@ export const verifyLoginOtp = async (req, res) => {
         role: "student",
         userType: "student",
         studentType: "independent_direct",
+        isNewUser: true,
+        needsOnboardingDetails: true,
         message: "Account created! Welcome to ClassTech.",
         student: newStudentDoc,
         user: {
