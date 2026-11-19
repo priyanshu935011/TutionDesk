@@ -2123,7 +2123,54 @@ export const getStudentSyncData = async (req, res) => {
           );
         }
       }
-      if (!institute) continue;
+      if (!institute) {
+        // Direct / Independent D2C Student or Archived student without active institute
+        const d2cClass = {
+          studentId: String(student._id || student.id),
+          id: String(student._id || student.id),
+          _id: String(student._id || student.id),
+          instituteName: "ClassTech Self-Study",
+          institute_name: "ClassTech Self-Study",
+          themeColor: "#4F46E5",
+          brandingEnabled: true,
+          logoUrl: "",
+          isDirectStudent: true,
+          is_direct_student: true,
+          student_type: student.student_type || "independent_direct",
+          aiStudentEnabled: true,
+          aiEnabled: true,
+          batchName: "Self-Study",
+          batch_name: "Self-Study",
+          batches: [],
+          batchIds: [],
+          batch_ids: [],
+          student: {
+            id: String(student._id || student.id),
+            _id: String(student._id || student.id),
+            name: student.name || "Student",
+            enrollmentNumber: student.enrollmentNumber || "STU-D2C",
+            phone: student.phone || "",
+            email: student.email || "",
+            targetExam: student.targetExam || "Boards / JEE / NEET",
+            student_type: student.student_type || "independent_direct",
+            paidAmount: 0,
+            pendingAmount: 0,
+            totalFees: 0,
+            paymentHistory: [],
+          },
+          summary: {
+            studyNotesCount: 0,
+            testsCount: 0,
+            attendance: { attendancePercentage: 0 },
+            fees: { pendingFees: 0, paidFees: 0 },
+          },
+          attendance: [],
+          notices: [],
+          timetable: null,
+        };
+        siblings.push(d2cClass);
+        continue;
+      }
 
       const isExpired =
         institute.status !== "active" ||
@@ -3183,7 +3230,54 @@ export const getStudentPortalData = async (req, res) => {
           institute = await Institute.findById(uDoc.institute).select(instFields);
         }
       }
-      if (!institute) continue;
+      if (!institute) {
+        // Direct / Independent D2C Student or Archived student without active institute
+        const d2cClass = {
+          studentId: String(student._id || student.id),
+          id: String(student._id || student.id),
+          _id: String(student._id || student.id),
+          instituteName: "ClassTech Self-Study",
+          institute_name: "ClassTech Self-Study",
+          themeColor: "#4F46E5",
+          brandingEnabled: true,
+          logoUrl: "",
+          isDirectStudent: true,
+          is_direct_student: true,
+          student_type: student.student_type || "independent_direct",
+          aiStudentEnabled: true,
+          aiEnabled: true,
+          batchName: "Self-Study",
+          batch_name: "Self-Study",
+          batches: [],
+          batchIds: [],
+          batch_ids: [],
+          student: {
+            id: String(student._id || student.id),
+            _id: String(student._id || student.id),
+            name: student.name || "Student",
+            enrollmentNumber: student.enrollmentNumber || "STU-D2C",
+            phone: student.phone || "",
+            email: student.email || "",
+            targetExam: student.targetExam || "Boards / JEE / NEET",
+            student_type: student.student_type || "independent_direct",
+            paidAmount: 0,
+            pendingAmount: 0,
+            totalFees: 0,
+            paymentHistory: [],
+          },
+          summary: {
+            studyNotesCount: 0,
+            testsCount: 0,
+            attendance: { attendancePercentage: 0 },
+            fees: { pendingFees: 0, paidFees: 0 },
+          },
+          attendance: [],
+          notices: [],
+          timetable: null,
+        };
+        siblings.push(d2cClass);
+        continue;
+      }
 
       const isExpired =
         institute.status !== "active" ||

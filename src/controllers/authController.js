@@ -276,6 +276,50 @@ export const loginUser = async (req, res) => {
       }
     }
 
+    // Fallback: search Student record if user account not found
+    if (!user) {
+      try {
+        const studentDoc = await Student.findOne({
+          $or: [
+            { email: normalizedIdentifier },
+            { phone: normalizedIdentifier },
+            { enrollmentNumber: normalizedIdentifier },
+            ...(cleanPhone.length >= 7 ? [{ phone: cleanPhone }, { phone: last10 }] : [])
+          ]
+        });
+        if (studentDoc && studentDoc.password) {
+          const isMatch = await bcrypt.compare(password, studentDoc.password);
+          if (isMatch) {
+            const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+            return res.json({
+              token: generateToken({
+                id: studentDoc._id,
+                studentId: studentDoc._id,
+                email: studentDoc.email,
+                name: studentDoc.name,
+                role: "student",
+                student_type: studentDoc.student_type || (studentDoc.user ? "institute_enrolled" : "independent_direct"),
+                enrollmentNumber: studentDoc.enrollmentNumber,
+                sessionId,
+              }),
+              user: {
+                id: studentDoc._id,
+                name: studentDoc.name,
+                email: studentDoc.email,
+                phone: studentDoc.phone,
+                role: "student",
+                student_type: studentDoc.student_type || (studentDoc.user ? "institute_enrolled" : "independent_direct"),
+                enrollmentNumber: studentDoc.enrollmentNumber,
+              },
+              student: studentDoc,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Student fallback password check error:", err.message);
+      }
+    }
+
     if (!user) {
       return res.status(401).json({ message: "Invalid email/phone or password" });
     }
@@ -292,6 +336,7 @@ export const loginUser = async (req, res) => {
       "marketing_admin",
       "marketing_person",
       "owner",
+      "student",
     ];
     if (!allowedAppRoles.includes(user.role?.toLowerCase())) {
       return res.status(403).json({ message: "Access denied. Role not permitted to log in." });
@@ -301,6 +346,40 @@ export const loginUser = async (req, res) => {
 
     if (!isMatch) {
       return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    if (user.role === "student") {
+      const sessionId = Date.now().toString() + "_" + Math.random().toString(36).substring(2, 11);
+      let student = await Student.findOne({ $or: [{ user: user._id }, { email: user.email }, { phone: user.phone }] });
+      return res.json({
+        token: generateToken({
+          id: user._id,
+          studentId: student?._id || user._id,
+          email: user.email,
+          name: user.name,
+          role: "student",
+          student_type: user.student_type || "independent_direct",
+          enrollmentNumber: student?.enrollmentNumber || "",
+          sessionId,
+        }),
+        user: {
+          id: user._id,
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: "student",
+          student_type: user.student_type || "independent_direct",
+          enrollmentNumber: student?.enrollmentNumber || "",
+        },
+        student: student || {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          enrollmentNumber: "STU-D2C",
+        },
+      });
     }
 
     const institute = await buildInstituteState(user);
