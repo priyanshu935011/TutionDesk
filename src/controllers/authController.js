@@ -832,17 +832,18 @@ export const sendLoginOtp = async (req, res) => {
 
     const rawIdentifier = (req.body.identifier || req.body.email || req.body.phone || "").toString().trim();
     if (!rawIdentifier) {
-      return res.status(400).json({ success: false, message: "Mobile Number is required." });
+      return res.status(400).json({ success: false, message: "Mobile Number or Email is required." });
     }
 
+    const isEmail = rawIdentifier.includes("@");
     const cleanPhone = rawIdentifier.replace(/\D/g, "");
     const last10 = cleanPhone.length >= 10 ? cleanPhone.slice(-10) : cleanPhone;
-    if (last10.length < 10) {
+    if (!isEmail && last10.length < 10) {
       return res.status(400).json({ success: false, message: "Please enter a valid 10-digit mobile number." });
     }
 
-    // 2. Cooldown per phone number: 60 seconds interval
-    const cleanCooldownKey = last10;
+    // 2. Cooldown per identifier: 60 seconds interval
+    const cleanCooldownKey = isEmail ? rawIdentifier.toLowerCase() : last10;
     const lastSentTime = loginOtpPhoneCooldown.get(cleanCooldownKey) || 0;
     if (now - lastSentTime < 60 * 1000) {
       const remainingSec = Math.ceil((60 * 1000 - (now - lastSentTime)) / 1000);
@@ -862,23 +863,27 @@ export const sendLoginOtp = async (req, res) => {
     let existingUser = null;
 
     // A. Check if Super Admin
-    if (last10 === SUPER_ADMIN_PHONE) {
+    if (!isEmail && last10 === SUPER_ADMIN_PHONE) {
       userType = "super_admin";
       isNewUser = false;
     } else {
       // B. Check User collection
-      existingUser = await User.findOne({
-        $or: [
-          { phone: last10 },
-          { phone: `+91${last10}` },
-          { phone: `91${last10}` },
-          { email: `teacher_${last10}@classtech.local` },
-          { email: `${last10}@direct.classtech.in` },
-        ],
-      });
+      if (isEmail) {
+        existingUser = await User.findOne({ email: rawIdentifier.toLowerCase() });
+      } else {
+        existingUser = await User.findOne({
+          $or: [
+            { phone: last10 },
+            { phone: `+91${last10}` },
+            { phone: `91${last10}` },
+            { email: `teacher_${last10}@classtech.local` },
+            { email: `${last10}@direct.classtech.in` },
+          ],
+        });
+      }
 
       // Fallback check Institute adminPhone
-      if (!existingUser) {
+      if (!existingUser && !isEmail) {
         try {
           const inst = await Institute.findOne({
             $or: [
@@ -909,14 +914,18 @@ export const sendLoginOtp = async (req, res) => {
         }
       } else {
         // C. Check Student collection
-        const studentDoc = await Student.findOne({
-          $or: [
-            { phone: last10 },
-            { parentPhone: last10 },
-            { phone: `+91${last10}` },
-            { parentPhone: `+91${last10}` },
-          ],
-        });
+        const studentDoc = await Student.findOne(
+          isEmail
+            ? { email: rawIdentifier.toLowerCase() }
+            : {
+                $or: [
+                  { phone: last10 },
+                  { parentPhone: last10 },
+                  { phone: `+91${last10}` },
+                  { parentPhone: `+91${last10}` },
+                ],
+              }
+        );
 
         if (studentDoc) {
           isNewUser = false;
@@ -936,6 +945,8 @@ export const sendLoginOtp = async (req, res) => {
     const otpToken = jwt.sign(
       {
         phone: last10,
+        email: isEmail ? rawIdentifier.toLowerCase() : existingUser?.email,
+        userId: existingUser?._id,
         otpHash,
         userType,
         studentType,
@@ -946,16 +957,23 @@ export const sendLoginOtp = async (req, res) => {
       { expiresIn: "10m" }
     );
 
-    // Send SMS OTP via gateway
-    await sendSMSOTP(last10, otp).catch((smsErr) => {
-      console.warn(`[UnifiedAuth] SMS OTP warning for ${last10}:`, smsErr.message);
-    });
+    // Send OTP via SMS or Email
+    if (isEmail) {
+      await sendOTPEmail(rawIdentifier.toLowerCase(), existingUser?.name || "User", otp).catch((mailErr) => {
+        console.warn(`[UnifiedAuth] Email OTP warning for ${rawIdentifier}:`, mailErr.message);
+      });
+    } else {
+      await sendSMSOTP(last10, otp).catch((smsErr) => {
+        console.warn(`[UnifiedAuth] SMS OTP warning for ${last10}:`, smsErr.message);
+      });
+    }
 
     return res.json({
       success: true,
-      message: `A 6-digit verification code has been sent via SMS to ${last10}.`,
+      message: `A 6-digit verification code has been sent ${isEmail ? "to " + rawIdentifier : "via SMS to " + last10}.`,
       otpToken,
       phone: last10,
+      email: isEmail ? rawIdentifier.toLowerCase() : undefined,
       isNewUser,
       userType,
       studentType,
@@ -1058,11 +1076,14 @@ export const verifyLoginOtp = async (req, res) => {
     // =========================================================================
     let user = await User.findOne({
       $or: [
-        { phone },
-        { phone: `+91${phone}` },
-        { phone: `91${phone}` },
-        { email: `teacher_${phone}@classtech.local` },
-        { email: `${phone}@direct.classtech.in` },
+        ...(phone ? [
+          { phone },
+          { phone: `+91${phone}` },
+          { phone: `91${phone}` },
+          { email: `teacher_${phone}@classtech.local` },
+          { email: `${phone}@direct.classtech.in` },
+        ] : []),
+        ...(decoded.email ? [{ email: decoded.email.toLowerCase() }] : []),
         ...(decoded.userId ? [{ _id: decoded.userId }] : []),
       ],
     });
@@ -1169,15 +1190,19 @@ export const verifyLoginOtp = async (req, res) => {
     // =========================================================================
     // CASE 3: EXISTING STUDENT IN STUDENT COLLECTION
     // =========================================================================
-    if (phone) {
-      const studentDoc = await Student.findOne({
-        $or: [
-          { phone },
-          { parentPhone: phone },
-          { phone: `+91${phone}` },
-          { parentPhone: `+91${phone}` },
-        ],
-      });
+    if (phone || decoded.email) {
+      const studentDoc = await Student.findOne(
+        phone
+          ? {
+              $or: [
+                { phone },
+                { parentPhone: phone },
+                { phone: `+91${phone}` },
+                { parentPhone: `+91${phone}` },
+              ],
+            }
+          : { email: decoded.email.toLowerCase() }
+      );
 
       if (studentDoc) {
         const studentType = studentDoc.user ? "institute_enrolled" : "independent_direct";
