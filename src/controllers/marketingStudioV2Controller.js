@@ -27,6 +27,7 @@ import {
   generateMarketingBackgroundImage,
   refineMarketingTemplate,
   generateAspectVariations,
+  POSTER_STYLES,
 } from "../services/marketingAiService.js";
 
 // Helper to validate UUIDs
@@ -1169,6 +1170,13 @@ export const trackTemplateAction = async (req, res) => {
 // AI MARKETING ENGINE CONTROLLER ENDPOINTS (SUPER ADMIN ONLY)
 // ============================================================================
 
+export const getAiPosterStyles = (req, res) => {
+  return res.json({
+    success: true,
+    styles: POSTER_STYLES,
+  });
+};
+
 export const generateAiTemplate = async (req, res) => {
   try {
     const {
@@ -1177,6 +1185,8 @@ export const generateAiTemplate = async (req, res) => {
       aspectRatio = "1:1",
       targetAudience = "students and parents",
       themeColor = "#1E3A8A",
+      includeImage = false,
+      visualStyle = "auto",
       saveAsTemplate = false,
       status = "published",
     } = req.body;
@@ -1191,6 +1201,8 @@ export const generateAiTemplate = async (req, res) => {
       aspectRatio,
       targetAudience,
       themeColor,
+      includeImage: Boolean(includeImage),
+      visualStyle,
       user: req.user,
     });
 

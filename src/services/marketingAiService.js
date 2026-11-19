@@ -21,6 +21,256 @@ export const RATIO_DIMENSIONS = {
 };
 
 /**
+ * 20 Professional Poster Visual Styles (from poster-generator skill)
+ */
+export const POSTER_STYLES = {
+  "swiss-editorial": {
+    name: "Swiss Editorial",
+    vibe: "Clean typographic grid, asymmetric structure, high contrast sans-serif, bold color blocking",
+    promptModifier: "clean Swiss style typography grid, asymmetric layout, minimal crisp geometric shapes, elegant whitespace, high contrast, clean architectural vibe, no text",
+    preferredFonts: ["Inter", "Helvetica", "Arial"],
+    accentColor: "#DC2626",
+    cardBg: "rgba(255, 255, 255, 0.95)",
+    textColor: "#0F172A",
+  },
+  "luxury-minimal": {
+    name: "Luxury Minimal",
+    vibe: "Muted dark tones, gold & champagne warm lighting, generous whitespace, refined elegance",
+    promptModifier: "luxury high-end minimalist composition, deep velvet dark background, subtle floating warm golden bokeh lights, delicate gold dust particles, cinematic premium atmosphere, no text",
+    preferredFonts: ["Cinzel", "Playfair Display", "serif"],
+    accentColor: "#F59E0B",
+    cardBg: "rgba(15, 23, 42, 0.85)",
+    textColor: "#FFFFFF",
+  },
+  "cinematic-key-art": {
+    name: "Cinematic Key Art",
+    vibe: "Dramatic ambient lighting, deep atmospheric shadows, cinematic depth, volumetric light beams",
+    promptModifier: "cinematic dramatic lighting, deep atmospheric shadows, volumetric light beams, epic commercial scale key visual, striking ambient depth, no text",
+    preferredFonts: ["Inter", "Montserrat", "sans-serif"],
+    accentColor: "#38BDF8",
+    cardBg: "rgba(11, 19, 43, 0.82)",
+    textColor: "#FFFFFF",
+  },
+  "art-deco-luxe": {
+    name: "Art Deco Luxe",
+    vibe: "Symmetrical geometry, fine golden accents, opulent celebration, rich dark emerald or burgundy backdrop",
+    promptModifier: "luxurious Art Deco festive illumination, glowing golden diyas and warm candlelight, ornamental gold lines, deep royal burgundy and dark emerald ambient gradient, radiant festive celebration, no text",
+    preferredFonts: ["Playfair Display", "serif"],
+    accentColor: "#F59E0B",
+    cardBg: "rgba(24, 24, 27, 0.85)",
+    textColor: "#FEF3C7",
+  },
+  "futurist-gradient": {
+    name: "Futurist Gradient",
+    vibe: "Luminescent neon glows, cyan/violet/magenta gradients, sleek dark glassmorphism, high-tech modern energy",
+    promptModifier: "futuristic sleek gradient background, glowing mesh light waves, deep indigo and electric cyan tones, 4k digital aesthetic, high-tech modernity, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#06B6D4",
+    cardBg: "rgba(15, 23, 42, 0.78)",
+    textColor: "#FFFFFF",
+  },
+  "pop-commercial": {
+    name: "Pop Commercial",
+    vibe: "Bright punchy pop colors, playful sticker-like badges, rounded soft cards, cheerful energetic commercial appeal",
+    promptModifier: "vibrant dynamic commercial background, bright playful geometric floats, high energy cheerful gradient, sunny joyful vibe, no text",
+    preferredFonts: ["Inter", "Poppins", "sans-serif"],
+    accentColor: "#EA580C",
+    cardBg: "rgba(255, 255, 255, 0.96)",
+    textColor: "#0F172A",
+  },
+  "neo-brutalist": {
+    name: "Neo Brutalist",
+    vibe: "Raw shapes, heavy solid black borders, vibrant solid color blocks, unapologetic modern contrast",
+    promptModifier: "neo-brutalist bold high-contrast background, solid geometric angular framing, crisp bold edges, vibrant modern pop, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#FACC15",
+    cardBg: "#FFFFFF",
+    textColor: "#000000",
+  },
+  "bauhaus-modular": {
+    name: "Bauhaus Modular",
+    vibe: "Primary geometric shapes: circle, square, triangle; functional grid, primary red/blue/yellow + black/white",
+    promptModifier: "bauhaus modern artistic background, bold primary geometric elements, clean cream paper texture, architectural balance, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#2563EB",
+    cardBg: "rgba(255, 255, 255, 0.94)",
+    textColor: "#111827",
+  },
+  "glassmorphism-ui": {
+    name: "Glassmorphism UI",
+    vibe: "Translucent frosted glass cards, soft blurred refraction, luminous ambient backdrops, modern digital sheen",
+    promptModifier: "soft colorful ambient sphere gradient background, fluid organic color transitions, dreamy modern glow, frosted glass aesthetic, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#6366F1",
+    cardBg: "rgba(255, 255, 255, 0.85)",
+    textColor: "#0F172A",
+  },
+  "organic-craft": {
+    name: "Organic Craft",
+    vibe: "Earthy warm tones, terracotta, sage green, handcrafted motifs, natural warmth and authenticity",
+    promptModifier: "warm earthy textured background, terracotta and sage organic gradients, gentle craft atmosphere, natural paper texture, no text",
+    preferredFonts: ["serif"],
+    accentColor: "#C2410C",
+    cardBg: "rgba(254, 252, 246, 0.92)",
+    textColor: "#292524",
+  },
+  "constructivist-impact": {
+    name: "Constructivist Impact",
+    vibe: "Dynamic diagonal energy, heavy crimson red and black geometric composition, monumental visual impact",
+    promptModifier: "constructivist dynamic diagonal energy, heavy crimson red and black geometric composition, monumental visual impact, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#DC2626",
+    cardBg: "rgba(255, 255, 255, 0.92)",
+    textColor: "#000000",
+  },
+  "data-editorial": {
+    name: "Data Editorial",
+    vibe: "Precision data editorial grid, subtle fine technological lines, dark navy background with laser-sharp cyan highlights",
+    promptModifier: "precision data editorial grid, subtle fine technological lines, dark navy background with laser-sharp cyan highlights, intellectual clean aesthetic, no text",
+    preferredFonts: ["Inter", "monospace"],
+    accentColor: "#38BDF8",
+    cardBg: "rgba(15, 23, 42, 0.88)",
+    textColor: "#FFFFFF",
+  },
+  "editorial-collage": {
+    name: "Editorial Collage",
+    vibe: "Editorial mixed-media magazine aesthetic, layered textured paper framing, soft neutral gradients",
+    promptModifier: "editorial mixed-media magazine aesthetic, layered textured paper framing, soft neutral gradients, artistic high fashion look, no text",
+    preferredFonts: ["Playfair Display", "serif"],
+    accentColor: "#D97706",
+    cardBg: "rgba(255, 255, 255, 0.95)",
+    textColor: "#1E293B",
+  },
+  "japanese-ma": {
+    name: "Japanese Ma",
+    vibe: "Negative space mastery, quiet balanced composition, zen minimalism, refined harmony",
+    promptModifier: "japanese zen negative space, subtle warm stone texture, peaceful minimalist composition, generous breathing space, soft natural light, no text",
+    preferredFonts: ["sans-serif"],
+    accentColor: "#B91C1C",
+    cardBg: "rgba(250, 250, 249, 0.95)",
+    textColor: "#1C1917",
+  },
+  "monochrome-typographic": {
+    name: "Monochrome Typographic",
+    vibe: "Striking high contrast black and charcoal monochrome background, architectural studio spotlight, silver nuances",
+    promptModifier: "striking high contrast black and charcoal monochrome background, architectural studio spotlight, silver and white nuances, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#FFFFFF",
+    cardBg: "rgba(24, 24, 27, 0.9)",
+    textColor: "#FFFFFF",
+  },
+  "risograph-zine": {
+    name: "Risograph Zine",
+    vibe: "Vibrant risograph dual-tone ink print texture, warm halftone dots, teal and fluorescent coral ink blend",
+    promptModifier: "vibrant risograph dual-tone ink print texture, warm halftone dots, teal and fluorescent coral ink blend, indie creative print feel, no text",
+    preferredFonts: ["sans-serif"],
+    accentColor: "#F43F5E",
+    cardBg: "rgba(255, 255, 255, 0.92)",
+    textColor: "#1E1B4B",
+  },
+  "surreal-3d-editorial": {
+    name: "Surreal 3D Editorial",
+    vibe: "Surreal 3D abstract floating sculptural geometric spheres, soft directional studio lighting, jewel tones",
+    promptModifier: "surreal 3D abstract floating sculptural geometric spheres, soft directional studio lighting, pastel and deep jewel tones, creative dreamscape, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#8B5CF6",
+    cardBg: "rgba(15, 23, 42, 0.8)",
+    textColor: "#FFFFFF",
+  },
+  "retro-futurism": {
+    name: "Retro Futurism",
+    vibe: "Retro futurism 80s synthwave perspective grid, glowing sunset horizon, deep purple and chrome cyan lighting",
+    promptModifier: "retro futurism 80s synthwave perspective grid, glowing sunset horizon, deep purple and chrome cyan lighting, nostalgic electronic warmth, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#EC4899",
+    cardBg: "rgba(15, 23, 42, 0.85)",
+    textColor: "#FFFFFF",
+  },
+  "botanical-premium": {
+    name: "Botanical Premium",
+    vibe: "Lush deep forest green botanical backdrop, elegant golden leaf filigree, natural organic luxury",
+    promptModifier: "lush deep forest green botanical backdrop, elegant golden leaf filigree, natural organic luxury, soft warm lighting, no text",
+    preferredFonts: ["Playfair Display", "serif"],
+    accentColor: "#F59E0B",
+    cardBg: "rgba(20, 30, 25, 0.88)",
+    textColor: "#F0FDF4",
+  },
+  "hyperreal-product": {
+    name: "Hyperreal Product",
+    vibe: "Crisp studio stage podium, immaculate directional lighting, subtle reflection, pristine clean commercial atmosphere",
+    promptModifier: "crisp studio stage podium, immaculate directional lighting, subtle reflection, pristine clean commercial atmosphere, ultra-high resolution, no text",
+    preferredFonts: ["Inter", "sans-serif"],
+    accentColor: "#2563EB",
+    cardBg: "rgba(255, 255, 255, 0.95)",
+    textColor: "#0F172A",
+  },
+};
+
+/**
+ * Intelligent Thematic Visual Subject & Style Resolver (from poster-generator skill)
+ */
+export function resolveThematicVisualSubject(prompt = "", category = "admissions") {
+  const p = prompt.toLowerCase();
+  
+  if (p.includes("diwali") || p.includes("deepawali")) {
+    return {
+      style: "art-deco-luxe",
+      themeColor: "#831843",
+      imagePrompt: "Traditional glowing golden clay diyas with warm flickering flames, elegant floral rangoli motifs, warm golden festive bokeh lights, ambient celebration sparkles, rich royal burgundy and deep navy gradient backdrop, radiant celebration lighting, commercial editorial grade, 4k ultra-high resolution, no text, no words, no letters, no typography, clean center area for text",
+    };
+  }
+  if (p.includes("holi")) {
+    return {
+      style: "pop-commercial",
+      themeColor: "#EA580C",
+      imagePrompt: "Artistic explosion of vibrant festive organic color powders in mid-air, dynamic celebratory energy, clean joyful aesthetic, high commercial photography, no text, 4k",
+    };
+  }
+  if (p.includes("eid")) {
+    return {
+      style: "luxury-minimal",
+      themeColor: "#065F46",
+      imagePrompt: "Illuminated golden crescent moon and subtle ornate lanterns glowing gently in dark emerald sky with soft ambient stars, serene festive celebration, no text, 4k",
+    };
+  }
+  if (p.includes("christmas") || p.includes("new year")) {
+    return {
+      style: "luxury-minimal",
+      themeColor: "#1E3A8A",
+      imagePrompt: "Elegant celebration background with subtle golden sparkles, festive ambient light bokeh, deep midnight blue, no text, 4k",
+    };
+  }
+  if (p.includes("jee") || p.includes("neet") || p.includes("iit") || p.includes("dropper") || p.includes("repeater")) {
+    return {
+      style: "futurist-gradient",
+      themeColor: "#1E3A8A",
+      imagePrompt: "Inspiring futuristic educational background, glowing abstract geometry, subtle atom and scientific energy waves, deep indigo and electric cyan lighting, sleek modern studio depth of field, no text, 4k",
+    };
+  }
+  if (p.includes("scholarship") || p.includes("stse") || p.includes("talent") || p.includes("topper") || p.includes("result") || p.includes("rank") || p.includes("award")) {
+    return {
+      style: "cinematic-key-art",
+      themeColor: "#1E3A8A",
+      imagePrompt: "Gleaming golden victory trophy with sparkling light reflections, triumphant celebratory particles, deep royal navy stage lighting, grand atmospheric depth, no text, 4k",
+    };
+  }
+  if (p.includes("crash course") || p.includes("board") || p.includes("class 10") || p.includes("class 12") || p.includes("exam")) {
+    return {
+      style: "swiss-editorial",
+      themeColor: "#0F172A",
+      imagePrompt: "Modern architectural minimalist studio space, crisp angular geometry, bright clean lighting with subtle ambient shadows, premium educational feel, no text, 4k",
+    };
+  }
+
+  // Default educational key visual
+  return {
+    style: "cinematic-key-art",
+    themeColor: "#1E3A8A",
+    imagePrompt: `High-end commercial poster key visual art for educational coaching institute: ${prompt}. Atmospheric lighting, striking aesthetic composition, deep elegant colors, clean space for typography, no text, 4k`,
+  };
+}
+
+/**
  * Helper to log AI usage for Super Admin marketing generation
  */
 async function recordMarketingAiUsage({ taskType, prompt, metadata = {}, user = null }) {
@@ -48,6 +298,7 @@ async function recordMarketingAiUsage({ taskType, prompt, metadata = {}, user = 
 
 /**
  * 1. Generate a Complete Canonical V2.0 Marketing Template from Natural Language
+ * Equipped with the Poster Generator Skill and optional Thematic Image Generation.
  */
 export async function generateMarketingTemplateWithAi({
   prompt,
@@ -55,6 +306,8 @@ export async function generateMarketingTemplateWithAi({
   aspectRatio = "1:1",
   targetAudience = "students and parents",
   themeColor = "#1E3A8A",
+  includeImage = false,
+  visualStyle = "auto",
   user = null,
 }) {
   if (!prompt || !prompt.trim()) {
@@ -65,52 +318,77 @@ export async function generateMarketingTemplateWithAi({
   const canvasWidth = dims.width;
   const canvasHeight = dims.height;
 
-  const systemInstruction = `You are a Principal Graphic Designer and Art Director specializing in educational marketing for Indian coaching institutes, tuition centres, and test-prep academies.
+  // 1. Resolve Visual Style & Thematic Image requirements via Poster Generator Skill
+  const thematic = resolveThematicVisualSubject(prompt, category);
+  const resolvedStyleKey = visualStyle && visualStyle !== "auto" && POSTER_STYLES[visualStyle]
+    ? visualStyle
+    : thematic.style;
+  const styleConfig = POSTER_STYLES[resolvedStyleKey] || POSTER_STYLES["cinematic-key-art"];
+  const activeThemeColor = themeColor || thematic.themeColor || styleConfig.accentColor;
 
-Your job is to generate a complete, professional, high-converting marketing creative in Canonical V2.0 JSON format.
+  let generatedBgImageUrl = "";
+
+  // 2. Generate AI Thematic Background Image if requested
+  if (includeImage) {
+    try {
+      const refinedImagePrompt = `${thematic.imagePrompt}. Aesthetic Style: ${styleConfig.name}, ${styleConfig.promptModifier}. Dominant tones: ${activeThemeColor}. Ensure ample clear space for poster typography and badges. Absolutely NO text, words, or letters. High commercial production quality, 4k.`;
+      
+      const imgResult = await generateMarketingBackgroundImage({
+        prompt: refinedImagePrompt,
+        aspectRatio,
+        style: resolvedStyleKey,
+        themeColor: activeThemeColor,
+        user,
+      });
+
+      if (imgResult?.url) {
+        generatedBgImageUrl = imgResult.url;
+      }
+    } catch (imgErr) {
+      console.warn("[marketingAiService] Warning: Image generation fallback triggered:", imgErr.message);
+    }
+  }
+
+  // 3. Construct System Prompt with Poster Generator Skill rules
+  const systemInstruction = `You are an elite Creative Director and Master Poster Graphic Designer adhering to the "Poster Generator" design system.
+You specialize in high-converting promotional creatives for coaching institutes, tuition academies, and test-prep centers.
 
 CANVAS SPECIFICATIONS:
-- Width: ${canvasWidth}px
-- Height: ${canvasHeight}px
+- Width: ${canvasWidth}px | Height: ${canvasHeight}px
 - Aspect Ratio: "${aspectRatio}"
-- Primary Theme Color: ${themeColor || "#1E3A8A"}
 - Category: "${category}"
 - Target Audience: "${targetAudience}"
+- Visual Style: "${styleConfig.name}" (${styleConfig.vibe})
+- Primary Accent: "${activeThemeColor}"
+${generatedBgImageUrl ? `- THEMATIC BACKGROUND VISUAL: "${generatedBgImageUrl}" has been generated and set as the canvas background!` : "- BACKGROUND: Clean solid or vector gradient canvas."}
 
-CRITICAL DESIGN & LAYOUT RULES:
+POSTER GENERATOR DESIGN RULES:
 1. CANONICAL COORDINATE GRID:
-   - Use absolute pixels based on 0 to ${canvasWidth} (x) and 0 to ${canvasHeight} (y).
-   - Elements must NEVER overflow the canvas. Keep safe margins (at least 40px from canvas edges).
-   - Ensure clean vertical stacking and visual breathing room.
-2. DYNAMIC PLACEHOLDER SYSTEM (MANDATORY FOR INSTITUTE IDENTITY):
-   - You MUST include dynamic placeholders so coaching institutes can automatically stamp their brand:
+   - Coordinates (x, y) must strictly be within 0 to ${canvasWidth} (x) and 0 to ${canvasHeight} (y).
+   - Safe margins: Leave at least 40px padding from every edge.
+   - Hierarchy: Top brand identity bar -> Hero headline -> Key offer / feature cards -> Bottom CTA & contact anchor.
+2. BACKGROUND & CONTRAST HARMONY:
+   ${generatedBgImageUrl ? `- CRITICAL: Because a vivid background visual is active ("${generatedBgImageUrl}"), you MUST wrap text groups and feature bullet points inside semi-transparent backing container cards (type: "shape", backgroundColor: "${styleConfig.cardBg || 'rgba(15, 23, 42, 0.78)'}", borderRadius: 16) or high-contrast pills so every letter is 100% crisp, legible, and unhindered by the image!
+   - Use high-contrast font colors: "${styleConfig.textColor || '#FFFFFF'}" for body copy, and radiant accents like "${styleConfig.accentColor || '#F59E0B'}" for headlines and badges.` : `- Use clean high-contrast color scheme (${styleConfig.textColor || '#0F172A'} on light or #FFFFFF on dark).`}
+3. DYNAMIC PLACEHOLDER SYSTEM (MANDATORY FOR INSTITUTE BRANDING):
+   - Every template MUST feature dynamic placeholders:
      a) Institute Logo:
         { "id": "elem_institute_logo", "type": "logo", "name": "Institute Logo", "x": 60, "y": 50, "width": 120, "height": 120, "placeholder": "{institute.logo}", "styling": { "borderRadius": 60, "objectFit": "contain" } }
      b) Institute Name:
-        { "id": "elem_institute_name", "type": "text", "name": "Institute Name", "x": 200, "y": 80, "width": 800, "height": 60, "placeholder": "{institute.name}", "content": "{institute.name}", "styling": { "fontSize": 34, "fontWeight": "800", "color": "#0F172A", "textAlign": "left" } }
-     c) Call to Action Pill / Contact Box at the bottom:
-        Shape container: { "id": "elem_cta_box", "type": "shape", "name": "CTA Container", "x": 80, "y": ${canvasHeight - 160}, "width": ${canvasWidth - 160}, "height": 80, "styling": { "backgroundColor": "${themeColor || '#2563EB'}", "borderRadius": 40 } }
+        { "id": "elem_institute_name", "type": "text", "name": "Institute Name", "x": 200, "y": 75, "width": ${canvasWidth - 280}, "height": 60, "placeholder": "{institute.name}", "content": "{institute.name}", "styling": { "fontSize": 34, "fontWeight": "800", "color": "${styleConfig.textColor || '#FFFFFF'}", "textAlign": "left" } }
+     c) Bottom Call to Action Button:
+        Shape: { "id": "elem_cta_box", "type": "shape", "name": "CTA Container", "x": 80, "y": ${canvasHeight - 160}, "width": ${canvasWidth - 160}, "height": 80, "styling": { "backgroundColor": "${activeThemeColor || '#2563EB'}", "borderRadius": 40 } }
      d) Institute Contact Phone:
         { "id": "elem_institute_phone", "type": "text", "name": "Contact Phone", "x": 100, "y": ${canvasHeight - 145}, "width": ${canvasWidth - 200}, "height": 50, "placeholder": "{institute.phone}", "content": "Call: {institute.phone}", "styling": { "fontSize": 28, "fontWeight": "700", "color": "#FFFFFF", "textAlign": "center" } }
      e) Institute Address:
-        { "id": "elem_institute_address", "type": "text", "name": "Campus Address", "x": 80, "y": ${canvasHeight - 65}, "width": ${canvasWidth - 160}, "height": 40, "placeholder": "{institute.address}", "content": "{institute.address}", "styling": { "fontSize": 20, "fontWeight": "500", "color": "#64748B", "textAlign": "center" } }
-3. VISUAL HIERARCHY & ELEMENTS:
-   - Primary Headline: Large, bold, eye-catching (fontSize 48-68px, uppercase, high contrast).
-   - Subheadline / Offer Hook: (fontSize 26-34px, fontWeight 600).
-   - 2 to 4 Feature Highlights / Key Selling Points: Use rounded cards or pills (type: "shape", backgroundColor: "#F1F5F9" or vibrant accents) with clear text (e.g., "Kota Expert Faculty", "Daily Doubt Counters", "Weekly Ranker Tests", "Scholarships up to 90%").
-   - Badges / Urgency Accents (e.g. "LIMITED SEATS", "BATCH COMMENCES JUNE 1ST").
-4. COLOR CONTRAST & READABILITY:
-   - Always ensure high contrast. If background is light (e.g., #FFFFFF, #F8FAFC), text must be dark (#0F172A, #1E293B).
-   - If dark background, text must be white (#FFFFFF) or light (#F1F5F9).
-   - Accent colors: Golden Amber (#F59E0B), Crimson (#DC2626), Emerald (#059669), Vibrant Blue (#2563EB).
-5. ELEMENT TYPES ALLOWED:
-   - "text": requires content, styling (fontSize, fontWeight, color, textAlign, fontFamily).
-   - "shape": rounded or sharp rectangle; styling (backgroundColor, borderRadius, borderWidth, borderColor).
-   - "circle": circular badge or highlight; styling (backgroundColor, borderRadius).
-   - "logo": institute brand logo placeholder.
-   - "image": decorative vector or graphic asset.
+        { "id": "elem_institute_address", "type": "text", "name": "Campus Address", "x": 80, "y": ${canvasHeight - 65}, "width": ${canvasWidth - 160}, "height": 40, "placeholder": "{institute.address}", "content": "{institute.address}", "styling": { "fontSize": 20, "fontWeight": "500", "color": "${generatedBgImageUrl ? '#CBD5E1' : '#64748B'}", "textAlign": "center" } }
+4. CONTENT SYNTHESIS:
+   - Primary Headline: Bold, impactful (fontSize: 48-64px, uppercase, high contrast).
+   - Subheadline / Offer Hook: (e.g. for Diwali: "Celebrate the Festival of Lights with a 25% Scholarship Waiver on All Foundation Batches!").
+   - Feature Highlights: 2 to 4 structured badges with rounded shape containers (e.g., "Experienced Kota Faculty", "Small Batch Sizes", "Daily Doubt Counters", "Comprehensive Test Series").
 
-RETURN STRICTLY A SINGLE VALID JSON OBJECT with this exact structure:
+OUTPUT FORMAT:
+Strictly return a single valid JSON object adhering to Canonical V2.0:
 {
   "name": "Catchy Creative Title",
   "category": "${category}",
@@ -118,53 +396,29 @@ RETURN STRICTLY A SINGLE VALID JSON OBJECT with this exact structure:
   "canvas": {
     "width": ${canvasWidth},
     "height": ${canvasHeight},
-    "backgroundColor": "#FFFFFF",
-    "backgroundImageUrl": ""
+    "backgroundColor": "${generatedBgImageUrl ? '#0B1329' : '#FFFFFF'}",
+    "backgroundImageUrl": "${generatedBgImageUrl}"
   },
   "elements": [
-    {
-      "id": "elem_unique_1",
-      "name": "Layer Name",
-      "type": "text",
-      "x": 80,
-      "y": 180,
-      "width": 920,
-      "height": 90,
-      "rotation": 0,
-      "opacity": 1,
-      "zIndex": 2,
-      "isLocked": false,
-      "isEditable": true,
-      "isVisible": true,
-      "placeholder": null,
-      "content": "ADMISSIONS OPEN 2026-27",
-      "styling": {
-        "fontFamily": "Inter",
-        "fontSize": 56,
-        "fontWeight": "900",
-        "color": "#0F172A",
-        "textAlign": "center",
-        "backgroundColor": "transparent"
-      }
-    }
+    ...
   ]
 }
 
-DO NOT include any markdown code blocks, explanation, or HTML. ONLY return the raw JSON.`;
+No markdown tags, no markdown codeblocks, no explanations. Pure JSON only.`;
 
-  const userPrompt = `Create a complete, stunning, high-converting marketing template based on this instruction:
+  const userPrompt = `Create a complete, stunning, professional poster creative based on this instruction:
 "${prompt}"
 
 Category: ${category}
 Aspect Ratio: ${aspectRatio} (${canvasWidth}x${canvasHeight} px)
-Target Audience: ${targetAudience}
-Primary Theme Color: ${themeColor || "#1E3A8A"}
+Visual Style: ${styleConfig.name}
+Thematic Image Attached: ${generatedBgImageUrl ? "YES (Active in background)" : "NO"}
 Remember to include institute identity placeholders ({institute.logo}, {institute.name}, {institute.phone}, {institute.address}) and compelling educational selling points!`;
 
   const raw = await callGeminiRaw({
     prompt: userPrompt,
     systemInstruction,
-    temperature: 0.3,
+    temperature: 0.25,
   });
 
   const parsed = extractJsonFromText(raw);
@@ -172,19 +426,29 @@ Remember to include institute identity placeholders ({institute.logo}, {institut
     throw new Error("AI returned an unparseable template format. Please try again with a more detailed prompt.");
   }
 
-  // Ensure canvas dimensions match ratio
+  // Ensure canvas dimensions & background image URL match
   if (!parsed.canvas) parsed.canvas = {};
   parsed.canvas.width = canvasWidth;
   parsed.canvas.height = canvasHeight;
   parsed.aspectRatio = aspectRatio;
+  if (generatedBgImageUrl) {
+    parsed.canvas.backgroundImageUrl = generatedBgImageUrl;
+  }
 
   // Validate and normalize using canonical template engine
   const validated = validateCanonicalTemplate(parsed);
 
   await recordMarketingAiUsage({
-    taskType: "generate_template",
+    taskType: includeImage ? "generate_template_with_image" : "generate_template",
     prompt,
-    metadata: { category, aspectRatio, elementCount: validated.elements.length },
+    metadata: {
+      category,
+      aspectRatio,
+      visualStyle: resolvedStyleKey,
+      includeImage,
+      hasBackgroundImage: Boolean(generatedBgImageUrl),
+      elementCount: validated.elements.length,
+    },
     user,
   });
 
@@ -357,7 +621,6 @@ export async function generateMarketingBackgroundImage({
       if (status === 400 || status === 401 || status === 403) {
         throw new Error(`Google AI Authentication failed: ${msg}`);
       }
-      // Try next model if 404 or unsupported
       continue;
     }
   }
@@ -379,7 +642,6 @@ export async function generateMarketingBackgroundImage({
     publicUrl = uploadRes.secure_url || uploadRes.url;
   } catch (cErr) {
     console.warn("[marketingAiService] Cloudinary upload failed, using local storage fallback:", cErr.message);
-    // Local fallback
     const filename = `ai_bg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.png`;
     const localDir = path.join(process.cwd(), "uploads", "marketing_assets");
     fs.mkdirSync(localDir, { recursive: true });
