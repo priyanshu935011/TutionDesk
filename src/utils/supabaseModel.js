@@ -2009,17 +2009,20 @@ class SupabaseQuery {
       query = this.model.applyFilters(query, currentFilter);
 
       if (this.sortFields) {
+        const missingCols = KNOWN_MISSING_COLUMNS.get(tableName);
         if (typeof this.sortFields === "string") {
           const parts = this.sortFields.split(" ");
           for (const part of parts) {
             const descending = part.startsWith("-");
             const field = descending ? part.substring(1) : part;
             const dbSortField = camelToSnake(field);
+            if (missingCols && (missingCols.has(dbSortField) || missingCols.has(field))) continue;
             query = query.order(dbSortField, { ascending: !descending });
           }
         } else if (typeof this.sortFields === "object") {
           for (const [key, val] of Object.entries(this.sortFields)) {
             const dbSortField = camelToSnake(key);
+            if (missingCols && (missingCols.has(dbSortField) || missingCols.has(key))) continue;
             query = query.order(dbSortField, { ascending: val !== -1 });
           }
         }
@@ -2056,6 +2059,25 @@ class SupabaseQuery {
               badCol = badCol.split(".")[1];
             }
             recordMissingColumn(tableName, badCol);
+            let removedFromSort = false;
+            if (this.sortFields) {
+              if (typeof this.sortFields === "object") {
+                for (const key of Object.keys(this.sortFields)) {
+                  if (camelToSnake(key) === badCol || key === badCol) {
+                    delete this.sortFields[key];
+                    removedFromSort = true;
+                  }
+                }
+              } else if (typeof this.sortFields === "string") {
+                const parts = this.sortFields.split(" ").filter(p => {
+                  const f = p.startsWith("-") ? p.substring(1) : p;
+                  return camelToSnake(f) !== badCol && f !== badCol;
+                });
+                this.sortFields = parts.join(" ");
+                removedFromSort = true;
+              }
+            }
+
             let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
               delete currentFilter[filterKey];
@@ -2073,6 +2095,10 @@ class SupabaseQuery {
                 delete currentFilter.$or;
                 return null;
               }
+              attempt++;
+              continue;
+            }
+            if (removedFromSort) {
               attempt++;
               continue;
             }
@@ -2160,6 +2186,25 @@ class SupabaseQuery {
               badCol = badCol.split(".")[1];
             }
             recordMissingColumn(tableName, badCol);
+            let removedFromSort = false;
+            if (this.sortFields) {
+              if (typeof this.sortFields === "object") {
+                for (const key of Object.keys(this.sortFields)) {
+                  if (camelToSnake(key) === badCol || key === badCol) {
+                    delete this.sortFields[key];
+                    removedFromSort = true;
+                  }
+                }
+              } else if (typeof this.sortFields === "string") {
+                const parts = this.sortFields.split(" ").filter(p => {
+                  const f = p.startsWith("-") ? p.substring(1) : p;
+                  return camelToSnake(f) !== badCol && f !== badCol;
+                });
+                this.sortFields = parts.join(" ");
+                removedFromSort = true;
+              }
+            }
+
             let filterKey = Object.keys(currentFilter).find(k => camelToSnake(k) === badCol);
             if (filterKey) {
               delete currentFilter[filterKey];
@@ -2177,6 +2222,10 @@ class SupabaseQuery {
                 delete currentFilter.$or;
                 return [];
               }
+              attempt++;
+              continue;
+            }
+            if (removedFromSort) {
               attempt++;
               continue;
             }

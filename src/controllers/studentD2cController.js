@@ -747,7 +747,10 @@ export const viewParentSnapshot = async (req, res) => {
 export const getStorePackages = async (req, res) => {
   try {
     await ensureDefaultPackages();
-    const packages = await StudentPackage.find({ isActive: true }).sort({ priority: 1 });
+    let packages = await StudentPackage.find({ isActive: true });
+    if (Array.isArray(packages)) {
+      packages.sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0) || (Number(a.price) || 0) - (Number(b.price) || 0));
+    }
     return res.json({ success: true, packages });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -876,7 +879,10 @@ export const transitionArchivedStudent = async (req, res) => {
 export const getAdminStudentPackages = async (req, res) => {
   try {
     await ensureDefaultPackages();
-    const packages = await StudentPackage.find().sort({ priority: 1 });
+    let packages = await StudentPackage.find();
+    if (Array.isArray(packages)) {
+      packages.sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0) || (Number(a.price) || 0) - (Number(b.price) || 0));
+    }
     return res.json({ success: true, packages });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
