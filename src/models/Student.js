@@ -179,6 +179,16 @@ const studentSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    dashboardType: {
+      type: String,
+      enum: ["new", "old"],
+      default: "new",
+    },
+    dashboard_type: {
+      type: String,
+      enum: ["new", "old"],
+      default: "new",
+    },
   },
   {
     timestamps: true,

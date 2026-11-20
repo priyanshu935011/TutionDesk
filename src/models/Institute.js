@@ -86,6 +86,16 @@ const instituteSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    studentDashboardType: {
+      type: String,
+      enum: ["new", "old"],
+      default: "new",
+    },
+    student_dashboard_type: {
+      type: String,
+      enum: ["new", "old"],
+      default: "new",
+    },
     subscriptionPaymentStatus: {
       type: String,
       enum: ["unpaid", "pending", "paid"],

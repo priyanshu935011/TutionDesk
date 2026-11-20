@@ -6,6 +6,8 @@ import mongoose, {
   updateInstituteAiSettingsMetadata,
   readInstitutesMetadata,
   writeInstitutesMetadata,
+  readStudentMetadata,
+  writeStudentMetadata,
 } from "../utils/supabaseModel.js";
 import { calculatePendingAmount } from "../utils/feeHelper.js";
 import Institute from "../models/Institute.js";
@@ -151,6 +153,8 @@ const hydrateInstitute = async (institute, adminEmails = []) => {
   instObj.payoutApprovalStatus = institute.payoutApprovalStatus || "pending";
   instObj.payoutApprovedAt = institute.payoutApprovedAt || null;
   instObj.payoutApprovedBy = institute.payoutApprovedBy || null;
+  instObj.studentDashboardType = institute.studentDashboardType || institute.student_dashboard_type || "new";
+  instObj.student_dashboard_type = instObj.studentDashboardType;
 
   return {
     ...instObj,
@@ -602,6 +606,8 @@ export const createInstitute = async (req, res) => {
       releaseVideosFeatureEnabled: releaseVideosFeatureEnabled !== false,
       maxVideoStorageGb: maxVideoStorageGb !== undefined ? Number(maxVideoStorageGb) : 50,
       maxLeadFileSizeMb: Number(maxLeadFileSizeMb || 10),
+      studentDashboardType: req.body.studentDashboardType || req.body.student_dashboard_type || req.body.dashboard_type || "new",
+      student_dashboard_type: req.body.studentDashboardType || req.body.student_dashboard_type || req.body.dashboard_type || "new",
       brandingEnabled: brandingEnabled !== false,
       logoUrl: logoUrl || null,
       themeColor: themeColor || "#6366f1",
@@ -889,6 +895,72 @@ export const updateInstitute = async (req, res) => {
     if (aiQuizRate !== undefined && !isNaN(Number(aiQuizRate))) institute.aiQuizRate = Number(aiQuizRate);
     if (aiDoubtRate !== undefined && !isNaN(Number(aiDoubtRate))) institute.aiDoubtRate = Number(aiDoubtRate);
 
+    const incomingDashType = req.body.studentDashboardType || req.body.student_dashboard_type || req.body.dashboard_type;
+    if (incomingDashType !== undefined && (incomingDashType === "new" || incomingDashType === "old")) {
+      institute.studentDashboardType = incomingDashType;
+      institute.student_dashboard_type = incomingDashType;
+
+      // Update institute metadata fallback
+      try {
+        const instMeta = readInstitutesMetadata();
+        const instKey = String(institute._id || institute.id);
+        if (instKey) {
+          instMeta[instKey] = {
+            ...(instMeta[instKey] || {}),
+            studentDashboardType: incomingDashType,
+            student_dashboard_type: incomingDashType,
+          };
+          writeInstitutesMetadata(instMeta);
+        }
+      } catch (_) {}
+
+      // Cascade update all students enrolled in this institute
+      const ownerId = institute.adminUser || institute.user;
+      const instId = institute._id || institute.id;
+      const studentFilter = {
+        $or: [
+          ...(ownerId ? [{ user: ownerId }] : []),
+          ...(instId ? [{ user: instId }, { institute: instId }] : [])
+        ]
+      };
+      try {
+        const studentsToUpdate = await Student.find(studentFilter);
+        if (studentsToUpdate && studentsToUpdate.length > 0) {
+          const studentMeta = readStudentMetadata();
+          for (const st of studentsToUpdate) {
+            st.dashboardType = incomingDashType;
+            st.dashboard_type = incomingDashType;
+            const stId = String(st._id || st.id);
+            if (stId) {
+              studentMeta[stId] = {
+                ...(studentMeta[stId] || {}),
+                dashboardType: incomingDashType,
+                dashboard_type: incomingDashType,
+              };
+            }
+            await st.save().catch(() => {});
+          }
+          writeStudentMetadata(studentMeta);
+        }
+      } catch (stErr) {
+        console.error("[updateInstitute] Cascade student dashboard_type update error:", stErr);
+      }
+
+      // Also sync to Supabase tables if columns exist
+      try {
+        const sbRow = await getSupabaseInstituteRow(String(req.params.id));
+        if (sbRow && sbRow.id) {
+          await supabase.from("institutes").update({ student_dashboard_type: incomingDashType }).eq("id", sbRow.id).catch(() => {});
+          await supabase.from("students").update({ dashboard_type: incomingDashType }).eq("institute_id", sbRow.id).catch(() => {});
+        }
+        if (ownerId) {
+          await supabase.from("students").update({ dashboard_type: incomingDashType }).eq("user_id", ownerId).catch(() => {});
+        }
+      } catch (sbErr) {
+        console.warn("[updateInstitute] Supabase dashboard_type sync:", sbErr.message);
+      }
+    }
+
     institute.subscriptionEnd = resolveSubscriptionEnd({
       subscriptionPlan: institute.subscriptionPlan,
       subscriptionStart: institute.subscriptionStart,
@@ -910,6 +982,7 @@ export const updateInstitute = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("student:sync:*");
 
     return res.json(await hydrateInstitute(institute));
   } catch (error) {
@@ -1003,6 +1076,7 @@ export const deleteInstitute = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("student:sync:*");
 
     return res.json({
       message: "Tution deleted successfully",
@@ -1166,6 +1240,7 @@ export const updateAdminTeacher = async (req, res) => {
     await teacher.save();
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("student:sync:*");
     return res.json({ message: "Teacher updated successfully", teacher: { _id: teacher._id, name: teacher.name, email: teacher.email } });
   } catch (error) {
     return res.status(500).json({ message: "Could not update teacher" });
@@ -1183,6 +1258,7 @@ export const deleteAdminTeacher = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("student:sync:*");
 
     return res.json({ message: "Teacher deleted successfully" });
   } catch (error) {
@@ -1230,6 +1306,7 @@ export const updateAdminStudent = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("student:sync:*");
 
     return res.json({ message: "Student updated successfully", student });
   } catch (error) {
@@ -1253,6 +1330,7 @@ export const deleteAdminStudent = async (req, res) => {
 
     await clearCachePattern("teacher:dashboard:*");
     await clearCachePattern("student:dashboard:*");
+    await clearCachePattern("student:sync:*");
 
     return res.json({ message: "Student deleted successfully" });
   } catch (error) {

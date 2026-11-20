@@ -2125,10 +2125,13 @@ export const getStudentSyncData = async (req, res) => {
       }
       if (!institute) {
         // Direct / Independent D2C Student or Archived student without active institute
+        const d2cDashType = student.dashboard_type || student.dashboardType || "new";
         const d2cClass = {
           studentId: String(student._id || student.id),
           id: String(student._id || student.id),
           _id: String(student._id || student.id),
+          dashboard_type: d2cDashType,
+          dashboardType: d2cDashType,
           instituteName: "ClassTech",
           institute_name: "ClassTech",
           themeColor: "#4F46E5",
@@ -2155,6 +2158,8 @@ export const getStudentSyncData = async (req, res) => {
             gender: student.gender || student.customFields?.gender || "",
             dob: student.dob || student.customFields?.dob || "",
             student_type: student.student_type || "independent_direct",
+            dashboard_type: d2cDashType,
+            dashboardType: d2cDashType,
             paidAmount: 0,
             pendingAmount: 0,
             totalFees: 0,
@@ -2322,9 +2327,13 @@ export const getStudentSyncData = async (req, res) => {
         if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => sBatchIdsList.push(String(b)));
         const cleanSBatchIdsList = Array.from(new Set(sBatchIdsList.filter(Boolean)));
 
+        const sDashType = student.dashboard_type || student.dashboardType || institute.student_dashboard_type || institute.studentDashboardType || "new";
+
         siblings.push({
           studentId: student._id,
           enrollmentNumber: student.enrollmentNumber,
+          dashboard_type: sDashType,
+          dashboardType: sDashType,
           batchId: sBatchId,
           batch_id: sBatchId,
           batchIds: cleanSBatchIdsList,
@@ -2338,6 +2347,8 @@ export const getStudentSyncData = async (req, res) => {
             parentPhone: student.parentPhone || "",
             enrollmentNumber: student.enrollmentNumber,
             profilePicture: student.profilePicture || "",
+            dashboard_type: sDashType,
+            dashboardType: sDashType,
             batchId: sBatchId,
             batch_id: sBatchId,
             batchIds: cleanSBatchIdsList,
@@ -2452,8 +2463,12 @@ export const getStudentSyncData = async (req, res) => {
       console.error("Error fetching sibling profiles in getStudentSyncData:", siblingErr);
     }
 
+    const defaultDashType = (siblings && siblings[0] && (siblings[0].dashboard_type || siblings[0].dashboardType)) || "new";
+
     const responsePayload = {
       isSyncSummary: true,
+      dashboard_type: defaultDashType,
+      dashboardType: defaultDashType,
       siblings: siblings,
       classes: siblings,
       siblingProfiles: siblingProfiles,
@@ -3234,10 +3249,13 @@ export const getStudentPortalData = async (req, res) => {
       }
       if (!institute) {
         // Direct / Independent D2C Student or Archived student without active institute
+        const d2cDashType = student.dashboard_type || student.dashboardType || "new";
         const d2cClass = {
           studentId: String(student._id || student.id),
           id: String(student._id || student.id),
           _id: String(student._id || student.id),
+          dashboard_type: d2cDashType,
+          dashboardType: d2cDashType,
           instituteName: "ClassTech",
           institute_name: "ClassTech",
           themeColor: "#4F46E5",
@@ -3264,6 +3282,8 @@ export const getStudentPortalData = async (req, res) => {
             gender: student.gender || student.customFields?.gender || "",
             dob: student.dob || student.customFields?.dob || "",
             student_type: student.student_type || "independent_direct",
+            dashboard_type: d2cDashType,
+            dashboardType: d2cDashType,
             paidAmount: 0,
             pendingAmount: 0,
             totalFees: 0,

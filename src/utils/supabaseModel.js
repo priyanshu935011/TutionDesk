@@ -169,7 +169,7 @@ export function writeBatchesMetadata(metadata) {
   } catch (e) {}
 }
 
-function readStudentMetadata() {
+export function readStudentMetadata() {
   try {
     if (!fs.existsSync(FALLBACK_DIR)) {
       fs.mkdirSync(FALLBACK_DIR, { recursive: true });
@@ -183,7 +183,7 @@ function readStudentMetadata() {
   }
 }
 
-function writeStudentMetadata(metadata) {
+export function writeStudentMetadata(metadata) {
   try {
     const content = JSON.stringify(metadata, null, 2);
     fs.writeFileSync(STUDENT_METADATA_FILE, content);
@@ -1013,11 +1013,15 @@ class SupabaseDocument {
       this.registration_source = this.registrationSource;
       this.isDirectRegistration = meta.isDirectRegistration ?? (this.registrationSource === "direct");
       this.is_direct_registration = this.isDirectRegistration;
+      this.studentDashboardType = data.student_dashboard_type || data.studentDashboardType || meta.studentDashboardType || meta.student_dashboard_type || "new";
+      this.student_dashboard_type = this.studentDashboardType;
     }
 
     if (tableName === "students" && this._id) {
       const metadata = readStudentMetadata();
       const meta = metadata[this._id] || {};
+      this.dashboardType = data.dashboard_type || data.dashboardType || meta.dashboardType || meta.dashboard_type || "new";
+      this.dashboard_type = this.dashboardType;
       this.customFields = meta.customFields ?? this.customFields ?? {};
       this.custom_fields = this.customFields;
       // Restore batches from metadata (since batch_ids column may not exist in Supabase)
@@ -1553,6 +1557,7 @@ class SupabaseDocument {
           absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
           registrationSource: this.registrationSource ?? metadata[this._id]?.registrationSource ?? "admin",
           isDirectRegistration: this.isDirectRegistration ?? metadata[this._id]?.isDirectRegistration ?? false,
+          studentDashboardType: this.studentDashboardType ?? metadata[this._id]?.studentDashboardType ?? "new",
         };
         writeInstitutesMetadata(metadata);
       }
@@ -1572,6 +1577,7 @@ class SupabaseDocument {
           archivedIndividually: this.archivedIndividually ?? metadata[this._id]?.archivedIndividually ?? false,
           archivedByBatch: this.archivedByBatch !== undefined ? this.archivedByBatch : (metadata[this._id]?.archivedByBatch ?? null),
           isArchived: this.isArchived !== undefined ? Boolean(this.isArchived) : (metadata[this._id]?.isArchived ?? false),
+          dashboardType: this.dashboardType ?? metadata[this._id]?.dashboardType ?? "new",
         };
         writeStudentMetadata(metadata);
       }
@@ -1722,14 +1728,17 @@ class SupabaseDocument {
           absentContactPhone: this.absentContactPhone ?? metadata[this._id]?.absentContactPhone ?? "",
           registrationSource: this.registrationSource ?? metadata[this._id]?.registrationSource ?? "admin",
           isDirectRegistration: this.isDirectRegistration ?? metadata[this._id]?.isDirectRegistration ?? false,
+          studentDashboardType: this.studentDashboardType ?? metadata[this._id]?.studentDashboardType ?? "new",
         };
         writeInstitutesMetadata(metadata);
       }
       if (this._tableName === "students" && this._id) {
         const metadata = readStudentMetadata();
         metadata[this._id] = {
+          ...(metadata[this._id] || {}),
           customFields: this.customFields ?? {},
-          batches: this.batches ?? []
+          batches: this.batches ?? [],
+          dashboardType: this.dashboardType ?? metadata[this._id]?.dashboardType ?? "new",
         };
         writeStudentMetadata(metadata);
       }
@@ -3459,6 +3468,7 @@ class SupabaseModel {
         payoutApprovedBy: doc.payoutApprovedBy || null,
         registrationSource: doc.registrationSource || (doc.createdByName === "direct_registration" ? "direct" : "admin"),
         isDirectRegistration: doc.isDirectRegistration ?? (doc.registrationSource === "direct" || doc.createdByName === "direct_registration"),
+        studentDashboardType: doc.studentDashboardType || doc.student_dashboard_type || "new",
       };
       writeInstitutesMetadata(metadata);
     }
@@ -3473,7 +3483,8 @@ class SupabaseModel {
         pendingAmount: doc.pendingAmount ?? 0,
         feePlanType: doc.feePlanType ?? "monthly",
         dueDate: doc.dueDate ?? "",
-        paymentHistory: doc.paymentHistory ?? []
+        paymentHistory: doc.paymentHistory ?? [],
+        dashboardType: doc.dashboardType || doc.dashboard_type || "new",
       };
       writeStudentMetadata(metadata);
     }
