@@ -767,6 +767,14 @@ function stripStudentNonColumnFields(payload) {
   if (payload.parent_phone === undefined || payload.parent_phone === null) {
     payload.parent_phone = payload.parentPhone || "";
   }
+  if (payload.due_date === "" || payload.dueDate === "") {
+    payload.due_date = null;
+    payload.dueDate = null;
+  }
+  if (payload.joined_on === "" || payload.joinedOn === "") {
+    payload.joined_on = null;
+    payload.joinedOn = null;
+  }
   return payload;
 }
 

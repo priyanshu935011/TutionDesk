@@ -1268,8 +1268,17 @@ export const deleteAdminTeacher = async (req, res) => {
 
 export const updateAdminStudent = async (req, res) => {
   try {
-    const { name, email, phone, parentName, parentPhone, address, pendingAmount, totalFees, paidAmount, dueDate, feePlanType } = req.body;
-    const student = await Student.findById(req.params.id);
+    const { name, email, phone, parentName, parentPhone, address, pendingAmount, totalFees, paidAmount, dueDate, feePlanType, dashboardType, dashboard_type } = req.body;
+    let student = null;
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      student = await Student.findById(req.params.id);
+    }
+    if (!student) {
+      student = await Student.findOne({ _id: req.params.id });
+    }
+    if (!student) {
+      student = await Student.findById(req.params.id);
+    }
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
@@ -1280,28 +1289,42 @@ export const updateAdminStudent = async (req, res) => {
     if (parentName !== undefined) student.parentName = parentName;
     if (parentPhone !== undefined) student.parentPhone = parentPhone;
     if (address !== undefined) student.address = address;
-    if (pendingAmount !== undefined) student.pendingAmount = Number(pendingAmount);
-    if (totalFees !== undefined) student.totalFees = Number(totalFees);
-    if (paidAmount !== undefined) student.paidAmount = Number(paidAmount);
-    if (dueDate !== undefined) student.dueDate = dueDate;
+    if (pendingAmount !== undefined) student.pendingAmount = Number(pendingAmount) || 0;
+    if (totalFees !== undefined) student.totalFees = Number(totalFees) || 0;
+    if (paidAmount !== undefined) student.paidAmount = Number(paidAmount) || 0;
+    if (dueDate !== undefined) {
+      student.dueDate = (dueDate && String(dueDate).trim()) ? new Date(dueDate) : null;
+      student.due_date = (dueDate && String(dueDate).trim()) ? new Date(dueDate) : null;
+    }
     if (feePlanType !== undefined) student.feePlanType = feePlanType;
+
+    const chosenDashType = (dashboard_type || dashboardType);
+    if (chosenDashType && ["new", "old"].includes(chosenDashType)) {
+      student.dashboardType = chosenDashType;
+      student.dashboard_type = chosenDashType;
+    }
 
     await student.save();
 
     if (student.enrollmentNumber) {
+      const siblingUpdate = {
+        name: student.name,
+        email: student.email,
+        phone: student.phone,
+        parentName: student.parentName,
+        parentPhone: student.parentPhone,
+        address: student.address,
+      };
+      if (chosenDashType && ["new", "old"].includes(chosenDashType)) {
+        siblingUpdate.dashboardType = chosenDashType;
+        siblingUpdate.dashboard_type = chosenDashType;
+      }
       await Student.updateMany(
         { enrollmentNumber: student.enrollmentNumber, _id: { $ne: student._id } },
         {
-          $set: {
-            name: student.name,
-            email: student.email,
-            phone: student.phone,
-            parentName: student.parentName,
-            parentPhone: student.parentPhone,
-            address: student.address,
-          }
+          $set: siblingUpdate
         }
-      );
+      ).catch((err) => console.warn("[updateAdminStudent] sibling update warning:", err.message));
     }
 
     await clearCachePattern("teacher:dashboard:*");
@@ -1310,7 +1333,8 @@ export const updateAdminStudent = async (req, res) => {
 
     return res.json({ message: "Student updated successfully", student });
   } catch (error) {
-    return res.status(500).json({ message: "Could not update student" });
+    console.error("updateAdminStudent error:", error);
+    return res.status(500).json({ message: "Could not update student: " + (error.message || error) });
   }
 };
 
@@ -3639,6 +3663,8 @@ export const switchSuperAdminStudent = async (req, res) => {
       superAdminEmail,
     }, "30d");
 
+    const studentDashType = student.dashboardType || student.dashboard_type || (institute && institute.student_dashboard_type) || "new";
+
     return res.json({
       success: true,
       token,
@@ -3650,9 +3676,12 @@ export const switchSuperAdminStudent = async (req, res) => {
         phone: student.phone,
         enrollmentNumber: student.enrollmentNumber,
         batch: student.batch,
+        dashboardType: studentDashType,
+        dashboard_type: studentDashType,
         institute: institute ? {
           id: institute._id,
           name: institute.name,
+          student_dashboard_type: institute.student_dashboard_type || "new",
           brandingEnabled: institute.brandingEnabled !== false,
           logoUrl: (institute.brandingEnabled !== false) ? (institute.logoUrl || null) : null,
           themeColor: (institute.brandingEnabled !== false) ? (institute.themeColor || "#4C3FBE") : "#4C3FBE",
@@ -3666,6 +3695,8 @@ export const switchSuperAdminStudent = async (req, res) => {
         role: "student",
         isSuperAdmin: true,
         superAdminEmail,
+        dashboardType: studentDashType,
+        dashboard_type: studentDashType,
       },
     });
   } catch (error) {
