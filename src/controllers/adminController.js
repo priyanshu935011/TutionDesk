@@ -1284,7 +1284,7 @@ export const updateAdminStudent = async (req, res) => {
     }
 
     if (name !== undefined) student.name = name;
-    if (email !== undefined) student.email = email.toLowerCase();
+    if (email !== undefined) student.email = email ? email.toLowerCase().trim() : "";
     if (phone !== undefined) student.phone = phone;
     if (parentName !== undefined) student.parentName = parentName;
     if (parentPhone !== undefined) student.parentPhone = parentPhone;
