@@ -36,6 +36,11 @@ const productSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    topic: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     thumbnail: {
       type: String,
       default: "",
@@ -47,6 +52,10 @@ const productSchema = new mongoose.Schema(
     isDigital: {
       type: Boolean,
       default: true,
+    },
+    isFree: {
+      type: Boolean,
+      default: false,
     },
     status: {
       type: String,

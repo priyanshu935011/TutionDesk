@@ -19,6 +19,14 @@ const getBaseUrl = (environment) => {
     : "https://sandbox.cashfree.com/pg";
 };
 
+export const optimizeCloudinaryUrl = (url) => {
+  if (!url || typeof url !== "string") return url;
+  if (!url.includes("res.cloudinary.com") || url.includes("/upload/w_") || url.includes("/upload/c_") || url.includes("/upload/f_")) {
+    return url;
+  }
+  return url.replace("/upload/", "/upload/w_500,c_scale,f_auto,q_auto/");
+};
+
 // -------------------------------------------------------------
 // SUPER ADMIN: PRODUCTS MANAGEMENT
 // -------------------------------------------------------------
@@ -74,6 +82,10 @@ export const getAdminProducts = async (req, res) => {
       const pObj = typeof p.toObject === "function" ? p.toObject() : { ...p };
       pObj.testSeriesIds = extractCleanIds(pObj.testSeriesIds || pObj.test_series_ids);
       pObj.bundleItems = extractCleanIds(pObj.bundleItems || pObj.bundle_items);
+      pObj.thumbnail = optimizeCloudinaryUrl(pObj.thumbnail);
+      if (Array.isArray(pObj.images)) {
+        pObj.images = pObj.images.map(optimizeCloudinaryUrl);
+      }
       return pObj;
     });
     res.json({ products: formatted });
@@ -122,9 +134,11 @@ export const createAdminProduct = async (req, res) => {
       productType,
       category,
       subject,
+      topic,
       thumbnail,
       images,
       isDigital,
+      isFree,
       status,
       featured,
       testSeriesIds,
@@ -180,6 +194,7 @@ export const createAdminProduct = async (req, res) => {
     const resolvedProductType = productType || "test_series";
     const resolvedIsDigital =
       isDigital !== undefined ? (isDigital === true || isDigital === "true") : resolvedProductType !== "offline";
+    const resolvedIsFree = isFree === true || isFree === "true" || Number(price) === 0;
 
     const parsedTestSeriesIds = extractCleanIds(testSeriesIds);
     const parsedBundleItems = extractCleanIds(bundleItems);
@@ -196,14 +211,16 @@ export const createAdminProduct = async (req, res) => {
     const product = await Product.create({
       title: title.trim(),
       description: description || "",
-      price: Number(price),
+      price: resolvedIsFree ? 0 : Number(price),
       mrp: Number(mrp || price),
       productType: resolvedProductType,
       category: category || "General",
       subject: (subject || "").trim(),
+      topic: (topic || "").trim(),
       thumbnail: resolvedThumbnail || "",
       images: Array.isArray(images) ? images : [],
       isDigital: resolvedIsDigital,
+      isFree: resolvedIsFree,
       status: status || "active",
       featured: featured === true || featured === "true",
       testSeriesIds: parsedTestSeriesIds,
@@ -277,6 +294,13 @@ export const updateAdminProduct = async (req, res) => {
     }
     if (updateData.featured !== undefined) {
       updateData.featured = updateData.featured === true || updateData.featured === "true";
+    }
+    if (updateData.isFree !== undefined) {
+      updateData.isFree = updateData.isFree === true || updateData.isFree === "true" || Number(updateData.price) === 0;
+      if (updateData.isFree) updateData.price = 0;
+    }
+    if (updateData.topic !== undefined) {
+      updateData.topic = (updateData.topic || "").trim();
     }
 
     if (updateData.price !== undefined) updateData.price = Number(updateData.price);
@@ -766,6 +790,10 @@ export const getStoreProducts = async (req, res) => {
       const pObj = typeof p.toObject === "function" ? p.toObject() : { ...p };
       const pidStr = String(pObj._id || pObj.id || "");
       pObj.isPurchased = purchasedSet.has(pidStr);
+      pObj.thumbnail = optimizeCloudinaryUrl(pObj.thumbnail);
+      if (Array.isArray(pObj.images)) {
+        pObj.images = pObj.images.map(optimizeCloudinaryUrl);
+      }
       return pObj;
     });
 
@@ -800,6 +828,10 @@ export const getStoreProductById = async (req, res) => {
     const pObj = typeof product.toObject === "function" ? product.toObject() : { ...product };
     const pidStr = String(pObj._id || pObj.id || "");
     pObj.isPurchased = purchasedSet.has(pidStr);
+    pObj.thumbnail = optimizeCloudinaryUrl(pObj.thumbnail);
+    if (Array.isArray(pObj.images)) {
+      pObj.images = pObj.images.map(optimizeCloudinaryUrl);
+    }
 
     res.json({
       product: pObj,

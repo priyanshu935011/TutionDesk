@@ -444,7 +444,7 @@ export const getStudentPersonalInfoById = async (req, res) => {
       : req.user._id;
 
     const student = await Student.findOne({ _id: studentId, user: ownerId })
-      .select("_id phone email parentName parentPhone address joinedOn customFields profilePicture name enrollmentNumber batch batches");
+      .select("_id phone email parentName parentPhone address joinedOn customFields profilePicture avatar name enrollmentNumber batch batches");
 
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
@@ -462,6 +462,7 @@ export const getStudentPersonalInfoById = async (req, res) => {
       joinedOn: student.joinedOn,
       customFields: student.customFields || {},
       profilePicture: student.profilePicture || "",
+      avatar: student.avatar || student.customFields?.avatar || "",
     };
 
     await setCache(cacheKey, payload, 3600);
@@ -2155,6 +2156,8 @@ export const getStudentSyncData = async (req, res) => {
             phone: student.phone || "",
             email: student.email || "",
             targetExam: student.targetExam || student.customFields?.targetExam || "Boards / JEE / NEET",
+            goal: student.goal || student.target_goal || student.customFields?.goal || student.targetExam || "NEET",
+            target_goal: student.target_goal || student.goal || student.customFields?.goal || "NEET",
             gender: student.gender || student.customFields?.gender || "",
             dob: student.dob || student.customFields?.dob || "",
             student_type: student.student_type || "independent_direct",
@@ -2347,6 +2350,7 @@ export const getStudentSyncData = async (req, res) => {
             parentPhone: student.parentPhone || "",
             enrollmentNumber: student.enrollmentNumber,
             profilePicture: student.profilePicture || "",
+            avatar: student.avatar || student.customFields?.avatar || "",
             dashboard_type: sDashType,
             dashboardType: sDashType,
             batchId: sBatchId,
@@ -2356,6 +2360,8 @@ export const getStudentSyncData = async (req, res) => {
             address: student.address || "",
             currentClass: student.currentClass || student.class || "",
             targetExam: student.targetExam || "",
+            goal: student.goal || student.target_goal || student.customFields?.goal || student.targetExam || "NEET",
+            target_goal: student.target_goal || student.goal || student.customFields?.goal || "NEET",
             totalFees: totalFees,
             paidFees: paidFees,
             pendingFees: pendingFees,
@@ -3279,6 +3285,8 @@ export const getStudentPortalData = async (req, res) => {
             phone: student.phone || "",
             email: student.email || "",
             targetExam: student.targetExam || student.customFields?.targetExam || "Boards / JEE / NEET",
+            goal: student.goal || student.target_goal || student.customFields?.goal || student.targetExam || "NEET",
+            target_goal: student.target_goal || student.goal || student.customFields?.goal || "NEET",
             gender: student.gender || student.customFields?.gender || "",
             dob: student.dob || student.customFields?.dob || "",
             student_type: student.student_type || "independent_direct",
@@ -3540,6 +3548,7 @@ export const getStudentPortalData = async (req, res) => {
             parentPhone: student.parentPhone,
             address: student.address,
             profilePicture: student.profilePicture || "",
+            avatar: student.avatar || student.customFields?.avatar || "",
             customFields: student.customFields || {},
             enrollmentNumber: student.enrollmentNumber,
             batch: batch || student.batch,

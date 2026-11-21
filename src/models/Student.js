@@ -171,6 +171,11 @@ const studentSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    avatar: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     fcmToken: {
       type: String,
       default: null,
@@ -188,6 +193,16 @@ const studentSchema = new mongoose.Schema(
       type: String,
       enum: ["new", "old"],
       default: "new",
+    },
+    goal: {
+      type: String,
+      default: "NEET",
+      trim: true,
+    },
+    target_goal: {
+      type: String,
+      default: "NEET",
+      trim: true,
     },
   },
   {

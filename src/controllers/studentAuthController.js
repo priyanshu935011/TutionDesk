@@ -554,10 +554,13 @@ export const updateStudentProfile = async (req, res) => {
       parentPhone,
       address,
       profilePicture,
+      avatar,
       customFields,
       targetExam,
       gender,
       dob,
+      goal,
+      targetGoal,
     } = req.body;
 
     if (name !== undefined && String(name).trim() !== "") {
@@ -568,6 +571,20 @@ export const updateStudentProfile = async (req, res) => {
           { name: student.name }
         );
       } catch (_) {}
+    }
+
+    const effectiveGoal = goal || targetGoal;
+    if (effectiveGoal !== undefined && String(effectiveGoal).trim() !== "") {
+      const cleanGoal = String(effectiveGoal).trim();
+      student.goal = cleanGoal;
+      student.target_goal = cleanGoal;
+      student.targetExam = cleanGoal;
+      student.customFields = {
+        ...(student.customFields || {}),
+        goal: cleanGoal,
+        targetGoal: cleanGoal,
+        targetExam: cleanGoal,
+      };
     }
 
     if (targetExam !== undefined && String(targetExam).trim() !== "") {
@@ -590,6 +607,14 @@ export const updateStudentProfile = async (req, res) => {
     if (parentPhone !== undefined) student.parentPhone = parentPhone.trim();
     if (address !== undefined) student.address = address.trim();
     if (profilePicture !== undefined) student.profilePicture = profilePicture;
+    if (avatar !== undefined && String(avatar).trim() !== "") {
+      const cleanAvatar = String(avatar).trim();
+      student.avatar = cleanAvatar;
+      student.customFields = {
+        ...(student.customFields || {}),
+        avatar: cleanAvatar,
+      };
+    }
     if (customFields !== undefined && typeof customFields === "object") {
       student.customFields = { ...(student.customFields || {}), ...customFields };
     }
@@ -611,9 +636,12 @@ export const updateStudentProfile = async (req, res) => {
         parentPhone: student.parentPhone,
         address: student.address,
         profilePicture: student.profilePicture,
+        avatar: student.avatar || student.customFields?.avatar || "",
         targetExam: student.targetExam || student.customFields?.targetExam,
         gender: student.gender || student.customFields?.gender,
         dob: student.dob || student.customFields?.dob,
+        goal: student.goal || student.customFields?.goal || student.targetExam || 'NEET',
+        target_goal: student.target_goal || student.goal || student.customFields?.goal || 'NEET',
         customFields: student.customFields,
       },
     });
