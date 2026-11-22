@@ -12,6 +12,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import cloudinary from "../utils/cloudinary.js";
 import { getCashfreeConfig, checkCashfreeOrderStatus } from "./paymentController.js";
 import { callGeminiApi, extractJsonFromText } from "../services/aiService.js";
+import { clearCachePattern } from "../utils/cache.js";
 
 const getBaseUrl = (environment) => {
   return environment === "production"
@@ -1044,6 +1045,90 @@ export const storeCheckout = async (req, res) => {
 
     // Generate unique order number
     const orderNumber = `ORD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const studentPhone = String(student.phone || student.mobileNumber || "9999999999").replace(/\D/g, "").slice(-10);
+    const studentEmail = student.email || "student@classtech.in";
+    const studentName = student.name || "Student";
+
+    // Free product checkout bypass - No Cashfree payment gateway needed
+    if (totalAmount <= 0) {
+      const order = await Order.create({
+        orderNumber,
+        studentId: student._id || student.id,
+        studentName,
+        studentEmail,
+        studentPhone: studentPhone.length === 10 ? studentPhone : "9999999999",
+        instituteId: student.institute || student.user || null,
+        items: formattedItems,
+        totalAmount: 0,
+        currency: "INR",
+        paymentStatus: "paid",
+        paymentMethod: "free",
+        cfOrderId: `free_${orderNumber}`,
+        fulfillmentStatus: "fulfilled",
+        shippingAddress: shippingAddress || {},
+      });
+
+      // Grant instant digital access to student
+      for (const item of formattedItems) {
+        if (item.notesPdfUrl) {
+          try {
+            await Note.create({
+              institute: order.instituteId || null,
+              createdBy: student._id || student.id,
+              title: item.notesTitle || item.title,
+              pdfUrl: item.notesPdfUrl,
+              pdfPublicId: `store_free_${order.orderNumber}`,
+              targetType: "student",
+              students: [order.studentId],
+              category: "Store Notes",
+              type: "Chapter Notes",
+              isPurchased: true,
+            });
+          } catch (nErr) {
+            console.warn("Failed to create note record for free item:", nErr.message);
+          }
+        }
+
+        if (Array.isArray(item.bundleItems)) {
+          for (const bItem of item.bundleItems) {
+            if (bItem.type === "notes" && bItem.url) {
+              try {
+                await Note.create({
+                  institute: order.instituteId || null,
+                  createdBy: student._id || student.id,
+                  title: bItem.title || "Bundle Notes",
+                  pdfUrl: bItem.url,
+                  pdfPublicId: `store_bundle_${order.orderNumber}`,
+                  targetType: "student",
+                  students: [order.studentId],
+                  category: "Store Notes",
+                  type: "Chapter Notes",
+                  isPurchased: true,
+                });
+              } catch (_) {}
+            }
+          }
+        }
+      }
+
+      // Invalidate student caches so notes and tests update instantly
+      try {
+        await clearCachePattern(`student:test_series:*`);
+      } catch (_) {}
+
+      return res.json({
+        success: true,
+        isFree: true,
+        orderNumber,
+        orderId: order._id || order.id,
+        cfOrderId: order.cfOrderId,
+        totalAmount: 0,
+        paymentStatus: "paid",
+        message: "Free resources claimed and unlocked successfully!",
+        order,
+      });
+    }
+
     const cfOrderId = "store_" + crypto.randomUUID().replace(/-/g, "").slice(0, 24);
 
     // Create Cashfree Order
@@ -1248,6 +1333,11 @@ export const verifyStorePayment = async (req, res) => {
 
       order.fulfillmentStatus = hasOffline ? "processing" : "fulfilled";
       await order.save();
+
+      // Invalidate student caches so notes and tests update instantly
+      try {
+        await clearCachePattern(`student:test_series:*`);
+      } catch (_) {}
 
       return res.json({
         success: true,

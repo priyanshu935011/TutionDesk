@@ -1466,13 +1466,43 @@ export const getStudentTests = async (req, res) => {
     }
 
     const instId = student.user || student.institute;
-    const institute = await Institute.findById(instId);
+    const institute = instId ? await Institute.findById(instId) : null;
 
     const isFeatureEnabled =
-      institute?.testSeriesFeatureEnabled === true ||
-      (Array.isArray(institute?.allowedFeatures) && institute.allowedFeatures.includes("test_series"));
+      Boolean(
+        institute?.testSeriesFeatureEnabled === true ||
+        (Array.isArray(institute?.allowedFeatures) && institute.allowedFeatures.includes("test_series"))
+      );
 
-    if (!isFeatureEnabled) {
+    // Also include test series directly purchased by this student from the store (sorted latest first)
+    const purchasedTestIds = new Set();
+    const purchasedOrderedTestIds = [];
+    try {
+      const studentOrders = await Order.find({
+        studentId: student._id || student.id,
+        paymentStatus: "paid",
+      }).sort({ createdAt: -1 });
+
+      (studentOrders || []).forEach((ord) => {
+        (ord.items || []).forEach((item) => {
+          if (Array.isArray(item.testSeriesIds)) {
+            item.testSeriesIds.forEach((tId) => {
+              if (tId) {
+                const sId = String(tId);
+                purchasedTestIds.add(sId);
+                if (!purchasedOrderedTestIds.includes(sId)) {
+                  purchasedOrderedTestIds.push(sId);
+                }
+              }
+            });
+          }
+        });
+      });
+    } catch (orderErr) {
+      console.warn("Could not check student store orders:", orderErr.message);
+    }
+
+    if (!isFeatureEnabled && purchasedTestIds.size === 0) {
       return res.json({
         enabled: false,
         testSeries: [],
@@ -1487,42 +1517,27 @@ export const getStudentTests = async (req, res) => {
     if (Array.isArray(student.enrolledBatchIds)) student.enrolledBatchIds.forEach((b) => studentBatchIds.push(String(b)));
 
     // Find enabled assignments for this institute where assignedBatches intersects student batches
-    const accessRecords = await InstituteTestSeriesAccess.find({
-      institute: instId,
-      isEnabled: true,
-    });
-
-    const matchingTestIds = accessRecords
-      .filter((acc) => {
-        if (!acc.assignedBatches || acc.assignedBatches.length === 0) return true; // all batches if empty
-        return acc.assignedBatches.some((bId) => studentBatchIds.includes(String(bId)));
-      })
-      .map((acc) => acc.testSeries);
-
-    // Also include test series directly purchased by this student from the store
-    const purchasedTestIds = new Set();
-    try {
-      const studentOrders = await Order.find({
-        studentId: student._id || student.id,
-        paymentStatus: "paid",
+    let matchingTestIds = [];
+    if (isFeatureEnabled && instId) {
+      const accessRecords = await InstituteTestSeriesAccess.find({
+        institute: instId,
+        isEnabled: true,
       });
-      (studentOrders || []).forEach((ord) => {
-        (ord.items || []).forEach((item) => {
-          if (Array.isArray(item.testSeriesIds)) {
-            item.testSeriesIds.forEach((tId) => {
-              if (tId) {
-                purchasedTestIds.add(String(tId));
-                if (!matchingTestIds.some((existing) => String(existing) === String(tId))) {
-                  matchingTestIds.push(tId);
-                }
-              }
-            });
-          }
-        });
-      });
-    } catch (orderErr) {
-      console.warn("Could not check student store orders:", orderErr.message);
+
+      matchingTestIds = accessRecords
+        .filter((acc) => {
+          if (!acc.assignedBatches || acc.assignedBatches.length === 0) return true; // all batches if empty
+          return acc.assignedBatches.some((bId) => studentBatchIds.includes(String(bId)));
+        })
+        .map((acc) => acc.testSeries);
     }
+
+    // Put purchased test IDs at the front of matchingTestIds
+    purchasedOrderedTestIds.forEach((pId) => {
+      if (!matchingTestIds.some((existing) => String(existing) === String(pId))) {
+        matchingTestIds.unshift(pId);
+      }
+    });
 
     const tests = await TestSeries.find({
       _id: { $in: matchingTestIds },
@@ -1572,6 +1587,13 @@ export const getStudentTests = async (req, res) => {
             }
           : null,
       };
+    });
+
+    // Sort: purchased test series appear at top
+    result.sort((a, b) => {
+      if (a.isPurchased && !b.isPurchased) return -1;
+      if (!a.isPurchased && b.isPurchased) return 1;
+      return 0;
     });
 
     const responsePayload = {

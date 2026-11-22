@@ -2554,7 +2554,11 @@ export const getStudentNotes = async (req, res) => {
       const cleanInstIds = Array.from(new Set(instQueryIds.filter(Boolean)));
 
       const studentNotes = await Note.find({
-        institute: { $in: cleanInstIds }
+        $or: [
+          { institute: { $in: cleanInstIds } },
+          { students: student._id || student.id },
+          { student_ids: student._id || student.id },
+        ],
       })
         .sort({ createdAt: -1 })
         .populate("batch", "name");
