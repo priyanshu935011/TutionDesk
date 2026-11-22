@@ -1143,10 +1143,6 @@ export const storeCheckout = async (req, res) => {
       "x-client-secret": secretKey,
     };
 
-    const studentPhone = String(student.phone || student.mobileNumber || "9999999999").replace(/\D/g, "").slice(-10);
-    const studentEmail = student.email || "student@classtech.in";
-    const studentName = student.name || "Student";
-
     const rawFrontendUrl = process.env.FRONTEND_URL || "https://app.classtech.in";
     const secureFrontendUrl = rawFrontendUrl.startsWith("http://")
       ? rawFrontendUrl.replace(/^http:\/\//, "https://")
