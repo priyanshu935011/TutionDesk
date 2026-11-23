@@ -16,8 +16,10 @@ import WhatsappLog from "../models/WhatsappLog.js";
 import cloudinary from "../utils/cloudinary.js";
 import {
   buildNoteDownloadFilename,
+  buildAttachmentHeader,
   streamRemoteFileAsAttachment,
   streamRemoteFileInline,
+  addClassTechWatermark,
 } from "../utils/noteDownload.js";
 import { supabase, supabaseBucket } from "../utils/supabase.js";
 import { toValidUUID, readUserMetadata, writeUserMetadata, readBatchesMetadata, writeBatchesMetadata } from "../utils/supabaseModel.js";
@@ -842,6 +844,13 @@ export const downloadNote = async (req, res) => {
       }
     }
 
+    if (!note && req.query.url) {
+      note = {
+        title: req.query.title || "Study Notes",
+        file_url: req.query.url,
+      };
+    }
+
     if (!note) {
       return res.status(404).json({ message: "Note document not found" });
     }
@@ -864,7 +873,7 @@ export const downloadNote = async (req, res) => {
         }
       }
 
-      await streamRemoteFileInline({
+      await streamRemoteFileAsAttachment({
         res,
         url: downloadUrl,
         filename: buildNoteDownloadFilename(note),
@@ -873,10 +882,13 @@ export const downloadNote = async (req, res) => {
       const matches = fileUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
         const buffer = Buffer.from(matches[2], "base64");
+        const watermarked = await addClassTechWatermark(buffer);
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+        res.setHeader("Content-Disposition", buildAttachmentHeader(buildNoteDownloadFilename(note)));
+        res.setHeader("Content-Length", watermarked.length);
         res.setHeader("Access-Control-Allow-Origin", "*");
-        return res.send(buffer);
+        res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+        return res.send(watermarked);
       }
       return res.status(400).json({ message: "Invalid data URL format" });
     } else {
@@ -895,10 +907,13 @@ export const downloadNote = async (req, res) => {
       }
 
       const arrayBuffer = await data.arrayBuffer();
+      const watermarked = await addClassTechWatermark(Buffer.from(arrayBuffer));
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", "inline; filename=\"note.pdf\"");
+      res.setHeader("Content-Disposition", buildAttachmentHeader(buildNoteDownloadFilename(note)));
+      res.setHeader("Content-Length", watermarked.length);
       res.setHeader("Access-Control-Allow-Origin", "*");
-      return res.send(Buffer.from(arrayBuffer));
+      res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+      return res.send(watermarked);
     }
   } catch (error) {
     console.error("downloadNote error:", error);
@@ -924,6 +939,13 @@ export const viewNote = async (req, res) => {
 
     if (!note) {
       note = await Note.findById(noteId).catch(() => null);
+    }
+
+    if (!note && req.query.url) {
+      note = {
+        title: req.query.title || "Study Notes",
+        file_url: req.query.url,
+      };
     }
 
     if (!note) {
@@ -983,7 +1005,9 @@ export const viewNote = async (req, res) => {
     }
 
     // Serve custom PDF.js HTML viewer: completely eliminates browser PDF headers & provides 100% native smooth scrolling
-    const rawPdfUrl = `/teacher/notes/${noteId}/view?raw=true`;
+    const rawPdfUrl = req.query.url
+      ? `/teacher/notes/${noteId}/view?raw=true&url=${encodeURIComponent(req.query.url)}&title=${encodeURIComponent(req.query.title || '')}`
+      : `/teacher/notes/${noteId}/view?raw=true`;
     const isDark = req.query.theme === "dark" || req.query.isDark === "true";
     const bgCol = isDark ? "#090D16" : "#F8FAFC";
     const htmlContent = `<!DOCTYPE html>
