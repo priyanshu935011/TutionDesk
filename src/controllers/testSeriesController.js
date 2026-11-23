@@ -10,6 +10,7 @@ import Student from "../models/Student.js";
 import Batch from "../models/Batch.js";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
+import Product from "../models/Product.js";
 import { callGeminiApi, extractJsonFromText } from "../services/aiService.js";
 import { isTeacherOfBatch } from "./teacherController.js";
 import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
@@ -1452,6 +1453,11 @@ export const getStudentTests = async (req, res) => {
     const cacheKey = `student:test_series:${studentId}`;
 
     if (isRefresh) {
+      if (studentId) {
+        try {
+          await deleteCache(cacheKey);
+        } catch (_) {}
+      }
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
@@ -1478,14 +1484,30 @@ export const getStudentTests = async (req, res) => {
     const purchasedTestIds = new Set();
     const purchasedOrderedTestIds = [];
     try {
+      const studentIdCandidates = [
+        student._id,
+        student.id,
+        student.studentId,
+        student._id ? String(student._id) : null,
+        student.id ? String(student.id) : null,
+      ].filter(Boolean);
+
+      if (Array.isArray(req.students)) {
+        req.students.forEach((s) => {
+          if (s._id) studentIdCandidates.push(s._id, String(s._id));
+          if (s.id) studentIdCandidates.push(s.id, String(s.id));
+        });
+      }
+      const uniqueStudentIds = [...new Set(studentIdCandidates)];
+
       const studentOrders = await Order.find({
-        studentId: student._id || student.id,
-        paymentStatus: "paid",
+        studentId: { $in: uniqueStudentIds },
+        paymentStatus: { $in: ["paid", "completed", "success"] },
       }).sort({ createdAt: -1 });
 
-      (studentOrders || []).forEach((ord) => {
-        (ord.items || []).forEach((item) => {
-          if (Array.isArray(item.testSeriesIds)) {
+      for (const ord of (studentOrders || [])) {
+        for (const item of (ord.items || [])) {
+          if (Array.isArray(item.testSeriesIds) && item.testSeriesIds.length > 0) {
             item.testSeriesIds.forEach((tId) => {
               if (tId) {
                 const sId = String(tId);
@@ -1495,9 +1517,24 @@ export const getStudentTests = async (req, res) => {
                 }
               }
             });
+          } else if (item.productId) {
+            try {
+              const prod = await Product.findById(item.productId);
+              if (prod && Array.isArray(prod.testSeriesIds)) {
+                prod.testSeriesIds.forEach((tId) => {
+                  if (tId) {
+                    const sId = String(tId);
+                    purchasedTestIds.add(sId);
+                    if (!purchasedOrderedTestIds.includes(sId)) {
+                      purchasedOrderedTestIds.push(sId);
+                    }
+                  }
+                });
+              }
+            } catch (_) {}
           }
-        });
-      });
+        }
+      }
     } catch (orderErr) {
       console.warn("Could not check student store orders:", orderErr.message);
     }
@@ -1541,7 +1578,7 @@ export const getStudentTests = async (req, res) => {
 
     const tests = await TestSeries.find({
       _id: { $in: matchingTestIds },
-      isPublished: true,
+      isPublished: { $ne: false },
     }).select("title description category folderPath durationMinutes totalMarks passingMarks instructions questions");
 
     // Fetch student's prior attempts

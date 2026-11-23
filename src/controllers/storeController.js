@@ -12,7 +12,7 @@ import SystemSetting from "../models/SystemSetting.js";
 import cloudinary from "../utils/cloudinary.js";
 import { getCashfreeConfig, checkCashfreeOrderStatus } from "./paymentController.js";
 import { callGeminiApi, extractJsonFromText } from "../services/aiService.js";
-import { clearCachePattern } from "../utils/cache.js";
+import { clearCachePattern, deleteCache } from "../utils/cache.js";
 
 const getBaseUrl = (environment) => {
   return environment === "production"
@@ -1113,7 +1113,13 @@ export const storeCheckout = async (req, res) => {
 
       // Invalidate student caches so notes and tests update instantly
       try {
+        const sId = String(student._id || student.id || studentId || "");
+        if (sId) {
+          await deleteCache(`student:test_series:${sId}`);
+          await deleteCache(`student:notes:${sId}`);
+        }
         await clearCachePattern(`student:test_series:*`);
+        await clearCachePattern(`student:notes:*`);
       } catch (_) {}
 
       return res.json({
@@ -1332,7 +1338,13 @@ export const verifyStorePayment = async (req, res) => {
 
       // Invalidate student caches so notes and tests update instantly
       try {
+        const sId = String(student._id || student.id || studentId || "");
+        if (sId) {
+          await deleteCache(`student:test_series:${sId}`);
+          await deleteCache(`student:notes:${sId}`);
+        }
         await clearCachePattern(`student:test_series:*`);
+        await clearCachePattern(`student:notes:*`);
       } catch (_) {}
 
       return res.json({
@@ -1355,12 +1367,30 @@ export const verifyStorePayment = async (req, res) => {
 
 export const getStudentOrders = async (req, res) => {
   try {
-    const studentId = req.student?._id || req.user?._id;
+    const studentId =
+      req.headers["x-student-id"] ||
+      req.query.studentId ||
+      req.student?._id ||
+      req.student?.id ||
+      req.user?._id ||
+      req.user?.id;
+
     if (!studentId) {
       return res.status(401).json({ message: "Unauthorized student" });
     }
 
-    const orders = await Order.find({ studentId }).sort({ createdAt: -1 });
+    const candidateIds = [studentId, String(studentId)];
+    if (req.student?._id) candidateIds.push(req.student._id, String(req.student._id));
+    if (req.student?.id) candidateIds.push(req.student.id, String(req.student.id));
+    if (Array.isArray(req.students)) {
+      req.students.forEach((s) => {
+        if (s._id) candidateIds.push(s._id, String(s._id));
+        if (s.id) candidateIds.push(s.id, String(s.id));
+      });
+    }
+    const uniqueIds = [...new Set(candidateIds.filter(Boolean))];
+
+    const orders = await Order.find({ studentId: { $in: uniqueIds } }).sort({ createdAt: -1 });
     res.json({ orders: orders || [] });
   } catch (err) {
     console.error("getStudentOrders error:", err);
