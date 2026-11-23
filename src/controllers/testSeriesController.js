@@ -1507,32 +1507,27 @@ export const getStudentTests = async (req, res) => {
 
       for (const ord of (studentOrders || [])) {
         for (const item of (ord.items || [])) {
+          let itemTestIds = [];
           if (Array.isArray(item.testSeriesIds) && item.testSeriesIds.length > 0) {
-            item.testSeriesIds.forEach((tId) => {
-              if (tId) {
-                const sId = String(tId);
-                purchasedTestIds.add(sId);
-                if (!purchasedOrderedTestIds.includes(sId)) {
-                  purchasedOrderedTestIds.push(sId);
-                }
-              }
-            });
-          } else if (item.productId) {
+            itemTestIds = item.testSeriesIds;
+          }
+          if (item.productId) {
             try {
               const prod = await Product.findById(item.productId);
-              if (prod && Array.isArray(prod.testSeriesIds)) {
-                prod.testSeriesIds.forEach((tId) => {
-                  if (tId) {
-                    const sId = String(tId);
-                    purchasedTestIds.add(sId);
-                    if (!purchasedOrderedTestIds.includes(sId)) {
-                      purchasedOrderedTestIds.push(sId);
-                    }
-                  }
-                });
+              if (prod && Array.isArray(prod.testSeriesIds) && prod.testSeriesIds.length > 0) {
+                itemTestIds = [...new Set([...itemTestIds, ...prod.testSeriesIds])];
               }
             } catch (_) {}
           }
+          itemTestIds.forEach((tId) => {
+            if (tId) {
+              const sId = String(tId);
+              purchasedTestIds.add(sId);
+              if (!purchasedOrderedTestIds.includes(sId)) {
+                purchasedOrderedTestIds.push(sId);
+              }
+            }
+          });
         }
       }
     } catch (orderErr) {

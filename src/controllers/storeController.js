@@ -1113,13 +1113,15 @@ export const storeCheckout = async (req, res) => {
 
       // Invalidate student caches so notes and tests update instantly
       try {
-        const sId = String(student._id || student.id || studentId || "");
+        const sId = String(order.studentId || studentId || "");
         if (sId) {
           await deleteCache(`student:test_series:${sId}`);
           await deleteCache(`student:notes:${sId}`);
+          await deleteCache(`student:purchased_product_ids:${sId}`);
         }
         await clearCachePattern(`student:test_series:*`);
         await clearCachePattern(`student:notes:*`);
+        await clearCachePattern(`student:purchased_product_ids:*`);
       } catch (_) {}
 
       return res.json({
@@ -1338,13 +1340,15 @@ export const verifyStorePayment = async (req, res) => {
 
       // Invalidate student caches so notes and tests update instantly
       try {
-        const sId = String(student._id || student.id || studentId || "");
+        const sId = String(order.studentId || studentId || "");
         if (sId) {
           await deleteCache(`student:test_series:${sId}`);
           await deleteCache(`student:notes:${sId}`);
+          await deleteCache(`student:purchased_product_ids:${sId}`);
         }
         await clearCachePattern(`student:test_series:*`);
         await clearCachePattern(`student:notes:*`);
+        await clearCachePattern(`student:purchased_product_ids:*`);
       } catch (_) {}
 
       return res.json({
