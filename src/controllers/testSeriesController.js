@@ -1586,14 +1586,6 @@ export const getStudentTests = async (req, res) => {
         .map((acc) => acc.testSeries);
     }
 
-    // Include any test series that the student has attempted so it never gets removed!
-    studentAttempts.forEach((att) => {
-      const tId = String(att.testSeries || att.test_series_id || att.testSeriesId || "");
-      if (tId && !matchingTestIds.some((existing) => String(existing) === tId)) {
-        matchingTestIds.push(tId);
-      }
-    });
-
     // Put purchased test IDs at the front of matchingTestIds
     purchasedOrderedTestIds.forEach((pId) => {
       if (!matchingTestIds.some((existing) => String(existing) === String(pId))) {
@@ -1675,7 +1667,7 @@ export const getStudentTests = async (req, res) => {
 
     if (studentId) {
       try {
-        await setCache(cacheKey, responsePayload, 7200);
+        await setCache(cacheKey, responsePayload, 30);
       } catch (_) {}
     }
 
