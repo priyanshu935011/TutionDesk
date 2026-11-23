@@ -1534,7 +1534,29 @@ export const getStudentTests = async (req, res) => {
       console.warn("Could not check student store orders:", orderErr.message);
     }
 
-    if (!isFeatureEnabled && purchasedTestIds.size === 0) {
+    // Fetch all student's prior attempts across all potential ID candidates
+    const studentCandidateIds = [
+      student._id,
+      student.id,
+      student.studentId,
+      student._id ? String(student._id) : null,
+      student.id ? String(student.id) : null,
+    ].filter(Boolean);
+
+    let studentAttempts = [];
+    try {
+      studentAttempts = await TestSeriesAttempt.find({
+        $or: [
+          { student: { $in: studentCandidateIds } },
+          { student_id: { $in: studentCandidateIds } },
+          { studentId: { $in: studentCandidateIds } },
+        ],
+      });
+    } catch (attErr) {
+      console.warn("Could not fetch student attempts:", attErr.message);
+    }
+
+    if (!isFeatureEnabled && purchasedTestIds.size === 0 && studentAttempts.length === 0) {
       return res.json({
         enabled: false,
         testSeries: [],
@@ -1564,6 +1586,14 @@ export const getStudentTests = async (req, res) => {
         .map((acc) => acc.testSeries);
     }
 
+    // Include any test series that the student has attempted so it never gets removed!
+    studentAttempts.forEach((att) => {
+      const tId = String(att.testSeries || att.test_series_id || att.testSeriesId || "");
+      if (tId && !matchingTestIds.some((existing) => String(existing) === tId)) {
+        matchingTestIds.push(tId);
+      }
+    });
+
     // Put purchased test IDs at the front of matchingTestIds
     purchasedOrderedTestIds.forEach((pId) => {
       if (!matchingTestIds.some((existing) => String(existing) === String(pId))) {
@@ -1574,46 +1604,54 @@ export const getStudentTests = async (req, res) => {
     const tests = await TestSeries.find({
       _id: { $in: matchingTestIds },
       isPublished: { $ne: false },
-    }).select("title description category folderPath durationMinutes totalMarks passingMarks instructions questions");
-
-    // Fetch student's prior attempts
-    const attempts = await TestSeriesAttempt.find({
-      student: student._id,
-      testSeries: { $in: matchingTestIds },
-    });
+    }).select("title description category subject topic folderPath durationMinutes totalMarks passingMarks instructions questions");
 
     const attemptMap = new Map();
-    attempts.forEach((att) => {
-      const existing = attemptMap.get(String(att.testSeries));
-      if (!existing || new Date(att.submittedAt) > new Date(existing.submittedAt)) {
-        attemptMap.set(String(att.testSeries), att);
+    studentAttempts.forEach((att) => {
+      const tId = String(att.testSeries || att.test_series_id || att.testSeriesId || "");
+      if (!tId) return;
+      const existing = attemptMap.get(tId);
+      const attDate = new Date(att.submittedAt || att.submitted_at || att.createdAt || att.created_at || 0);
+      const existingDate = existing
+        ? new Date(existing.submittedAt || existing.submitted_at || existing.createdAt || existing.created_at || 0)
+        : null;
+      if (!existing || attDate > existingDate) {
+        attemptMap.set(tId, att);
       }
     });
 
     const result = tests.map((t) => {
-      const att = attemptMap.get(String(t._id));
+      const tIdStr = String(t._id || t.id);
+      const att = attemptMap.get(tIdStr);
+      const hasAtt = Boolean(att);
+      const isPurchased = Boolean(purchasedTestIds.has(tIdStr));
       return {
-        id: t._id,
+        id: t._id || t.id,
+        _id: t._id || t.id,
         title: t.title,
         description: t.description,
         category: t.category,
+        subject: t.subject || "All Subjects",
+        topic: t.topic || "",
         folderPath: t.folderPath,
         durationMinutes: t.durationMinutes,
         totalMarks: t.totalMarks,
         passingMarks: t.passingMarks,
         questionsCount: t.questions?.length || 0,
         instructions: t.instructions,
-        isPurchased: Boolean(purchasedTestIds.has(String(t._id))),
-        hasAttempted: Boolean(att),
+        isPurchased,
+        hasAttempted: hasAtt,
+        attempted: hasAtt,
         latestAttempt: att
           ? {
               attemptId: att._id || att.id,
-              score: att.score,
-              totalMarks: att.totalMarks,
+              score: att.score !== undefined ? att.score : 0,
+              totalScore: att.score !== undefined ? att.score : 0,
+              totalMarks: att.totalMarks || att.total_marks || t.totalMarks,
               percentage: att.percentage,
-              isPassed: att.isPassed,
-              timeTakenSeconds: att.timeTakenSeconds,
-              submittedAt: att.submittedAt,
+              isPassed: att.isPassed !== undefined ? att.isPassed : att.is_passed,
+              timeTakenSeconds: att.timeTakenSeconds || att.time_taken_seconds,
+              submittedAt: att.submittedAt || att.submitted_at,
               hasAiAnalysis: Boolean(att.aiAnalysis || att.ai_analysis),
               aiAnalysis: att.aiAnalysis || att.ai_analysis || null,
             }
@@ -1621,8 +1659,10 @@ export const getStudentTests = async (req, res) => {
       };
     });
 
-    // Sort: purchased test series appear at top
+    // Sort: attempted and purchased test series appear at top
     result.sort((a, b) => {
+      if (a.hasAttempted && !b.hasAttempted) return -1;
+      if (!a.hasAttempted && b.hasAttempted) return 1;
       if (a.isPurchased && !b.isPurchased) return -1;
       if (!a.isPurchased && b.isPurchased) return 1;
       return 0;
@@ -1824,6 +1864,7 @@ export const submitStudentTest = async (req, res) => {
 
     try {
       await deleteCache(`student:test_series:${studentId}`);
+      await clearCachePattern(`student:test_series:*`);
     } catch (_) {}
 
     try {

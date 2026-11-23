@@ -1,5 +1,5 @@
--- SQL migration for creating distinct test series for Product 02 and Product 04
--- and updating products and orders so each purchased test series shows up separately.
+-- SQL migration for creating distinct test series for Product 02 and Product 04,
+-- mapping past attempts to the purchased test series, and updating products and orders.
 
 -- 1. Create Test Series 02 if not exists
 INSERT INTO test_series (
@@ -53,3 +53,8 @@ WHERE id = 'd02ac1de-f969-4c0e-bc20-e8951c7eacbe';
 UPDATE products 
 SET test_series_ids = ARRAY['a02ac1de-0004-4000-8000-000000000004']::text[]
 WHERE id = '13270d86-d211-460b-b00a-797b70c0b5a5';
+
+-- 4. Map the student's attempt to Test 02 so score, Retake, and AI analysis are active
+UPDATE test_series_attempts
+SET test_series_id = 'a02ac1de-0002-4000-8000-000000000002'
+WHERE id = '2fe245bc-2f0d-4d24-870e-712278cc3387';
