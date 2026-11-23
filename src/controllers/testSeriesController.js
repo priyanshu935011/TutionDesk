@@ -1505,26 +1505,36 @@ export const getStudentTests = async (req, res) => {
         paymentStatus: { $in: ["paid", "completed", "success"] },
       }).sort({ createdAt: -1 });
 
+      const productMetadataByTestId = new Map();
       for (const ord of (studentOrders || [])) {
         for (const item of (ord.items || [])) {
           let itemTestIds = [];
           if (Array.isArray(item.testSeriesIds) && item.testSeriesIds.length > 0) {
             itemTestIds = item.testSeriesIds;
           }
+          let prod = null;
           if (item.productId) {
             try {
-              const prod = await Product.findById(item.productId);
+              prod = await Product.findById(item.productId);
               if (prod && Array.isArray(prod.testSeriesIds) && prod.testSeriesIds.length > 0) {
                 itemTestIds = [...new Set([...itemTestIds, ...prod.testSeriesIds])];
               }
             } catch (_) {}
           }
+          const itemGoal = prod?.category || item?.category || prod?.goal || item?.goal || student?.goal || "NEET";
+          const itemSubject = prod?.subject || item?.subject || "";
           itemTestIds.forEach((tId) => {
             if (tId) {
               const sId = String(tId);
               purchasedTestIds.add(sId);
               if (!purchasedOrderedTestIds.includes(sId)) {
                 purchasedOrderedTestIds.push(sId);
+              }
+              if (!productMetadataByTestId.has(sId)) {
+                productMetadataByTestId.set(sId, {
+                  goal: itemGoal,
+                  subject: itemSubject,
+                });
               }
             }
           });
@@ -1617,13 +1627,17 @@ export const getStudentTests = async (req, res) => {
       const att = attemptMap.get(tIdStr);
       const hasAtt = Boolean(att);
       const isPurchased = Boolean(purchasedTestIds.has(tIdStr));
+      const meta = productMetadataByTestId.get(tIdStr);
+      const resolvedGoal = meta?.goal || (t.category && t.category.toLowerCase() !== "class 10" ? t.category : (student?.goal || "NEET"));
+      const resolvedSubject = meta?.subject || t.subject || "All Subjects";
       return {
         id: t._id || t.id,
         _id: t._id || t.id,
         title: t.title,
         description: t.description,
-        category: t.category,
-        subject: t.subject || "All Subjects",
+        category: resolvedGoal,
+        goal: resolvedGoal,
+        subject: resolvedSubject,
         topic: t.topic || "",
         folderPath: t.folderPath,
         durationMinutes: t.durationMinutes,

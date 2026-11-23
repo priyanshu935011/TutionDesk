@@ -1131,6 +1131,9 @@ export const viewNote = async (req, res) => {
 </body>
 </html>`;
 
+    res.removeHeader("X-Frame-Options");
+    res.setHeader("Content-Security-Policy", "frame-ancestors *;");
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "text/html");
     return res.send(htmlContent);
   } catch (error) {

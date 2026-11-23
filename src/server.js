@@ -76,6 +76,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: false,
+    frameguard: false,
   })
 );
 app.use(
