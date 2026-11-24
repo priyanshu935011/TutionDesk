@@ -1873,6 +1873,17 @@ export const submitStudentTest = async (req, res) => {
       await clearCachePattern(`student:test_series:*`);
     } catch (_) {}
 
+    // Automatically record student streak activity in IST
+    try {
+      const { recordStudentActivity } = await import("../services/streakService.js");
+      await recordStudentActivity(student._id, {
+        testsCompleted: 1,
+        questionsSolved: evaluatedAnswers.length || (test.questions || []).length || 1,
+      });
+    } catch (streakErr) {
+      console.warn("Could not record streak for test attempt:", streakErr.message);
+    }
+
     try {
       sendStudentNotification({
         studentIds: [studentId],

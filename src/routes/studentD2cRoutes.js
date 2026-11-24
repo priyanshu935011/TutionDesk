@@ -24,12 +24,16 @@ import {
   createOrUpdateStudentPackage,
   setStudentFeatureOverride,
 } from "../controllers/studentD2cController.js";
+import { getStudentStreaks } from "../controllers/streakController.js";
 
 const router = express.Router();
 
 // 1. Direct Student OTP Auth
 router.post("/auth/send-otp", sendDirectStudentOtp);
 router.post("/auth/verify-otp", verifyDirectStudentOtp);
+
+// Streaks & Badges (IST timezone)
+router.get("/streaks", optionalAuth, getStudentStreaks);
 
 // 2. Multimodal AI Doubt Solver
 router.post("/ai/solve-doubt", optionalAuth, solveStudentDoubtWithAi);

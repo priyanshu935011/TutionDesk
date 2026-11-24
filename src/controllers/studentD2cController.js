@@ -273,6 +273,12 @@ Question Details: ${questionText || "Please solve and explain the attached textb
     // Record Quota Usage
     const updatedCount = await incrementDailyUsage(studentId, "ai_doubts", 1);
 
+    // Record Streak Activity in IST
+    try {
+      const { recordStudentActivity } = await import("../services/streakService.js");
+      await recordStudentActivity(studentId, { doubtsAsked: 1 });
+    } catch (_) {}
+
     return res.json({
       success: true,
       solution: parsed,

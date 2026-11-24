@@ -1005,9 +1005,12 @@ export const viewNote = async (req, res) => {
     }
 
     // Serve custom PDF.js HTML viewer: completely eliminates browser PDF headers & provides 100% native smooth scrolling
+    const host = req.get("host") || "localhost:5000";
+    const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+    const origin = `${protocol}://${host}`;
     const rawPdfUrl = req.query.url
-      ? `/teacher/notes/${noteId}/view?raw=true&url=${encodeURIComponent(req.query.url)}&title=${encodeURIComponent(req.query.title || '')}`
-      : `/teacher/notes/${noteId}/view?raw=true`;
+      ? `${origin}/teacher/notes/${noteId}/view?raw=true&url=${encodeURIComponent(req.query.url)}&title=${encodeURIComponent(req.query.title || '')}`
+      : `${origin}/teacher/notes/${noteId}/view?raw=true`;
     const isDark = req.query.theme === "dark" || req.query.isDark === "true";
     const bgCol = isDark ? "#090D16" : "#F8FAFC";
     const htmlContent = `<!DOCTYPE html>

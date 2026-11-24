@@ -106,6 +106,16 @@ import {
   aiHuntAdminLeads,
   aiImportAdminLeads,
 } from "../controllers/adminLeadsController.js";
+import {
+  getAllStreakTasksAdmin,
+  createStreakTaskAdmin,
+  updateStreakTaskAdmin,
+  deleteStreakTaskAdmin,
+  getAllBadgesAdmin,
+  createBadgeAdmin,
+  updateBadgeAdmin,
+  deleteBadgeAdmin,
+} from "../controllers/streakController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -250,5 +260,16 @@ router.post("/leads/assign-territory", assignTerritory);
 router.post("/leads/bulk-import", bulkImportAdminLeads);
 router.post("/leads/ai-hunt", aiHuntAdminLeads);
 router.post("/leads/ai-import", aiImportAdminLeads);
+
+// Super Admin Gamification: Streaks & Badges Management
+router.get("/streaks/tasks", getAllStreakTasksAdmin);
+router.post("/streaks/tasks", createStreakTaskAdmin);
+router.put("/streaks/tasks/:id", updateStreakTaskAdmin);
+router.delete("/streaks/tasks/:id", deleteStreakTaskAdmin);
+
+router.get("/streaks/badges", getAllBadgesAdmin);
+router.post("/streaks/badges", createBadgeAdmin);
+router.put("/streaks/badges/:id", updateBadgeAdmin);
+router.delete("/streaks/badges/:id", deleteBadgeAdmin);
 
 export default router;
