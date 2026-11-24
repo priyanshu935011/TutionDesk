@@ -208,12 +208,31 @@ export const recordStudentActivity = async (studentId, metrics = {}) => {
   if (!studentId) return null;
   try {
     const todayStrIST = getDateInIST();
-    let streakDoc = await StudentStreak.findOne({ studentId });
+    let streakDoc = null;
+    try {
+      streakDoc = await StudentStreak.findOne({ studentId });
+    } catch (_) {}
+
     if (!streakDoc) {
-      streakDoc = new StudentStreak({ studentId, activityHistory: [] });
+      try {
+        streakDoc = await StudentStreak.create({ studentId, activityHistory: [] });
+      } catch (_) {
+        try {
+          streakDoc = new StudentStreak({ studentId, activityHistory: [] });
+        } catch (_) {
+          streakDoc = { studentId, activityHistory: [], save: async () => {} };
+        }
+      }
     }
 
-    let todayEntry = streakDoc.activityHistory.find((a) => a.dateIST === todayStrIST);
+    if (!streakDoc) {
+      streakDoc = { studentId, activityHistory: [], save: async () => {} };
+    }
+    if (!Array.isArray(streakDoc.activityHistory)) {
+      streakDoc.activityHistory = [];
+    }
+
+    let todayEntry = streakDoc.activityHistory.find((a) => a && a.dateIST === todayStrIST);
     if (!todayEntry) {
       todayEntry = {
         dateIST: todayStrIST,
@@ -312,19 +331,64 @@ const evaluateTasksAndStreaks = async (streakDoc, todayEntry) => {
 export const getStudentStreaksAndBadges = async (studentId) => {
   await seedDefaultStreakData();
 
-  let streakDoc = await StudentStreak.findOne({ studentId });
+  let streakDoc = null;
+  try {
+    streakDoc = await StudentStreak.findOne({ studentId });
+  } catch (err) {
+    console.warn("[StreakService] findOne student streak notice:", err.message);
+  }
+
   if (!streakDoc) {
-    streakDoc = new StudentStreak({
+    try {
+      streakDoc = await StudentStreak.create({
+        studentId,
+        currentStreak: 0,
+        longestStreak: 0,
+        activityHistory: [],
+        unlockedBadges: [],
+      });
+    } catch (_) {
+      try {
+        streakDoc = new StudentStreak({
+          studentId,
+          currentStreak: 0,
+          longestStreak: 0,
+          activityHistory: [],
+          unlockedBadges: [],
+        });
+      } catch (_) {
+        streakDoc = {
+          studentId,
+          currentStreak: 0,
+          longestStreak: 0,
+          activityHistory: [],
+          unlockedBadges: [],
+          save: async () => {},
+        };
+      }
+    }
+  }
+
+  if (!streakDoc) {
+    streakDoc = {
       studentId,
       currentStreak: 0,
       longestStreak: 0,
       activityHistory: [],
       unlockedBadges: [],
-    });
+      save: async () => {},
+    };
+  }
+
+  if (!Array.isArray(streakDoc.activityHistory)) {
+    streakDoc.activityHistory = [];
+  }
+  if (!Array.isArray(streakDoc.unlockedBadges)) {
+    streakDoc.unlockedBadges = [];
   }
 
   const todayStrIST = getDateInIST();
-  let todayEntry = streakDoc.activityHistory.find((a) => a.dateIST === todayStrIST);
+  let todayEntry = streakDoc.activityHistory.find((a) => a && a.dateIST === todayStrIST);
   if (!todayEntry) {
     todayEntry = {
       dateIST: todayStrIST,
@@ -384,7 +448,13 @@ export const getStudentStreaksAndBadges = async (studentId) => {
 
   // Evaluate tasks and update streak
   await evaluateTasksAndStreaks(streakDoc, todayEntry);
-  await streakDoc.save();
+  try {
+    if (typeof streakDoc.save === "function") {
+      await streakDoc.save();
+    }
+  } catch (err) {
+    console.warn("[StreakService] streakDoc save warning:", err.message);
+  }
 
   // Load all active tasks
   const activeTasks = await StreakTask.find({ isActive: true }).sort({ sortOrder: 1 }).lean();
@@ -497,7 +567,11 @@ export const getStudentStreaksAndBadges = async (studentId) => {
   });
 
   if (newlyUnlocked) {
-    await streakDoc.save();
+    try {
+      if (typeof streakDoc.save === "function") {
+        await streakDoc.save();
+      }
+    } catch (_) {}
   }
 
   const { days: weekDays, todayIndex } = getWeekDaysInIST(streakDoc);

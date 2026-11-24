@@ -1413,8 +1413,8 @@ export const getTestSeriesAnalytics = async (req, res) => {
 
 const resolveStudentContext = async (req) => {
   const requestedStudentId =
-    req.headers["x-student-id"] ||
-    req.query.studentId ||
+    req.headers?.["x-student-id"] ||
+    req.query?.studentId ||
     req.body?.studentId;
 
   let student = null;
@@ -1483,6 +1483,7 @@ export const getStudentTests = async (req, res) => {
     // Also include test series directly purchased by this student from the store (sorted latest first)
     const purchasedTestIds = new Set();
     const purchasedOrderedTestIds = [];
+    const productMetadataByTestId = new Map();
     try {
       const studentIdCandidates = [
         student._id,
@@ -1505,7 +1506,6 @@ export const getStudentTests = async (req, res) => {
         paymentStatus: { $in: ["paid", "completed", "success"] },
       }).sort({ createdAt: -1 });
 
-      const productMetadataByTestId = new Map();
       for (const ord of (studentOrders || [])) {
         for (const item of (ord.items || [])) {
           let itemTestIds = [];

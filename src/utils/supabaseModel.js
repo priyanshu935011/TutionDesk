@@ -1203,11 +1203,18 @@ class SupabaseDocument {
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -1224,11 +1231,18 @@ class SupabaseDocument {
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -1511,11 +1525,18 @@ class SupabaseDocument {
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -1680,11 +1701,18 @@ class SupabaseDocument {
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -2131,11 +2159,18 @@ class SupabaseQuery {
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -2258,11 +2293,18 @@ class SupabaseQuery {
         if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -3669,11 +3711,18 @@ class SupabaseModel {
           if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -3686,11 +3735,18 @@ class SupabaseModel {
           if (error && (error.code === "PGRST205" || error.code === "42P01" || (error.message && (error.message.includes("schema cache") || error.message.includes("relation"))))) {
           MISSING_TABLES.add(this._tableName);
           const fallbackData = readFallbackData(this._tableName);
+          if (!this._id && !this.id) {
+            this._id = crypto.randomUUID();
+            this.id = this._id;
+          }
+          const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
           const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
-            fallbackData[idx] = { ...fallbackData[idx], ...this.toObject() };
-            writeFallbackData(this._tableName, fallbackData);
+            fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
+          } else {
+            fallbackData.push(plainObj);
           }
+          writeFallbackData(this._tableName, fallbackData);
           return this;
         }
 
@@ -4114,90 +4170,117 @@ const mockMongoose = {
       return this;
     }
   },
+  models: {},
   model(modelName, schema, collectionName) {
-    if (collectionName) {
-      return new SupabaseModel(collectionName);
+    if (this.models && this.models[modelName]) {
+      return this.models[modelName];
     }
-    let tableName = "";
-    if (modelName === "User") tableName = "users";
-    else if (modelName === "Student") tableName = "students";
-    else if (modelName === "Batch") tableName = "batches";
-    else if (modelName === "Institute") tableName = "institutes";
-    else if (modelName === "Note") tableName = "notes";
-    else if (modelName === "Quiz") tableName = "quizzes";
-    else if (modelName === "QuizAttempt") tableName = "quiz_attempts";
-    else if (modelName === "TestResult") tableName = "test_marks";
-    else if (modelName === "UptimeEvent") tableName = "uptime_events";
-    else if (modelName === "SystemMetric") tableName = "system_metrics";
-    else if (modelName === "SystemSetting") tableName = "system_settings";
-    else if (modelName === "VideoLecture") tableName = "video_lectures";
-    else if (modelName === "VideoPlaylist") tableName = "video_playlists";
-    else if (modelName === "VideoPlaylistItem") tableName = "video_playlist_items";
-    else if (modelName === "VideoRelease") tableName = "video_releases";
-    else if (modelName === "VideoReleaseStudent") tableName = "video_release_students";
-    else if (modelName === "VideoUpload") tableName = "video_uploads";
-    else if (modelName === "InstituteVideoStorage") tableName = "institute_video_storage";
-    else if (modelName === "VideoWatchLog") tableName = "video_watch_logs";
-    else if (modelName === "Notice") tableName = "notices";
-    else if (modelName === "SystemLog" || modelName === "SystemLogs") tableName = "error_logs";
-    else if (modelName === "Lead") tableName = "leads";
-    else if (modelName === "LeadForm") tableName = "lead_forms";
-    else if (modelName === "TestSeriesFolder") tableName = "test_series_folders";
-    else if (modelName === "TestSeries") tableName = "test_series";
-    else if (modelName === "InstituteTestSeriesAccess") tableName = "institute_test_series";
-    else if (modelName === "TestSeriesAttempt") tableName = "test_series_attempts";
-    else if (modelName === "TestSeriesCategory") tableName = "test_series_categories";
-    else if (modelName === "WhatsappLog") tableName = "whatsapp_logs";
-    else if (modelName === "ActivityLog") tableName = "activity_logs";
-    else if (modelName === "CashfreePayment") tableName = "cashfree_payments";
-    else if (modelName === "ContactMessage" || modelName === "ContactMessages") tableName = "contactmessages";
-    else if (modelName === "SalesLead" || modelName === "SalesLeads") tableName = "sales_leads";
-    else if (modelName === "SalesTerritory" || modelName === "SalesTerritories") tableName = "sales_territory_assignments";
-    else if (modelName === "CustomPage") tableName = "custom_pages";
-    else if (modelName === "Notification") tableName = "notifications";
-    else if (modelName === "SupportFaq" || modelName === "SupportFaqs") tableName = "support_faqs";
-    else if (modelName === "SupportTicket" || modelName === "SupportTickets") tableName = "support_tickets";
-    else if (modelName === "SupportTutorial" || modelName === "SupportTutorials") tableName = "support_tutorials";
-    else if (modelName === "AiHarvestLog" || modelName === "AiHarvestLogs") tableName = "ai_harvest_logs";
-    else if (modelName === "AiUsageLog" || modelName === "AiUsageLogs") tableName = "ai_usage_logs";
-    else if (modelName === "Product" || modelName === "Products") tableName = "products";
-    else if (modelName === "Order" || modelName === "Orders") tableName = "orders";
-    else if (modelName === "StudentAddress" || modelName === "StudentAddresses") tableName = "student_addresses";
-    else if (modelName === "StaffAttendance" || modelName === "StaffAttendances") tableName = "staff_attendances";
-    else if (modelName === "InstituteExpense" || modelName === "InstituteExpenses") tableName = "institute_expenses";
-    else if (modelName === "InstituteIncome" || modelName === "InstituteIncomes") tableName = "institute_incomes";
-    else if (modelName === "StaffSalary" || modelName === "StaffSalaries") tableName = "staff_salaries";
-    else if (modelName === "DirectRegistration" || modelName === "DirectRegistrations") tableName = "direct_registrations";
-    else if (modelName === "PushNotificationLog" || modelName === "PushNotificationLogs") tableName = "push_notification_logs";
-    else if (modelName === "ConsentRecord" || modelName === "ConsentRecords") tableName = "consent_records";
-    else if (modelName === "GrievanceTicket" || modelName === "GrievanceTickets") tableName = "grievance_tickets";
-    else if (modelName === "DataAccessLog" || modelName === "DataAccessLogs") tableName = "data_access_logs";
-    else if (modelName === "DpdpRetentionNotice" || modelName === "DpdpRetentionNotices") tableName = "dpdp_retention_notices";
-    else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
-    else if (modelName === "MarketingTemplate" || modelName === "MarketingTemplates") tableName = "marketing_templates";
-    else if (modelName === "MarketingMedia" || modelName === "MarketingMedias") tableName = "marketing_media";
-    else if (modelName === "MarketingCategory" || modelName === "MarketingCategories") tableName = "marketing_categories";
-    else if (modelName === "MarketingTemplateV2" || modelName === "MarketingTemplatesV2") tableName = "marketing_templates_v2";
-    else if (modelName === "MarketingTemplateVersion" || modelName === "MarketingTemplateVersions") tableName = "marketing_template_versions";
-    else if (modelName === "MarketingAsset" || modelName === "MarketingAssets") tableName = "marketing_assets";
-    else if (modelName === "InstituteMarketingDesign" || modelName === "InstituteMarketingDesigns") tableName = "institute_marketing_designs";
-    else if (modelName === "MarketingExport" || modelName === "MarketingExports") tableName = "marketing_exports";
-    else if (modelName === "MarketingTemplateUsage" || modelName === "MarketingTemplateUsages") tableName = "marketing_template_usage";
-    else if (modelName === "Organization" || modelName === "Organizations") tableName = "organizations";
-    else if (modelName === "UserBranchMembership" || modelName === "UserBranchMemberships") tableName = "user_branch_memberships";
-    else tableName = modelName.toLowerCase() + "s";
+    let tableName = collectionName || "";
+    if (!tableName) {
+      if (modelName === "User") tableName = "users";
+      else if (modelName === "Student") tableName = "students";
+      else if (modelName === "Batch") tableName = "batches";
+      else if (modelName === "Institute") tableName = "institutes";
+      else if (modelName === "Note") tableName = "notes";
+      else if (modelName === "Quiz") tableName = "quizzes";
+      else if (modelName === "QuizAttempt") tableName = "quiz_attempts";
+      else if (modelName === "TestResult") tableName = "test_marks";
+      else if (modelName === "UptimeEvent") tableName = "uptime_events";
+      else if (modelName === "SystemMetric") tableName = "system_metrics";
+      else if (modelName === "SystemSetting") tableName = "system_settings";
+      else if (modelName === "VideoLecture") tableName = "video_lectures";
+      else if (modelName === "VideoPlaylist") tableName = "video_playlists";
+      else if (modelName === "VideoPlaylistItem") tableName = "video_playlist_items";
+      else if (modelName === "VideoRelease") tableName = "video_releases";
+      else if (modelName === "VideoReleaseStudent") tableName = "video_release_students";
+      else if (modelName === "VideoUpload") tableName = "video_uploads";
+      else if (modelName === "InstituteVideoStorage") tableName = "institute_video_storage";
+      else if (modelName === "VideoWatchLog") tableName = "video_watch_logs";
+      else if (modelName === "Notice") tableName = "notices";
+      else if (modelName === "SystemLog" || modelName === "SystemLogs") tableName = "error_logs";
+      else if (modelName === "Lead") tableName = "leads";
+      else if (modelName === "LeadForm") tableName = "lead_forms";
+      else if (modelName === "TestSeriesFolder") tableName = "test_series_folders";
+      else if (modelName === "TestSeries") tableName = "test_series";
+      else if (modelName === "InstituteTestSeriesAccess") tableName = "institute_test_series";
+      else if (modelName === "TestSeriesAttempt") tableName = "test_series_attempts";
+      else if (modelName === "TestSeriesCategory") tableName = "test_series_categories";
+      else if (modelName === "WhatsappLog") tableName = "whatsapp_logs";
+      else if (modelName === "ActivityLog") tableName = "activity_logs";
+      else if (modelName === "CashfreePayment") tableName = "cashfree_payments";
+      else if (modelName === "ContactMessage" || modelName === "ContactMessages") tableName = "contactmessages";
+      else if (modelName === "SalesLead" || modelName === "SalesLeads") tableName = "sales_leads";
+      else if (modelName === "SalesTerritory" || modelName === "SalesTerritories") tableName = "sales_territory_assignments";
+      else if (modelName === "CustomPage") tableName = "custom_pages";
+      else if (modelName === "Notification") tableName = "notifications";
+      else if (modelName === "SupportFaq" || modelName === "SupportFaqs") tableName = "support_faqs";
+      else if (modelName === "SupportTicket" || modelName === "SupportTickets") tableName = "support_tickets";
+      else if (modelName === "SupportTutorial" || modelName === "SupportTutorials") tableName = "support_tutorials";
+      else if (modelName === "AiHarvestLog" || modelName === "AiHarvestLogs") tableName = "ai_harvest_logs";
+      else if (modelName === "AiUsageLog" || modelName === "AiUsageLogs") tableName = "ai_usage_logs";
+      else if (modelName === "Product" || modelName === "Products") tableName = "products";
+      else if (modelName === "Order" || modelName === "Orders") tableName = "orders";
+      else if (modelName === "StudentAddress" || modelName === "StudentAddresses") tableName = "student_addresses";
+      else if (modelName === "StaffAttendance" || modelName === "StaffAttendances") tableName = "staff_attendances";
+      else if (modelName === "InstituteExpense" || modelName === "InstituteExpenses") tableName = "institute_expenses";
+      else if (modelName === "InstituteIncome" || modelName === "InstituteIncomes") tableName = "institute_incomes";
+      else if (modelName === "StaffSalary" || modelName === "StaffSalaries") tableName = "staff_salaries";
+      else if (modelName === "DirectRegistration" || modelName === "DirectRegistrations") tableName = "direct_registrations";
+      else if (modelName === "PushNotificationLog" || modelName === "PushNotificationLogs") tableName = "push_notification_logs";
+      else if (modelName === "ConsentRecord" || modelName === "ConsentRecords") tableName = "consent_records";
+      else if (modelName === "GrievanceTicket" || modelName === "GrievanceTickets") tableName = "grievance_tickets";
+      else if (modelName === "DataAccessLog" || modelName === "DataAccessLogs") tableName = "data_access_logs";
+      else if (modelName === "DpdpRetentionNotice" || modelName === "DpdpRetentionNotices") tableName = "dpdp_retention_notices";
+      else if (modelName === "SmsOtpLog" || modelName === "SmsOtpLogs") tableName = "sms_otp_logs";
+      else if (modelName === "MarketingTemplate" || modelName === "MarketingTemplates") tableName = "marketing_templates";
+      else if (modelName === "MarketingMedia" || modelName === "MarketingMedias") tableName = "marketing_media";
+      else if (modelName === "MarketingCategory" || modelName === "MarketingCategories") tableName = "marketing_categories";
+      else if (modelName === "MarketingTemplateV2" || modelName === "MarketingTemplatesV2") tableName = "marketing_templates_v2";
+      else if (modelName === "MarketingTemplateVersion" || modelName === "MarketingTemplateVersions") tableName = "marketing_template_versions";
+      else if (modelName === "MarketingAsset" || modelName === "MarketingAssets") tableName = "marketing_assets";
+      else if (modelName === "InstituteMarketingDesign" || modelName === "InstituteMarketingDesigns") tableName = "institute_marketing_designs";
+      else if (modelName === "MarketingExport" || modelName === "MarketingExports") tableName = "marketing_exports";
+      else if (modelName === "MarketingTemplateUsage" || modelName === "MarketingTemplateUsages") tableName = "marketing_template_usage";
+      else if (modelName === "Organization" || modelName === "Organizations") tableName = "organizations";
+      else if (modelName === "UserBranchMembership" || modelName === "UserBranchMemberships") tableName = "user_branch_memberships";
+      else if (modelName === "StreakTask" || modelName === "StreakTasks") tableName = "streak_tasks";
+      else if (modelName === "Badge" || modelName === "Badges") tableName = "badges";
+      else if (modelName === "StudentStreak" || modelName === "StudentStreaks") tableName = "student_streaks";
+      else tableName = modelName.toLowerCase() + "s";
 
-    if (tableName === "marketingtemplates" || tableName === "marketingtemplate") tableName = "marketing_templates";
-    if (tableName === "marketingmedias" || tableName === "marketingmedia") tableName = "marketing_media";
-    if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
-    if (tableName === "contact_messages") tableName = "contactmessages";
-    if (tableName === "cashfreepayments" || tableName === "cashfreepayment") tableName = "cashfree_payments";
-    if (tableName === "supportfaqs" || tableName === "supportfaq") tableName = "support_faqs";
-    if (tableName === "supporttickets" || tableName === "supportticket") tableName = "support_tickets";
-    if (tableName === "supporttutorials" || tableName === "supporttutorial") tableName = "support_tutorials";
-    if (tableName === "aiharvestlogs" || tableName === "aiharvestlog") tableName = "ai_harvest_logs";
+      if (tableName === "marketingtemplates" || tableName === "marketingtemplate") tableName = "marketing_templates";
+      if (tableName === "marketingmedias" || tableName === "marketingmedia") tableName = "marketing_media";
+      if (tableName === "system_logs" || tableName === "systemlogs") tableName = "error_logs";
+      if (tableName === "contact_messages") tableName = "contactmessages";
+      if (tableName === "cashfreepayments" || tableName === "cashfreepayment") tableName = "cashfree_payments";
+      if (tableName === "supportfaqs" || tableName === "supportfaq") tableName = "support_faqs";
+      if (tableName === "supporttickets" || tableName === "supportticket") tableName = "support_tickets";
+      if (tableName === "supporttutorials" || tableName === "supporttutorial") tableName = "support_tutorials";
+      if (tableName === "aiharvestlogs" || tableName === "aiharvestlog") tableName = "ai_harvest_logs";
+      if (tableName === "streaktasks" || tableName === "streaktask") tableName = "streak_tasks";
+      if (tableName === "studentstreaks" || tableName === "studentstreak") tableName = "student_streaks";
+    }
 
-    return new SupabaseModel(tableName);
+    const modelInstance = new SupabaseModel(tableName);
+
+    function ModelConstructor(data = {}) {
+      return new SupabaseDocument(tableName, data, modelInstance);
+    }
+
+    Object.setPrototypeOf(ModelConstructor, modelInstance);
+    for (const key of Object.getOwnPropertyNames(Object.getPrototypeOf(modelInstance))) {
+      if (key !== "constructor" && typeof modelInstance[key] === "function") {
+        ModelConstructor[key] = modelInstance[key].bind(modelInstance);
+      }
+    }
+    for (const [key, val] of Object.entries(modelInstance)) {
+      ModelConstructor[key] = val;
+    }
+
+    if (!this.models) this.models = {};
+    this.models[modelName] = ModelConstructor;
+
+    return ModelConstructor;
   },
   Types: {
     ObjectId: (function() {
