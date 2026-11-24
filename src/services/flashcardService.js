@@ -427,51 +427,8 @@ export async function getDashboardOverview(userId, instituteId = null) {
     });
   }
 
-  // If user has 0 decks, provide a starter demo deck so UI is never empty
-  if (decks.length === 0) {
-    decks = [
-      {
-        id: "demo_photosynthesis",
-        title: "Photosynthesis & Cellular Energy",
-        subject: "Biology",
-        chapter: "Chapter 5",
-        total_cards: 20,
-        due_cards: 12,
-        mastered_cards: 8,
-        mastery_percentage: 75,
-        last_studied_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-      },
-      {
-        id: "demo_os",
-        title: "Operating Systems & Process Scheduling",
-        subject: "Computer Science",
-        chapter: "Chapter 3",
-        total_cards: 45,
-        due_cards: 8,
-        mastered_cards: 18,
-        mastery_percentage: 40,
-        last_studied_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-      },
-      {
-        id: "demo_dbms",
-        title: "Database Normalisation & SQL",
-        subject: "DBMS",
-        chapter: "Chapter 2",
-        total_cards: 30,
-        due_cards: 0,
-        mastered_cards: 28,
-        mastery_percentage: 92,
-        last_studied_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-      },
-    ];
-    totalCards = 95;
-    dueToday = 20;
-    masteredCards = 54;
-    completedToday = 15;
-  }
-
   const overallMastery = totalCards > 0 ? Math.round((masteredCards / totalCards) * 100) : 0;
-  const targetDailyCards = Math.max(20, dueToday + completedToday);
+  const targetDailyCards = dueToday + completedToday;
   const dailyProgressPercent = targetDailyCards > 0 ? Math.min(100, Math.round((completedToday / targetDailyCards) * 100)) : 0;
 
   return {
@@ -583,11 +540,6 @@ export async function getStudySessionCards(deckId, userId, filter = "all") {
     console.warn("[Flashcards] DB fetch cards failed, trying fallback:", err.message);
     const store = getFallbackStore();
 
-    if (deckId.startsWith("demo_")) {
-      // Provide built-in demo cards matching screenshot
-      return getDemoCards(deckId);
-    }
-
     deckInfo = store.decks[deckId] || { id: deckId, title: "Revision Deck", subject: "General" };
     const allCards = Object.values(store.cards).filter(c => c.deck_id === deckId);
     cards = allCards.map(c => {
@@ -612,11 +564,6 @@ export async function getStudySessionCards(deckId, userId, filter = "all") {
     cards = cards.filter(c => c.progress?.isBookmarked);
   } else if (filter === "due_today") {
     cards = cards.filter(c => !c.progress?.nextReviewAt || c.progress.nextReviewAt <= nowIso);
-  }
-
-  // Fallback to sample if empty
-  if (cards.length === 0) {
-    return getDemoCards(deckId);
   }
 
   return {
@@ -763,89 +710,4 @@ export async function toggleCardBookmark(userId, flashcardId, deckId) {
   return { success: true, isBookmarked };
 }
 
-/**
- * Built-in Demo Cards (Matches User Screenshots)
- */
-function getDemoCards(deckId) {
-  const biologyCards = [
-    {
-      id: "bio_1",
-      question: "What is photosynthesis and why is it important for life on Earth?",
-      answer: "Photosynthesis is the biochemical process by which photoautotrophs (plants, algae, cyanobacteria) convert light energy into chemical energy stored in glucose, releasing molecular oxygen as a byproduct. It forms the energetic foundation of nearly all terrestrial food chains.",
-      explanation: "Light reactions occur in the thylakoid membranes generating ATP and NADPH, while the Calvin cycle occurs in the stroma fixing atmospheric CO₂ into 3-carbon sugars.",
-      card_type: "conceptual",
-      difficulty: "medium",
-      topic: "Photosynthesis",
-      source_page: 42,
-      source_excerpt: "Biology Chapter 5: Bioenergetics",
-      position: 1,
-      progress: { state: "learning", repetitions: 1, intervalDays: 1, isBookmarked: false },
-    },
-    {
-      id: "bio_2",
-      question: "What is the primary function of chlorophyll-a in photosystem II (P680)?",
-      answer: "Chlorophyll-a at P680 acts as the primary electron donor upon excitation by light, initiating non-cyclic photophosphorylation and the photolysis of water.",
-      explanation: "When excited by a 680 nm photon, P680 transfers electrons to pheophytin. The resulting oxidized P680⁺ is one of the strongest biological oxidants known and extracts electrons from H₂O via the Oxygen Evolving Complex.",
-      card_type: "conceptual",
-      difficulty: "hard",
-      topic: "Light Reactions",
-      source_page: 44,
-      source_excerpt: "Photosystem II and Water Splitting",
-      position: 2,
-      progress: { state: "learning", repetitions: 2, intervalDays: 3, isBookmarked: true },
-    },
-    {
-      id: "bio_3",
-      question: "State the overall balanced chemical equation for oxygenic photosynthesis.",
-      answer: "6CO₂ + 6H₂O + light energy → C₆H₁₂O₆ + 6O₂",
-      explanation: "Water is oxidized to oxygen gas (O₂), and carbon dioxide is reduced to synthesize hexose sugars.",
-      card_type: "formula",
-      difficulty: "easy",
-      topic: "Core Equations",
-      source_page: 40,
-      source_excerpt: "General Photosynthetic stoichiometry",
-      position: 3,
-      progress: { state: "mastered", repetitions: 4, intervalDays: 14, isBookmarked: false },
-    },
-    {
-      id: "bio_4",
-      question: "What enzyme catalyzes the initial carbon fixation step in the Calvin cycle?",
-      answer: "RuBisCO (Ribulose-1,5-bisphosphate carboxylase-oxygenase)",
-      explanation: "RuBisCO attaches CO₂ to RuBP (a 5-carbon sugar) to produce an unstable 6-carbon intermediate that immediately splits into two 3-PGA molecules.",
-      card_type: "definition",
-      difficulty: "medium",
-      topic: "Calvin Cycle",
-      source_page: 48,
-      source_excerpt: "Dark reactions & Carbon Fixation",
-      position: 4,
-      progress: { state: "reviewing", repetitions: 3, intervalDays: 6, isBookmarked: false },
-    },
-    {
-      id: "bio_5",
-      question: "Why do C4 plants exhibit higher photosynthetic efficiency in hot, arid climates compared to C3 plants?",
-      answer: "C4 plants spatially separate initial CO₂ fixation (in mesophyll cells using PEP carboxylase) from the Calvin cycle (in bundle sheath cells), virtually eliminating photorespiration.",
-      explanation: "PEP carboxylase has high affinity for HCO₃⁻ and zero oxygenase activity. By concentrating CO₂ around RuBisCO, C4 plants prevent RuBisCO from binding O₂ even under high heat and closed stomata.",
-      card_type: "conceptual",
-      difficulty: "hard",
-      topic: "C4 vs C3 Pathway",
-      source_page: 52,
-      source_excerpt: "Kranz Anatomy & Environmental Adaptation",
-      position: 5,
-      progress: { state: "learning", repetitions: 0, intervalDays: 0, isBookmarked: false },
-    },
-  ];
 
-  return {
-    deck: {
-      id: deckId || "demo_photosynthesis",
-      title: "Photosynthesis & Cellular Energy",
-      subject: "Biology",
-      chapter: "Chapter 5",
-      total_cards: biologyCards.length,
-      due_cards: 3,
-      mastered_cards: 1,
-    },
-    cards: biologyCards,
-    totalCards: biologyCards.length,
-  };
-}
