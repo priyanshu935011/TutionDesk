@@ -78,6 +78,7 @@ export const getWeekDaysInIST = (currentStreakDoc = null) => {
 
     days.push({
       day: weekLabels[i],
+      name: weekLabels[i],
       date: dateStr,
       isToday,
       isCompleted,
@@ -131,7 +132,8 @@ export const seedDefaultStreakData = async () => {
         {
           title: "Streak Master",
           description: "Maintain a 30-day streak",
-          symbol: "local_fire_department",
+          symbol: "fa-fire",
+          fontAwesomeCode: "fa-fire",
           backgroundColor: "#F59E0B",
           criteriaType: "streak_days",
           targetValue: 30,
@@ -142,7 +144,8 @@ export const seedDefaultStreakData = async () => {
         {
           title: "Class Attender",
           description: "Attend 50 live or recorded classes",
-          symbol: "menu_book",
+          symbol: "fa-book-open",
+          fontAwesomeCode: "fa-book-open",
           backgroundColor: "#3B82F6",
           criteriaType: "classes_attended",
           targetValue: 50,
@@ -153,7 +156,8 @@ export const seedDefaultStreakData = async () => {
         {
           title: "Practice Pro",
           description: "Solve 500 practice questions",
-          symbol: "track_changes",
+          symbol: "fa-bullseye",
+          fontAwesomeCode: "fa-bullseye",
           backgroundColor: "#8B5CF6",
           criteriaType: "questions_solved",
           targetValue: 500,
@@ -164,7 +168,8 @@ export const seedDefaultStreakData = async () => {
         {
           title: "Test Taker",
           description: "Attempt 25 chapter or mock tests",
-          symbol: "check_circle",
+          symbol: "fa-check-circle",
+          fontAwesomeCode: "fa-check-circle",
           backgroundColor: "#10B981",
           criteriaType: "tests_completed",
           targetValue: 25,
@@ -175,7 +180,8 @@ export const seedDefaultStreakData = async () => {
         {
           title: "Top Performer",
           description: "Score 90%+ in 5 tests",
-          symbol: "military_tech",
+          symbol: "fa-trophy",
+          fontAwesomeCode: "fa-trophy",
           backgroundColor: "#F59E0B",
           criteriaType: "score_percentage",
           targetValue: 5,
@@ -186,7 +192,8 @@ export const seedDefaultStreakData = async () => {
         {
           title: "Consistency Pro",
           description: "Maintain a 60-day learning streak",
-          symbol: "lock",
+          symbol: "fa-crown",
+          fontAwesomeCode: "fa-crown",
           backgroundColor: "#64748B",
           criteriaType: "streak_days",
           targetValue: 60,
@@ -300,10 +307,10 @@ const evaluateTasksAndStreaks = async (streakDoc, todayEntry) => {
 
   todayEntry.completedTasks = completedTaskIds;
 
-  // Streak is automatically marked if user completes >= 2 tasks (or all tasks if less than 2 exist)
-  const threshold = Math.min(2, Math.max(1, activeTasks.length));
+  // User must complete ALL active tasks to mark streak
+  const threshold = activeTasks.length;
   const wasMarked = todayEntry.isStreakMarked;
-  const isNowMarked = completedTaskIds.length >= threshold;
+  const isNowMarked = activeTasks.length > 0 && completedTaskIds.length >= threshold;
   todayEntry.isStreakMarked = isNowMarked;
 
   if (isNowMarked && !wasMarked) {
@@ -555,7 +562,8 @@ export const getStudentStreaksAndBadges = async (studentId) => {
       id: String(badge._id),
       title: badge.title,
       description: badge.description,
-      symbol: badge.symbol,
+      symbol: badge.symbol || badge.fontAwesomeCode || "fa-award",
+      fontAwesomeCode: badge.fontAwesomeCode || badge.symbol || "fa-award",
       backgroundColor: badge.backgroundColor,
       criteriaType: badge.criteriaType,
       targetValue: targetVal,
@@ -584,7 +592,7 @@ export const getStudentStreaksAndBadges = async (studentId) => {
     weekDays,
     tasks: taskPayload,
     completedTasksCount: taskPayload.filter((t) => t.isCompleted).length,
-    requiredTasksCount: Math.min(2, Math.max(1, activeTasks.length)),
+    requiredTasksCount: activeTasks.length,
     badges: badgePayload,
   };
 };

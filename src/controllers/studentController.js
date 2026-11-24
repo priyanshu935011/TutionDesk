@@ -13,6 +13,7 @@ import VideoLecture from "../models/VideoLecture.js";
 import VideoRelease from "../models/VideoRelease.js";
 import VideoReleaseStudent from "../models/VideoReleaseStudent.js";
 import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
+import StudentStreak from "../models/StudentStreak.js";
 import { supabase, readFallbackData, toValidUUID } from "../utils/supabaseModel.js";
 import { isTeacherOfBatch, getTeacherAssignedBatchIds } from "../utils/batchTeacherHelper.js";
 import bcrypt from "bcryptjs";
@@ -2110,6 +2111,15 @@ export const getStudentSyncData = async (req, res) => {
     const siblings = [];
 
     for (const student of students) {
+      let studentStreakCount = 0;
+      let studentLongestStreak = 0;
+      try {
+        const sStreak = await StudentStreak.findOne({ studentId: student._id || student.id });
+        if (sStreak) {
+          studentStreakCount = sStreak.currentStreak || 0;
+          studentLongestStreak = sStreak.longestStreak || studentStreakCount;
+        }
+      } catch (_) {}
       let institute = await Institute.findById(student.user).select(
         "_id name status subscriptionEnd brandingEnabled logoUrl themeColor allowedFeatures adminUser upiId aiEnabled aiStudentEnabled"
       );
@@ -2133,6 +2143,10 @@ export const getStudentSyncData = async (req, res) => {
           studentId: String(student._id || student.id),
           id: String(student._id || student.id),
           _id: String(student._id || student.id),
+          streak: studentStreakCount,
+          streakDays: studentStreakCount,
+          currentStreak: studentStreakCount,
+          longestStreak: studentLongestStreak,
           dashboard_type: d2cDashType,
           dashboardType: d2cDashType,
           instituteName: "ClassTech",
@@ -2157,6 +2171,10 @@ export const getStudentSyncData = async (req, res) => {
             enrollmentNumber: student.enrollmentNumber || "STU-D2C",
             phone: student.phone || "",
             email: student.email || "",
+            streak: studentStreakCount,
+            streakDays: studentStreakCount,
+            currentStreak: studentStreakCount,
+            longestStreak: studentLongestStreak,
             targetExam: student.targetExam || student.customFields?.targetExam || "Boards / JEE / NEET",
             goal: student.goal || student.target_goal || student.customFields?.goal || student.targetExam || "NEET",
             target_goal: student.target_goal || student.goal || student.customFields?.goal || "NEET",
@@ -2369,7 +2387,15 @@ export const getStudentSyncData = async (req, res) => {
             pendingFees: pendingFees,
             feePlanType: student.feePlanType || "monthly",
             dueDate: student.dueDate || null,
+            streak: studentStreakCount,
+            streakDays: studentStreakCount,
+            currentStreak: studentStreakCount,
+            longestStreak: studentLongestStreak,
           },
+          streak: studentStreakCount,
+          streakDays: studentStreakCount,
+          currentStreak: studentStreakCount,
+          longestStreak: studentLongestStreak,
           teacherName,
           instituteName: institute.name,
           upiId: institute.upiId || "",
@@ -2472,11 +2498,17 @@ export const getStudentSyncData = async (req, res) => {
     }
 
     const defaultDashType = (siblings && siblings[0] && (siblings[0].dashboard_type || siblings[0].dashboardType)) || "new";
+    const primaryStreak = (siblings && siblings[0] && (siblings[0].streakDays || siblings[0].currentStreak || siblings[0].streak)) || 0;
+    const primaryLongest = (siblings && siblings[0] && (siblings[0].longestStreak || siblings[0].streakDays || siblings[0].currentStreak)) || 0;
 
     const responsePayload = {
       isSyncSummary: true,
       dashboard_type: defaultDashType,
       dashboardType: defaultDashType,
+      streak: primaryStreak,
+      streakDays: primaryStreak,
+      currentStreak: primaryStreak,
+      longestStreak: primaryLongest,
       siblings: siblings,
       classes: siblings,
       siblingProfiles: siblingProfiles,
@@ -3266,6 +3298,10 @@ export const getStudentPortalData = async (req, res) => {
           studentId: String(student._id || student.id),
           id: String(student._id || student.id),
           _id: String(student._id || student.id),
+          streak: studentStreakCount,
+          streakDays: studentStreakCount,
+          currentStreak: studentStreakCount,
+          longestStreak: studentLongestStreak,
           dashboard_type: d2cDashType,
           dashboardType: d2cDashType,
           instituteName: "ClassTech",
@@ -3290,6 +3326,10 @@ export const getStudentPortalData = async (req, res) => {
             enrollmentNumber: student.enrollmentNumber || "STU-D2C",
             phone: student.phone || "",
             email: student.email || "",
+            streak: studentStreakCount,
+            streakDays: studentStreakCount,
+            currentStreak: studentStreakCount,
+            longestStreak: studentLongestStreak,
             targetExam: student.targetExam || student.customFields?.targetExam || "Boards / JEE / NEET",
             goal: student.goal || student.target_goal || student.customFields?.goal || student.targetExam || "NEET",
             target_goal: student.target_goal || student.goal || student.customFields?.goal || "NEET",

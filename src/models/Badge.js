@@ -14,7 +14,12 @@ const badgeSchema = new mongoose.Schema(
     },
     symbol: {
       type: String,
-      default: "military_tech",
+      default: "fa-award",
+      trim: true,
+    },
+    fontAwesomeCode: {
+      type: String,
+      default: "fa-award",
       trim: true,
     },
     backgroundColor: {

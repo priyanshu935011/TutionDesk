@@ -171,6 +171,7 @@ export const createBadgeAdmin = async (req, res) => {
       title,
       description,
       symbol,
+      fontAwesomeCode,
       backgroundColor,
       criteriaType,
       targetValue,
@@ -183,10 +184,13 @@ export const createBadgeAdmin = async (req, res) => {
       return res.status(400).json({ message: "Badge title and criteria type are required" });
     }
 
-    const badge = new Badge({
+    const resolvedFaCode = (fontAwesomeCode || symbol || "fa-award").trim();
+
+    const badge = await Badge.create({
       title: title.trim(),
       description: (description || "").trim(),
-      symbol: (symbol || "military_tech").trim(),
+      symbol: resolvedFaCode,
+      fontAwesomeCode: resolvedFaCode,
       backgroundColor: (backgroundColor || "#8B5CF6").trim(),
       criteriaType,
       targetValue: Math.max(1, Number(targetValue) || 1),
@@ -214,6 +218,7 @@ export const updateBadgeAdmin = async (req, res) => {
       title,
       description,
       symbol,
+      fontAwesomeCode,
       backgroundColor,
       criteriaType,
       targetValue,
@@ -229,7 +234,13 @@ export const updateBadgeAdmin = async (req, res) => {
 
     if (title !== undefined) badge.title = title.trim();
     if (description !== undefined) badge.description = description.trim();
-    if (symbol !== undefined) badge.symbol = symbol.trim();
+    if (fontAwesomeCode !== undefined) {
+      badge.fontAwesomeCode = fontAwesomeCode.trim();
+      badge.symbol = fontAwesomeCode.trim();
+    } else if (symbol !== undefined) {
+      badge.symbol = symbol.trim();
+      badge.fontAwesomeCode = symbol.trim();
+    }
     if (backgroundColor !== undefined) badge.backgroundColor = backgroundColor.trim();
     if (criteriaType !== undefined) badge.criteriaType = criteriaType;
     if (targetValue !== undefined) badge.targetValue = Math.max(1, Number(targetValue) || 1);
