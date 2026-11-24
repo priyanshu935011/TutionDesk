@@ -26,6 +26,14 @@ import {
   storeCheckout,
   verifyStorePayment,
   getStudentOrders,
+  getClassTechPassDetails,
+  getStudentPassStatus,
+  claimProductWithPass,
+  passCheckout,
+  verifyPassPayment,
+  getAdminClassTechPass,
+  updateAdminClassTechPass,
+  uploadPassPoster,
 } from "../controllers/storeController.js";
 
 const upload = multer({
@@ -59,6 +67,7 @@ const studentAuth = (req, res, next) => {
 router.get("/products", getStoreProducts);
 router.get("/products/:id", getStoreProductById);
 router.get("/settings", getStoreSettings);
+router.get("/pass/details", getClassTechPassDetails);
 
 // ---------------- STUDENT PROTECTED STORE ROUTES ----------------
 router.get("/student/orders", studentAuth, getStudentOrders);
@@ -68,6 +77,10 @@ router.put("/student/addresses/:id", studentAuth, updateStudentAddress);
 router.delete("/student/addresses/:id", studentAuth, deleteStudentAddress);
 router.post("/checkout", studentAuth, storeCheckout);
 router.post("/verify-payment", studentAuth, verifyStorePayment);
+router.get("/pass/my-status", studentAuth, getStudentPassStatus);
+router.post("/pass/checkout", studentAuth, passCheckout);
+router.post("/pass/verify-payment", studentAuth, verifyPassPayment);
+router.post("/pass/claim-product", studentAuth, claimProductWithPass);
 
 // ---------------- SUPER ADMIN STORE MANAGEMENT ----------------
 router.use("/admin", protect);
@@ -79,6 +92,11 @@ router.post("/admin/products", productUpload, createAdminProduct);
 router.put("/admin/products/:id", productUpload, updateAdminProduct);
 router.delete("/admin/products/:id", deleteAdminProduct);
 router.post("/admin/generate-description", generateProductDescription);
+
+// ClassTech Pass Management
+router.get("/admin/classtech-pass", getAdminClassTechPass);
+router.put("/admin/classtech-pass", updateAdminClassTechPass);
+router.post("/admin/classtech-pass/upload-poster", upload.single("posterImage"), uploadPassPoster);
 
 // Orders & Fulfillment
 router.get("/admin/orders", getAdminOrders);

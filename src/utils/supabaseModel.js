@@ -4259,6 +4259,7 @@ const mockMongoose = {
       if (tableName === "aiharvestlogs" || tableName === "aiharvestlog") tableName = "ai_harvest_logs";
       if (tableName === "streaktasks" || tableName === "streaktask") tableName = "streak_tasks";
       if (tableName === "studentstreaks" || tableName === "studentstreak") tableName = "student_streaks";
+      if (tableName === "studentpasses" || tableName === "studentpass" || tableName === "classtechpasses" || tableName === "classtechpass") tableName = "student_classtech_passes";
     }
 
     const modelInstance = new SupabaseModel(tableName);

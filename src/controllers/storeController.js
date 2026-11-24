@@ -2,6 +2,7 @@ import crypto from "crypto";
 import axios from "axios";
 import mongoose from "mongoose";
 import Product from "../models/Product.js";
+import StudentPass from "../models/StudentPass.js";
 import { verifyJwtToken } from "../utils/jwtHelper.js";
 import Order from "../models/Order.js";
 import StudentAddress from "../models/StudentAddress.js";
@@ -662,10 +663,27 @@ export const getStoreSettings = async (req, res) => {
       freeDeliveryThreshold: 499,
       supportEmail: "support@classtech.in",
       supportPhone: "919999999999",
+      classtechPass: {
+        isEnabled: true,
+        title: "ClassTech All-Access Pass",
+        tagline: "Unlock Every Test Series & Notes Library with 1-Click",
+        description: "Get unrestricted 1-click access to all test series, chapter questions, and handwritten notes across NEET, JEE, and Board exams for 1 full year.",
+        price: 999,
+        originalPrice: 2999,
+        validityDays: 365,
+        posterUrl: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&q=80",
+        features: [
+          "Instant 1-Click unlock on all Store Test Series",
+          "Unlimited access to all Handwritten Notes & Mindmaps",
+          "Detailed AI test analytics and solutions",
+          "Valid for 365 days across all subjects",
+        ],
+      },
     };
 
     const saved = setting?.value || {};
-    const merged = { ...defaults, ...saved };
+    const mergedPass = { ...(defaults.classtechPass || {}), ...(saved.classtechPass || {}) };
+    const merged = { ...defaults, ...saved, classtechPass: mergedPass };
     res.json({ settings: merged });
   } catch (err) {
     console.error("getStoreSettings error:", err);
@@ -717,25 +735,54 @@ export const uploadStoreBanner = async (req, res) => {
 // STUDENT & PUBLIC: STORE FRONT
 // -------------------------------------------------------------
 
+export const getStudentIdFromReq = (req) => {
+  let studentId = req.student?._id || req.student?.id || req.user?._id || req.user?.id;
+  if (!studentId && req.headers?.authorization?.startsWith("Bearer ")) {
+    try {
+      const token = req.headers.authorization.split(" ")[1];
+      const decoded = verifyJwtToken(token);
+      if (decoded) {
+        studentId = decoded.studentId || decoded.id || decoded._id;
+      }
+    } catch (_) {}
+  }
+  if (!studentId && req.headers?.["x-student-id"]) {
+    studentId = req.headers["x-student-id"];
+  }
+  return studentId ? String(studentId) : null;
+};
+
+export const getStudentActivePass = async (studentId) => {
+  if (!studentId) return null;
+  try {
+    const now = new Date();
+    const passes = await StudentPass.find({
+      studentId: String(studentId),
+      status: "active",
+    });
+    const active = (passes || []).find((p) => {
+      const exp = new Date(p.validUntil);
+      return !isNaN(exp.getTime()) && exp > now;
+    });
+    return active || null;
+  } catch (err) {
+    console.warn("getStudentActivePass error:", err.message);
+    return null;
+  }
+};
+
 export const getStudentPurchasedProductIds = async (req) => {
   try {
-    let studentId = req.student?._id || req.user?._id;
-    if (!studentId && req.headers?.authorization?.startsWith("Bearer ")) {
-      try {
-        const token = req.headers.authorization.split(" ")[1];
-        const decoded = verifyJwtToken(token);
-        if (decoded) {
-          studentId = decoded.studentId || decoded.id || decoded._id;
-        }
-      } catch (_) {}
-    }
-    if (!studentId && req.headers?.["x-student-id"]) {
-      studentId = req.headers["x-student-id"];
-    }
+    const studentId = getStudentIdFromReq(req);
     if (!studentId) return new Set();
 
+    const candidateIds = [studentId, String(studentId)];
+    if (req.student?._id) candidateIds.push(req.student._id, String(req.student._id));
+    if (req.student?.id) candidateIds.push(req.student.id, String(req.student.id));
+    const uniqueStudentIds = [...new Set(candidateIds.filter(Boolean))];
+
     const paidOrders = await Order.find({
-      studentId,
+      studentId: { $in: uniqueStudentIds },
       paymentStatus: "paid",
     }).select("items");
 
@@ -748,6 +795,17 @@ export const getStudentPurchasedProductIds = async (req) => {
         });
       }
     });
+
+    // Also check claimedProducts on active StudentPass
+    try {
+      const activePass = await getStudentActivePass(studentId);
+      if (activePass && Array.isArray(activePass.claimedProducts)) {
+        activePass.claimedProducts.forEach((pId) => {
+          if (pId) purchasedSet.add(String(pId));
+        });
+      }
+    } catch (_) {}
+
     return purchasedSet;
   } catch (err) {
     console.warn("getStudentPurchasedProductIds error:", err.message);
@@ -786,6 +844,10 @@ export const getStoreProducts = async (req, res) => {
       if (p.category) categoriesSet.add(p.category);
     });
 
+    const studentId = getStudentIdFromReq(req);
+    const activePass = await getStudentActivePass(studentId);
+    const hasActivePass = !!activePass;
+
     const purchasedSet = await getStudentPurchasedProductIds(req);
     const formattedProducts = (products || []).map((p) => {
       const pObj = typeof p.toObject === "function" ? p.toObject() : { ...p };
@@ -798,9 +860,33 @@ export const getStoreProducts = async (req, res) => {
       return pObj;
     });
 
+    // Pass settings
+    const setting = await SystemSetting.findOne({ key: "store_settings" });
+    const passDefaults = {
+      isEnabled: true,
+      title: "ClassTech All-Access Pass",
+      tagline: "Unlock Every Test Series & Notes Library with 1-Click",
+      description: "Get unrestricted 1-click access to all test series, chapter questions, and handwritten notes across NEET, JEE, and Board exams for 1 full year.",
+      price: 999,
+      originalPrice: 2999,
+      validityDays: 365,
+      posterUrl: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&q=80",
+      features: [
+        "Instant 1-Click unlock on all Store Test Series",
+        "Unlimited access to all Handwritten Notes & Mindmaps",
+        "Detailed AI test analytics and solutions",
+        "Valid for 365 days across all subjects",
+      ],
+    };
+    const savedPass = setting?.value?.classtechPass || {};
+    const passConfig = { ...passDefaults, ...savedPass };
+
     res.json({
       products: formattedProducts,
       categories: Array.from(categoriesSet),
+      hasActivePass,
+      studentPass: activePass || null,
+      classtechPass: passConfig,
     });
   } catch (err) {
     console.error("getStoreProducts error:", err);
@@ -825,6 +911,10 @@ export const getStoreProductById = async (req, res) => {
       }).select("title category totalMarks durationMinutes");
     }
 
+    const studentId = getStudentIdFromReq(req);
+    const activePass = await getStudentActivePass(studentId);
+    const hasActivePass = !!activePass;
+
     const purchasedSet = await getStudentPurchasedProductIds(req);
     const pObj = typeof product.toObject === "function" ? product.toObject() : { ...product };
     const pidStr = String(pObj._id || pObj.id || "");
@@ -834,9 +924,32 @@ export const getStoreProductById = async (req, res) => {
       pObj.images = pObj.images.map(optimizeCloudinaryUrl);
     }
 
+    const setting = await SystemSetting.findOne({ key: "store_settings" });
+    const passDefaults = {
+      isEnabled: true,
+      title: "ClassTech All-Access Pass",
+      tagline: "Unlock Every Test Series & Notes Library with 1-Click",
+      description: "Get unrestricted 1-click access to all test series, chapter questions, and handwritten notes across NEET, JEE, and Board exams for 1 full year.",
+      price: 999,
+      originalPrice: 2999,
+      validityDays: 365,
+      posterUrl: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&q=80",
+      features: [
+        "Instant 1-Click unlock on all Store Test Series",
+        "Unlimited access to all Handwritten Notes & Mindmaps",
+        "Detailed AI test analytics and solutions",
+        "Valid for 365 days across all subjects",
+      ],
+    };
+    const savedPass = setting?.value?.classtechPass || {};
+    const passConfig = { ...passDefaults, ...savedPass };
+
     res.json({
       product: pObj,
       attachedTestSeries,
+      hasActivePass,
+      studentPass: activePass || null,
+      classtechPass: passConfig,
     });
   } catch (err) {
     console.error("getStoreProductById error:", err);
@@ -1399,5 +1512,673 @@ export const getStudentOrders = async (req, res) => {
   } catch (err) {
     console.error("getStudentOrders error:", err);
     res.status(500).json({ message: "Failed to fetch student orders", error: err.message });
+  }
+};
+
+// -------------------------------------------------------------
+// CLASSTECH PASS (ALL-ACCESS PASS): STUDENT & PUBLIC
+// -------------------------------------------------------------
+
+export const getClassTechPassDetails = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "store_settings" });
+    const passDefaults = {
+      isEnabled: true,
+      title: "ClassTech All-Access Pass",
+      tagline: "Unlock Every Test Series & Notes Library with 1-Click",
+      description: "Get unrestricted 1-click access to all test series, chapter questions, and handwritten notes across NEET, JEE, and Board exams for 1 full year.",
+      price: 999,
+      originalPrice: 2999,
+      validityDays: 365,
+      posterUrl: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&q=80",
+      features: [
+        "Instant 1-Click unlock on all Store Test Series",
+        "Unlimited access to all Handwritten Notes & Mindmaps",
+        "Detailed AI test analytics and solutions",
+        "Valid for 365 days across all subjects",
+      ],
+    };
+
+    const savedPass = setting?.value?.classtechPass || {};
+    const pass = { ...passDefaults, ...savedPass };
+
+    const studentId = getStudentIdFromReq(req);
+    const activePass = await getStudentActivePass(studentId);
+
+    res.json({
+      success: true,
+      pass,
+      hasActivePass: !!activePass,
+      activePass: activePass || null,
+    });
+  } catch (err) {
+    console.error("getClassTechPassDetails error:", err);
+    res.status(500).json({ message: "Failed to get ClassTech Pass details", error: err.message });
+  }
+};
+
+export const getStudentPassStatus = async (req, res) => {
+  try {
+    const studentId = getStudentIdFromReq(req);
+    if (!studentId) {
+      return res.status(401).json({ message: "Unauthorized student" });
+    }
+
+    const activePass = await getStudentActivePass(studentId);
+    if (!activePass) {
+      return res.json({
+        hasActivePass: false,
+        activePass: null,
+        daysRemaining: 0,
+      });
+    }
+
+    const now = new Date();
+    const expiry = new Date(activePass.validUntil);
+    const diffMs = expiry.getTime() - now.getTime();
+    const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+    res.json({
+      hasActivePass: true,
+      activePass,
+      daysRemaining,
+      expiryDate: activePass.validUntil,
+      claimedCount: Array.isArray(activePass.claimedProducts) ? activePass.claimedProducts.length : 0,
+    });
+  } catch (err) {
+    console.error("getStudentPassStatus error:", err);
+    res.status(500).json({ message: "Failed to fetch student pass status", error: err.message });
+  }
+};
+
+export const claimProductWithPass = async (req, res) => {
+  try {
+    const studentId = getStudentIdFromReq(req);
+    if (!studentId) {
+      return res.status(401).json({ message: "Unauthorized student. Please log in." });
+    }
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ message: "Student record not found" });
+    }
+
+    const activePass = await getStudentActivePass(studentId);
+    if (!activePass) {
+      return res.status(403).json({
+        message: "You need an active ClassTech Pass to claim this product for free.",
+        needsPass: true,
+      });
+    }
+
+    const { productId } = req.body;
+    if (!productId) {
+      return res.status(400).json({ message: "productId is required" });
+    }
+
+    const product = await Product.findById(productId);
+    if (!product || product.status !== "active") {
+      return res.status(404).json({ message: "Product is currently unavailable or archived" });
+    }
+
+    // Check if already claimed / purchased
+    const purchasedSet = await getStudentPurchasedProductIds(req);
+    const prodIdStr = String(product._id || product.id);
+    if (purchasedSet.has(prodIdStr)) {
+      return res.json({
+        success: true,
+        alreadyOwned: true,
+        message: `"${product.title}" is already in your tests & notes library!`,
+        product: {
+          ...(typeof product.toObject === "function" ? product.toObject() : product),
+          isPurchased: true,
+        },
+      });
+    }
+
+    const orderNumber = `PASS-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const studentPhone = String(student.phone || student.mobileNumber || "9999999999").replace(/\D/g, "").slice(-10);
+    const studentEmail = student.email || "student@classtech.in";
+    const studentName = student.name || "Student";
+
+    const formattedItem = {
+      productId: product._id || product.id,
+      title: product.title,
+      price: 0,
+      quantity: 1,
+      productType: product.productType,
+      isDigital: product.isDigital,
+      testSeriesIds: (product.testSeriesIds || []).map(String),
+      notesPdfUrl: product.notesPdfUrl || "",
+      notesTitle: product.notesTitle || product.title,
+      digitalFileUrl: product.digitalFileUrl || "",
+      bundleItems: product.bundleItems || [],
+    };
+
+    // Create free Order granted via ClassTech Pass
+    const order = await Order.create({
+      orderNumber,
+      studentId: student._id || student.id,
+      studentName,
+      studentEmail,
+      studentPhone: studentPhone.length === 10 ? studentPhone : "9999999999",
+      instituteId: student.institute || student.user || null,
+      items: [formattedItem],
+      totalAmount: 0,
+      currency: "INR",
+      paymentStatus: "paid",
+      paymentMethod: "classtech_pass",
+      cfOrderId: `pass_${orderNumber}`,
+      fulfillmentStatus: "fulfilled",
+      shippingAddress: {},
+    });
+
+    // If PDF notes, create Note record for student
+    if (product.notesPdfUrl) {
+      try {
+        await Note.create({
+          institute: order.instituteId || null,
+          createdBy: student._id || student.id,
+          title: product.notesTitle || product.title,
+          pdfUrl: product.notesPdfUrl,
+          pdfPublicId: `store_pass_${order.orderNumber}`,
+          targetType: "student",
+          students: [order.studentId],
+          category: "Store Notes",
+          type: "Chapter Notes",
+          isPurchased: true,
+        });
+      } catch (nErr) {
+        console.warn("Failed to create note record for claimed item:", nErr.message);
+      }
+    }
+
+    // If bundle items
+    if (Array.isArray(product.bundleItems)) {
+      for (const bItem of product.bundleItems) {
+        if (bItem.type === "notes" && bItem.url) {
+          try {
+            await Note.create({
+              institute: order.instituteId || null,
+              createdBy: student._id || student.id,
+              title: bItem.title || "Bundle Notes",
+              pdfUrl: bItem.url,
+              pdfPublicId: `store_bundle_${order.orderNumber}`,
+              targetType: "student",
+              students: [order.studentId],
+              category: "Store Notes",
+              type: "Chapter Notes",
+              isPurchased: true,
+            });
+          } catch (_) {}
+        }
+      }
+    }
+
+    // Track claimed item on StudentPass
+    try {
+      const passId = activePass._id || activePass.id;
+      if (passId) {
+        const passDoc = await StudentPass.findById(passId);
+        if (passDoc) {
+          const currentClaimed = Array.isArray(passDoc.claimedProducts) ? passDoc.claimedProducts : [];
+          if (!currentClaimed.includes(prodIdStr)) {
+            passDoc.claimedProducts = [...currentClaimed, prodIdStr];
+            await passDoc.save();
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Invalidate caches so tests & notes lists update immediately
+    try {
+      const sId = String(student._id || student.id || "");
+      if (sId) {
+        await deleteCache(`student:test_series:${sId}`);
+        await deleteCache(`student:notes:${sId}`);
+        await deleteCache(`student:purchased_product_ids:${sId}`);
+      }
+      await clearCachePattern(`student:test_series:*`);
+      await clearCachePattern(`student:notes:*`);
+      await clearCachePattern(`student:purchased_product_ids:*`);
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      message: `"${product.title}" added to your library successfully!`,
+      orderId: order._id || order.id,
+      orderNumber,
+      product: {
+        ...(typeof product.toObject === "function" ? product.toObject() : product),
+        isPurchased: true,
+      },
+    });
+  } catch (err) {
+    console.error("claimProductWithPass error:", err);
+    res.status(500).json({ message: "Failed to claim product with pass", error: err.message });
+  }
+};
+
+export const passCheckout = async (req, res) => {
+  try {
+    const studentId = getStudentIdFromReq(req);
+    if (!studentId) {
+      return res.status(401).json({ message: "Unauthorized student. Please log in." });
+    }
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ message: "Student record not found" });
+    }
+
+    // Check if student already has active pass
+    const existingActivePass = await getStudentActivePass(studentId);
+    if (existingActivePass) {
+      return res.status(400).json({
+        message: "You already have an active ClassTech Pass! Unlimited access is currently active.",
+        pass: existingActivePass,
+      });
+    }
+
+    // Get current pass configuration
+    const setting = await SystemSetting.findOne({ key: "store_settings" });
+    const passConfig = setting?.value?.classtechPass || {
+      isEnabled: true,
+      title: "ClassTech All-Access Pass",
+      price: 999,
+      validityDays: 365,
+    };
+
+    if (!passConfig.isEnabled) {
+      return res.status(400).json({ message: "ClassTech Pass is currently not available for purchase." });
+    }
+
+    const price = Number(passConfig.price ?? 999);
+    const validityDays = Number(passConfig.validityDays ?? 365);
+    const orderNumber = `PASS-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const studentPhone = String(student.phone || student.mobileNumber || "9999999999").replace(/\D/g, "").slice(-10);
+    const studentEmail = student.email || "student@classtech.in";
+    const studentName = student.name || "Student";
+
+    // If price is 0, instant activation
+    if (price <= 0) {
+      const validUntil = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000);
+      const studentPass = await StudentPass.create({
+        studentId: String(student._id || student.id),
+        passTitle: passConfig.title || "ClassTech All-Access Pass",
+        price: 0,
+        validityDays,
+        orderId: orderNumber,
+        status: "active",
+        validFrom: new Date(),
+        validUntil,
+        claimedProducts: [],
+      });
+
+      await Order.create({
+        orderNumber,
+        studentId: student._id || student.id,
+        studentName,
+        studentEmail,
+        studentPhone: studentPhone.length === 10 ? studentPhone : "9999999999",
+        instituteId: student.institute || student.user || null,
+        items: [
+          {
+            title: passConfig.title || "ClassTech All-Access Pass",
+            price: 0,
+            quantity: 1,
+            productType: "classtech_pass",
+            isDigital: true,
+          },
+        ],
+        totalAmount: 0,
+        currency: "INR",
+        paymentStatus: "paid",
+        paymentMethod: "free",
+        cfOrderId: `free_${orderNumber}`,
+        fulfillmentStatus: "fulfilled",
+      });
+
+      return res.json({
+        success: true,
+        isFree: true,
+        orderNumber,
+        message: "ClassTech Pass activated successfully!",
+        pass: studentPass,
+      });
+    }
+
+    const cfOrderId = "pass_" + crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const config = await getCashfreeConfig();
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const rawFrontendUrl = process.env.FRONTEND_URL || "https://app.classtech.in";
+    const secureFrontendUrl = rawFrontendUrl.startsWith("http://")
+      ? rawFrontendUrl.replace(/^http:\/\//, "https://")
+      : rawFrontendUrl.startsWith("https://")
+      ? rawFrontendUrl
+      : `https://${rawFrontendUrl}`;
+
+    const payload = {
+      order_id: cfOrderId,
+      order_amount: price,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: String(student._id || student.id),
+        customer_name: studentName,
+        customer_email: studentEmail,
+        customer_phone: studentPhone.length === 10 ? studentPhone : "9999999999",
+      },
+      order_meta: {
+        return_url: `${secureFrontendUrl}/store/pass/verify?order_id=${cfOrderId}`,
+      },
+      order_note: `ClassTech Pass Subscription #${orderNumber}`,
+    };
+
+    let paymentSessionId = "";
+    try {
+      const cfRes = await axios.post(`${baseUrl}/orders`, payload, { headers });
+      paymentSessionId = cfRes.data?.payment_session_id || "";
+    } catch (cfErr) {
+      console.error("Cashfree Pass Order Error:", cfErr.response?.data || cfErr.message);
+      return res.status(500).json({
+        message: "Failed to initiate Cashfree payment session for ClassTech Pass",
+        error: cfErr.response?.data?.message || cfErr.message,
+      });
+    }
+
+    const order = await Order.create({
+      orderNumber,
+      studentId: student._id || student.id,
+      studentName,
+      studentEmail,
+      studentPhone: studentPhone.length === 10 ? studentPhone : "9999999999",
+      instituteId: student.institute || student.user || null,
+      items: [
+        {
+          title: passConfig.title || "ClassTech All-Access Pass",
+          price,
+          quantity: 1,
+          productType: "classtech_pass",
+          isDigital: true,
+        },
+      ],
+      totalAmount: price,
+      currency: "INR",
+      paymentStatus: "pending",
+      paymentMethod: "cashfree",
+      cfOrderId,
+      cfPaymentSessionId: paymentSessionId,
+      fulfillmentStatus: "pending",
+    });
+
+    res.json({
+      success: true,
+      orderNumber,
+      orderId: order._id || order.id,
+      cfOrderId,
+      paymentSessionId,
+      totalAmount: price,
+      environment,
+    });
+  } catch (err) {
+    console.error("passCheckout error:", err);
+    res.status(500).json({ message: "Failed to initiate pass checkout", error: err.message });
+  }
+};
+
+export const verifyPassPayment = async (req, res) => {
+  try {
+    const studentId = getStudentIdFromReq(req);
+    const { orderId, cfOrderId } = req.body;
+
+    const queryConditions = [];
+    if (orderId) {
+      queryConditions.push({ _id: orderId });
+      queryConditions.push({ orderNumber: orderId });
+    }
+    if (cfOrderId) {
+      queryConditions.push({ cfOrderId });
+    }
+
+    if (queryConditions.length === 0) {
+      return res.status(400).json({ message: "orderId or cfOrderId is required." });
+    }
+
+    const order = await Order.findOne({ $or: queryConditions });
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const sId = String(order.studentId || studentId);
+
+    // If order already paid, return pass
+    if (order.paymentStatus === "paid") {
+      let activePass = await getStudentActivePass(sId);
+      return res.json({
+        success: true,
+        message: "ClassTech Pass already active!",
+        order,
+        pass: activePass,
+      });
+    }
+
+    const config = await getCashfreeConfig();
+    let cfStatus = await checkCashfreeOrderStatus(order.cfOrderId || cfOrderId, config);
+    if (cfStatus?.status === "pending") {
+      await new Promise((r) => setTimeout(r, 1500));
+      cfStatus = await checkCashfreeOrderStatus(order.cfOrderId || cfOrderId, config);
+    }
+
+    const isPaid =
+      order.paymentStatus === "paid" ||
+      cfStatus?.status === "success" ||
+      cfStatus?.status === "paid" ||
+      cfStatus?.status === "PAID" ||
+      cfStatus?.order_status === "PAID" ||
+      cfStatus?.rawData?.order_status === "PAID" ||
+      (Array.isArray(cfStatus?.rawData?.payments) &&
+        cfStatus.rawData.payments.some(
+          (p) => String(p?.payment_status || "").toUpperCase() === "SUCCESS"
+        ));
+
+    if (isPaid) {
+      order.paymentStatus = "paid";
+      order.cfPaymentId =
+        cfStatus?.payment_id ||
+        cfStatus?.cf_payment_id ||
+        cfStatus?.rawData?.payments?.find(
+          (p) => String(p?.payment_status || "").toUpperCase() === "SUCCESS"
+        )?.cf_payment_id ||
+        order.cfOrderId;
+      order.fulfillmentStatus = "fulfilled";
+      await order.save();
+
+      // Get settings for validity days
+      const setting = await SystemSetting.findOne({ key: "store_settings" });
+      const passConfig = setting?.value?.classtechPass || { validityDays: 365, title: "ClassTech All-Access Pass" };
+      const validityDays = Number(passConfig.validityDays || 365);
+      const validUntil = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000);
+
+      // Create or update StudentPass
+      let studentPass = await StudentPass.create({
+        studentId: sId,
+        passTitle: passConfig.title || "ClassTech All-Access Pass",
+        price: Number(order.totalAmount || 999),
+        validityDays,
+        orderId: order.orderNumber,
+        cfOrderId: order.cfOrderId,
+        paymentId: order.cfPaymentId,
+        status: "active",
+        validFrom: new Date(),
+        validUntil,
+        claimedProducts: [],
+      });
+
+      // Clear student caches
+      try {
+        await deleteCache(`student:test_series:${sId}`);
+        await deleteCache(`student:notes:${sId}`);
+        await deleteCache(`student:purchased_product_ids:${sId}`);
+      } catch (_) {}
+
+      return res.json({
+        success: true,
+        message: "Congratulations! ClassTech All-Access Pass is now active!",
+        order,
+        pass: studentPass,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: "Payment could not be verified or is still processing.",
+      cfStatus,
+    });
+  } catch (err) {
+    console.error("verifyPassPayment error:", err);
+    res.status(500).json({ message: "Failed to verify pass payment", error: err.message });
+  }
+};
+
+// -------------------------------------------------------------
+// SUPER ADMIN: CLASSTECH PASS MANAGEMENT
+// -------------------------------------------------------------
+
+export const getAdminClassTechPass = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: "store_settings" });
+    const defaults = {
+      isEnabled: true,
+      title: "ClassTech All-Access Pass",
+      tagline: "Unlock Every Test Series & Notes Library with 1-Click",
+      description: "Get unrestricted 1-click access to all test series, chapter questions, and handwritten notes across NEET, JEE, and Board exams for 1 full year.",
+      price: 999,
+      originalPrice: 2999,
+      validityDays: 365,
+      posterUrl: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=1200&q=80",
+      features: [
+        "Instant 1-Click unlock on all Store Test Series",
+        "Unlimited access to all Handwritten Notes & Mindmaps",
+        "Detailed AI test analytics and solutions",
+        "Valid for 365 days across all subjects",
+      ],
+    };
+
+    const savedPass = setting?.value?.classtechPass || {};
+    const pass = { ...defaults, ...savedPass };
+
+    // Subscriber stats
+    const now = new Date();
+    const allPasses = await StudentPass.find({});
+    const activeCount = (allPasses || []).filter((p) => p.status === "active" && new Date(p.validUntil) > now).length;
+    const totalRevenue = (allPasses || []).reduce((acc, p) => acc + (Number(p.price) || 0), 0);
+
+    res.json({
+      pass,
+      metrics: {
+        totalPassesSold: allPasses.length,
+        activeSubscribers: activeCount,
+        totalPassRevenue: totalRevenue,
+      },
+    });
+  } catch (err) {
+    console.error("getAdminClassTechPass error:", err);
+    res.status(500).json({ message: "Failed to fetch pass settings", error: err.message });
+  }
+};
+
+export const updateAdminClassTechPass = async (req, res) => {
+  try {
+    const { pass } = req.body;
+    if (!pass || typeof pass !== "object") {
+      return res.status(400).json({ message: "Invalid pass payload" });
+    }
+
+    let setting = await SystemSetting.findOne({ key: "store_settings" });
+    if (!setting) {
+      setting = await SystemSetting.create({
+        key: "store_settings",
+        value: {},
+      });
+    }
+
+    const currentVal = setting.value || {};
+    const currentPass = currentVal.classtechPass || {};
+    const updatedPass = {
+      ...currentPass,
+      ...pass,
+      price: Number(pass.price ?? currentPass.price ?? 999),
+      originalPrice: Number(pass.originalPrice ?? currentPass.originalPrice ?? 2999),
+      validityDays: Number(pass.validityDays ?? currentPass.validityDays ?? 365),
+      isEnabled: pass.isEnabled !== undefined ? Boolean(pass.isEnabled) : (currentPass.isEnabled ?? true),
+      features: Array.isArray(pass.features) ? pass.features : (currentPass.features || []),
+      posterUrl: pass.posterUrl !== undefined ? String(pass.posterUrl).trim() : (currentPass.posterUrl || ""),
+      title: pass.title ? String(pass.title).trim() : (currentPass.title || "ClassTech All-Access Pass"),
+      tagline: pass.tagline ? String(pass.tagline).trim() : (currentPass.tagline || ""),
+      description: pass.description ? String(pass.description).trim() : (currentPass.description || ""),
+    };
+
+    setting.value = {
+      ...currentVal,
+      classtechPass: updatedPass,
+    };
+    await setting.save();
+
+    res.json({
+      success: true,
+      message: "ClassTech Pass settings updated successfully!",
+      pass: updatedPass,
+    });
+  } catch (err) {
+    console.error("updateAdminClassTechPass error:", err);
+    res.status(500).json({ message: "Failed to update pass settings", error: err.message });
+  }
+};
+
+export const uploadPassPoster = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "No image file provided" });
+    }
+
+    const b64 = Buffer.from(req.file.buffer).toString("base64");
+    const dataUri = `data:${req.file.mimetype};base64,${b64}`;
+
+    const uploadRes = await cloudinary.uploader.upload(dataUri, {
+      folder: "classtech_store/passes",
+      resource_type: "image",
+    });
+
+    const posterUrl = uploadRes.secure_url || uploadRes.url;
+
+    // Save directly to store_settings
+    let setting = await SystemSetting.findOne({ key: "store_settings" });
+    if (!setting) {
+      setting = await SystemSetting.create({ key: "store_settings", value: {} });
+    }
+
+    const currentVal = setting.value || {};
+    const currentPass = currentVal.classtechPass || {};
+    currentPass.posterUrl = posterUrl;
+    setting.value = { ...currentVal, classtechPass: currentPass };
+    await setting.save();
+
+    res.json({
+      success: true,
+      message: "Pass poster uploaded successfully!",
+      posterUrl,
+    });
+  } catch (err) {
+    console.error("uploadPassPoster error:", err);
+    res.status(500).json({ message: "Failed to upload poster", error: err.message });
   }
 };
