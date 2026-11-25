@@ -32,6 +32,7 @@ import privacyRoutes from "./routes/privacyRoutes.js";
 import marketingRoutes from "./routes/marketingRoutes.js";
 import studentD2cRoutes from "./routes/studentD2cRoutes.js";
 import flashcardRoutes from "./routes/flashcardRoutes.js";
+import careerRoutes from "./routes/careerRoutes.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
@@ -181,6 +182,7 @@ app.use(["/privacy", "/api/privacy"], privacyRoutes);
 app.use(["/marketing", "/api/marketing"], marketingRoutes);
 app.use(["/student-d2c", "/api/student-d2c", "/api/v2/student-d2c"], studentD2cRoutes);
 app.use(["/flashcards", "/api/flashcards"], flashcardRoutes);
+app.use(["/career", "/api/career", "/api/v2/career"], careerRoutes);
 
 app.get("/debug-sentry", protect, function mainHandler(req, res) {
   if (process.env.NODE_ENV === "production" || req.user?.role !== "super_admin") {
