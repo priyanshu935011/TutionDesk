@@ -17,6 +17,7 @@ import { logTeacherActivity } from "../utils/teacherActivityLogger.js";
 import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendStudentNotification } from "../services/notificationService.js";
+import { autoIngestFromTestAttempt } from "../services/mistakeBookService.js";
 
 const DEFAULT_CATEGORIES = [
   { name: "Class 10", icon: "🎓" },
@@ -1904,6 +1905,17 @@ export const submitStudentTest = async (req, res) => {
     } catch (nErr) {
       console.warn("submitStudentTest notification error:", nErr.message);
     }
+
+    // Auto-ingest wrong and skipped questions into AI Mistake Notebook asynchronously
+    try {
+      autoIngestFromTestAttempt({
+        userId: studentId,
+        instituteId: instId,
+        testTitle: test.title,
+        attemptId: attempt._id,
+        evaluatedAnswers,
+      }).catch((e) => console.warn("[MistakeBook] autoIngest async error:", e.message));
+    } catch (_) {}
 
     res.json({
       message: "Test submitted successfully",

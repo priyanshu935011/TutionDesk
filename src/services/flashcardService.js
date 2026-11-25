@@ -1,5 +1,6 @@
 import { supabase } from "../utils/supabase.js";
 import { callGeminiRaw, extractJsonFromText } from "./aiService.js";
+import { autoIngestFromFlashcard } from "./mistakeBookService.js";
 import fs from "fs";
 import path from "path";
 
@@ -781,6 +782,38 @@ export async function recordCardReview({
       await supabase.from("flashcard_decks").update({
         last_studied_at: new Date().toISOString(),
       }).eq("id", deckId);
+    }
+
+    // Auto-ingest into AI Mistake Notebook if student rated "Again" (1)
+    if (numRating === 1) {
+      (async () => {
+        try {
+          const { data: cData } = await supabase
+            .from("flashcards")
+            .select("question, answer, explanation, topic")
+            .eq("id", flashcardId)
+            .maybeSingle();
+
+          const { data: dData } = await supabase
+            .from("flashcard_decks")
+            .select("title, subject")
+            .eq("id", deckId)
+            .maybeSingle();
+
+          if (cData) {
+            await autoIngestFromFlashcard({
+              userId: uid,
+              flashcardId,
+              deckTitle: dData?.title || "Flashcard Deck",
+              question: cData.question,
+              answer: cData.answer,
+              explanation: cData.explanation,
+              subject: dData?.subject || "General",
+              topic: cData.topic || "",
+            });
+          }
+        } catch (_) {}
+      })().catch(() => {});
     }
   } catch (err) {
     console.warn("[Flashcards] DB record review failed, updating fallback store:", err.message);

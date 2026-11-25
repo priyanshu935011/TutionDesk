@@ -34,6 +34,7 @@ import studentD2cRoutes from "./routes/studentD2cRoutes.js";
 import flashcardRoutes from "./routes/flashcardRoutes.js";
 import careerRoutes from "./routes/careerRoutes.js";
 import aiTutorRoutes from "./routes/aiTutorRoutes.js";
+import mistakeBookRoutes from "./routes/mistakeBookRoutes.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
@@ -185,6 +186,7 @@ app.use(["/student-d2c", "/api/student-d2c", "/api/v2/student-d2c"], studentD2cR
 app.use(["/flashcards", "/api/flashcards"], flashcardRoutes);
 app.use(["/career", "/api/career", "/api/v2/career"], careerRoutes);
 app.use(["/ai-tutor", "/api/ai-tutor", "/api/v2/ai-tutor"], aiTutorRoutes);
+app.use(["/mistake-book", "/api/mistake-book", "/api/v2/mistake-book"], mistakeBookRoutes);
 
 app.get("/debug-sentry", protect, function mainHandler(req, res) {
   if (process.env.NODE_ENV === "production" || req.user?.role !== "super_admin") {
