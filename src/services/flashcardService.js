@@ -98,6 +98,118 @@ export function calculateSM2(rating, prevReps = 0, prevInterval = 0, prevEF = 2.
 }
 
 /**
+ * Fetch Flashcards Quota for a student
+ */
+export async function getStudentFlashcardQuota(userId) {
+  let limit = 25;
+  let created = 0;
+  let planTier = "free";
+
+  if (!userId || userId === "guest_student") {
+    return { limit, created, remaining: limit - created, planTier };
+  }
+
+  // 1. Try Supabase students table
+  try {
+    const { data, error } = await supabase
+      .from("students")
+      .select("flashcards_limit, flashcards_created, plan_tier")
+      .or(`id.eq.${userId},user_id.eq.${userId}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (data && !error) {
+      limit = Number(data.flashcards_limit ?? 25);
+      created = Number(data.flashcards_created ?? 0);
+      planTier = data.plan_tier || "free";
+      return {
+        limit,
+        created,
+        remaining: Math.max(0, limit - created),
+        planTier,
+      };
+    }
+  } catch (_) {}
+
+  // 2. Try Mongoose Student model
+  try {
+    const mongoose = (await import("mongoose")).default;
+    const Student = (await import("../models/Student.js")).default;
+    let stu = null;
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      stu = await Student.findById(userId).lean();
+    }
+    if (!stu) {
+      stu = await Student.findOne({
+        $or: [{ _id: userId }, { user: userId }, { phone: userId }, { email: userId }],
+      }).lean();
+    }
+    if (stu) {
+      limit = Number(stu.flashcards_limit ?? stu.flashcardsLimit ?? 25);
+      created = Number(stu.flashcards_created ?? stu.flashcardsCreated ?? 0);
+      planTier = stu.plan_tier || stu.planTier || "free";
+    }
+  } catch (_) {}
+
+  return {
+    limit,
+    created,
+    remaining: Math.max(0, limit - created),
+    planTier,
+  };
+}
+
+/**
+ * Increment student flashcard usage count
+ */
+export async function incrementStudentFlashcardUsage(userId, count) {
+  if (!count || count <= 0 || !userId || userId === "guest_student") return;
+
+  // 1. Supabase update
+  try {
+    await supabase.rpc("increment_student_flashcard_usage", {
+      p_student_id: String(userId),
+      p_count: count,
+    }).catch(async () => {
+      const { data: row } = await supabase
+        .from("students")
+        .select("flashcards_created")
+        .or(`id.eq.${userId},user_id.eq.${userId}`)
+        .limit(1)
+        .maybeSingle();
+      const cur = Number(row?.flashcards_created || 0);
+      await supabase
+        .from("students")
+        .update({ flashcards_created: cur + count })
+        .or(`id.eq.${userId},user_id.eq.${userId}`);
+    });
+  } catch (err) {
+    console.warn("[Flashcards] Supabase usage increment error:", err.message);
+  }
+
+  // 2. Mongoose update
+  try {
+    const mongoose = (await import("mongoose")).default;
+    const Student = (await import("../models/Student.js")).default;
+    let query = { $or: [{ phone: userId }, { email: userId }] };
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      query.$or.unshift({ _id: userId }, { user: userId });
+    }
+    await Student.findOneAndUpdate(
+      query,
+      {
+        $inc: {
+          flashcards_created: count,
+          flashcardsCreated: count,
+        },
+      }
+    );
+  } catch (err) {
+    console.warn("[Flashcards] Mongoose usage increment error:", err.message);
+  }
+}
+
+/**
  * Generate Flashcards using Gemini AI
  */
 export async function generateFlashcardsFromAi({
@@ -119,6 +231,19 @@ export async function generateFlashcardsFromAi({
   instituteId,
 }) {
   const count = Math.min(50, Math.max(5, Number(cardCount) || 20));
+
+  // Quota validation
+  const quota = await getStudentFlashcardQuota(userId);
+  if (quota.remaining <= 0) {
+    throw new Error(
+      `You have reached your AI Flashcards limit (${quota.created}/${quota.limit} created). Upgrade to ClassTech Premium to generate more revision cards.`
+    );
+  }
+  if (count > quota.remaining) {
+    throw new Error(
+      `You requested ${count} flashcards, but only ${quota.remaining} card(s) remain in your quota (${quota.created}/${quota.limit} used). Please adjust the card count or upgrade to ClassTech Premium.`
+    );
+  }
 
   let systemInstruction = `You are a world-class cognitive learning specialist and master teacher creating active-recall flashcards for student revision using spaced repetition.
 Your goal is to extract high-yield, conceptually sound flashcards that maximize retention, active recall, and deep conceptual understanding.`;
@@ -321,11 +446,17 @@ Respond strictly with valid JSON in this exact structure:
     saveFallbackStore(store);
   }
 
+  if (savedCards.length > 0) {
+    await incrementStudentFlashcardUsage(userId, savedCards.length);
+  }
+  const updatedQuota = await getStudentFlashcardQuota(userId);
+
   return {
     success: true,
     deck: savedDeck,
     cards: savedCards,
     totalCards: savedCards.length,
+    quota: updatedQuota,
   };
 }
 
@@ -431,6 +562,8 @@ export async function getDashboardOverview(userId, instituteId = null) {
   const targetDailyCards = dueToday + completedToday;
   const dailyProgressPercent = targetDailyCards > 0 ? Math.min(100, Math.round((completedToday / targetDailyCards) * 100)) : 0;
 
+  const quota = await getStudentFlashcardQuota(uid);
+
   return {
     overview: {
       totalCards,
@@ -444,6 +577,7 @@ export async function getDashboardOverview(userId, instituteId = null) {
         percentage: dailyProgressPercent,
       },
     },
+    quota,
     decks,
   };
 }

@@ -10,9 +10,14 @@ import { supabase } from "../utils/supabase.js";
 // Helper to extract student/user id safely
 function getUserIdFromReq(req) {
   return (
+    req.student?._id ||
+    req.student?.id ||
+    req.studentId ||
+    req.user?.studentId ||
     req.user?._id ||
     req.user?.id ||
     req.headers["x-student-id"] ||
+    req.headers["x-user-id"] ||
     req.query?.studentId ||
     req.body?.studentId ||
     "guest_student"

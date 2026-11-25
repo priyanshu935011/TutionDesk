@@ -67,6 +67,10 @@ const studentPackageSchema = new mongoose.Schema(
         type: Number,
         default: 3,
       },
+      aiFlashcardsLimit: {
+        type: Number,
+        default: 25, // Editable by admin per tier
+      },
     },
     features: {
       aiTutor: { type: Boolean, default: true },

@@ -2023,6 +2023,14 @@ export const verifyPassPayment = async (req, res) => {
         claimedProducts: [],
       });
 
+      // Upgrade student to premium tier & add flashcards quota
+      try {
+        const { addStudentPremiumFlashcards } = await import("../services/studentEntitlementService.js");
+        await addStudentPremiumFlashcards(sId);
+      } catch (tierErr) {
+        console.warn("[storeController] addStudentPremiumFlashcards warning:", tierErr.message);
+      }
+
       // Clear student caches
       try {
         await deleteCache(`student:test_series:${sId}`);

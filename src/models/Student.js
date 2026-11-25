@@ -204,6 +204,36 @@ const studentSchema = new mongoose.Schema(
       default: "NEET",
       trim: true,
     },
+    flashcardsLimit: {
+      type: Number,
+      default: 25,
+      min: 0,
+    },
+    flashcards_limit: {
+      type: Number,
+      default: 25,
+      min: 0,
+    },
+    flashcardsCreated: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    flashcards_created: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    planTier: {
+      type: String,
+      enum: ["free", "premium"],
+      default: "free",
+    },
+    plan_tier: {
+      type: String,
+      enum: ["free", "premium"],
+      default: "free",
+    },
   },
   {
     timestamps: true,

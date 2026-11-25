@@ -365,13 +365,24 @@ export const optionalAuth = async (req, res, next) => {
       return next();
     }
 
-    const userId = decoded.id || decoded._id || decoded.userId || decoded.sub;
+    const userId = decoded.id || decoded._id || decoded.userId || decoded.sub || decoded.studentId;
     let user = null;
     if (userId && mongoose.Types.ObjectId.isValid(userId)) {
       user = await User.findById(userId).select("-password").lean().catch(() => null);
     }
     if (!user && decoded.email) {
       user = await User.findOne({ email: decoded.email.toLowerCase().trim() }).select("-password").lean().catch(() => null);
+    }
+    if (!user && (decoded.role === "student" || decoded.studentId)) {
+      const sId = decoded.studentId || decoded.id || userId;
+      user = {
+        _id: sId,
+        id: sId,
+        studentId: sId,
+        role: "student",
+        ...decoded,
+      };
+      req.studentId = sId;
     }
 
     req.user = user || null;

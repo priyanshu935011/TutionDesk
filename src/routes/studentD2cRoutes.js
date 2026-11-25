@@ -23,6 +23,8 @@ import {
   getAdminStudentPackages,
   createOrUpdateStudentPackage,
   setStudentFeatureOverride,
+  getAdminTierLimits,
+  updateAdminTierLimits,
 } from "../controllers/studentD2cController.js";
 import { getStudentStreaks } from "../controllers/streakController.js";
 
@@ -76,5 +78,10 @@ router.get("/admin/packages", protect, superAdminOnly, getAdminStudentPackages);
 router.post("/admin/packages", protect, superAdminOnly, createOrUpdateStudentPackage);
 router.put("/admin/packages/:id", protect, superAdminOnly, createOrUpdateStudentPackage);
 router.post("/admin/student-override", protect, superAdminOnly, setStudentFeatureOverride);
+
+// 13. Tier Flashcard Limits Management
+router.get("/tier-limits", getAdminTierLimits);
+router.get("/admin/tier-limits", protect, superAdminOnly, getAdminTierLimits);
+router.put("/admin/tier-limits", protect, superAdminOnly, updateAdminTierLimits);
 
 export default router;

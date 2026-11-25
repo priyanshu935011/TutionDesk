@@ -15,6 +15,9 @@ import {
   incrementDailyUsage,
   getDailyUsage,
   ensureDefaultPackages,
+  getTierFlashcardLimit,
+  updateTierFlashcardLimits,
+  addStudentPremiumFlashcards,
 } from "../services/studentEntitlementService.js";
 import { sendSMSOTP } from "../utils/smsHelper.js";
 import { sendOTPEmail } from "../utils/mailer.js";
@@ -110,6 +113,7 @@ export const verifyDirectStudentOtp = async (req, res) => {
     }
 
     // 2. Find or create Student profile
+    const freeLimit = await getTierFlashcardLimit("free");
     let student = await Student.findOne({ $or: [{ phone: user.phone || phone }, { email: user.email }] });
     if (!student) {
       student = await Student.create({
@@ -123,7 +127,21 @@ export const verifyDirectStudentOtp = async (req, res) => {
         parent_phone: user.phone || phone,
         enrollmentNumber: `STU-D2C-${Date.now().toString().slice(-6)}`,
         targetExam,
+        flashcards_limit: freeLimit,
+        flashcardsLimit: freeLimit,
+        flashcards_created: 0,
+        flashcardsCreated: 0,
+        plan_tier: "free",
+        planTier: "free",
       });
+    } else if (student.flashcards_limit === undefined || student.flashcards_limit === null) {
+      student.flashcards_limit = freeLimit;
+      student.flashcardsLimit = freeLimit;
+      student.flashcards_created = student.flashcards_created || 0;
+      student.flashcardsCreated = student.flashcardsCreated || 0;
+      student.plan_tier = student.plan_tier || "free";
+      student.planTier = student.planTier || "free";
+      await student.save();
     }
 
     const studentId = String(student._id || user._id);
@@ -166,6 +184,14 @@ export const verifyDirectStudentOtp = async (req, res) => {
         name: student.name,
         enrollmentNumber: student.enrollmentNumber,
         targetExam: student.targetExam || targetExam,
+        flashcards_limit: student.flashcards_limit ?? freeLimit,
+        flashcardsLimit: student.flashcards_limit ?? freeLimit,
+        flashcards_created: student.flashcards_created ?? 0,
+        flashcardsCreated: student.flashcards_created ?? 0,
+        flashcards_remaining: Math.max(0, (student.flashcards_limit ?? freeLimit) - (student.flashcards_created ?? 0)),
+        flashcardsRemaining: Math.max(0, (student.flashcards_limit ?? freeLimit) - (student.flashcards_created ?? 0)),
+        plan_tier: student.plan_tier || "free",
+        planTier: student.plan_tier || "free",
       },
     });
   } catch (error) {
@@ -848,12 +874,19 @@ export const verifyAndUnlockPackage = async (req, res) => {
       await CashfreePayment.findOneAndUpdate({ orderId }, { status: "SUCCESS" }).catch(() => {});
     }
 
+    // Add premium flashcards quota upon upgrading
+    let quotaUpgrade = null;
+    if (pkg.price > 0 || pkg.slug.includes("premium") || pkg.slug.includes("pro")) {
+      quotaUpgrade = await addStudentPremiumFlashcards(studentId);
+    }
+
     return res.json({
       success: true,
       message: `Congratulations! ${pkg.name} is now active on your account.`,
       tier: entitlement.tier,
       expiresAt: entitlement.packageExpiresAt,
       entitlement,
+      quota: quotaUpgrade,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -945,6 +978,53 @@ export const setStudentFeatureOverride = async (req, res) => {
       success: true,
       message: `Feature ${featureKey} override applied for student ${studentId}.`,
       entitlement,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============================================================================
+// 13. TIER FLASHCARD LIMITS MANAGEMENT (Free & ClassTech Premium)
+// ============================================================================
+
+export const getAdminTierLimits = async (req, res) => {
+  try {
+    await ensureDefaultPackages();
+    const freeLimit = await getTierFlashcardLimit("free");
+    const premiumLimit = await getTierFlashcardLimit("premium");
+    return res.json({
+      success: true,
+      tiers: {
+        free: {
+          slug: "classtech-free",
+          name: "ClassTech Free",
+          aiFlashcardsLimit: freeLimit,
+        },
+        premium: {
+          slug: "classtech-premium",
+          name: "ClassTech Premium",
+          aiFlashcardsLimit: premiumLimit,
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateAdminTierLimits = async (req, res) => {
+  try {
+    const { freeLimit, premiumLimit } = req.body;
+    await ensureDefaultPackages();
+    const results = await updateTierFlashcardLimits({
+      freeLimit: freeLimit !== undefined ? Number(freeLimit) : undefined,
+      premiumLimit: premiumLimit !== undefined ? Number(premiumLimit) : undefined,
+    });
+    return res.json({
+      success: true,
+      message: "Tier flashcard limits updated successfully.",
+      tiers: results,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
