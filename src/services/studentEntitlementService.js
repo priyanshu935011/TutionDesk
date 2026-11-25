@@ -78,29 +78,38 @@ export const DEFAULT_PACKAGES = [
  */
 export async function ensureDefaultPackages() {
   try {
-    // 1. Ensure Free Tier
-    let freePkg = await StudentPackage.findOne({ slug: "classtech-free" });
-    if (!freePkg) {
-      await StudentPackage.create(DEFAULT_PACKAGES[0]);
-    } else if (freePkg.quotas?.aiFlashcardsLimit === undefined) {
-      freePkg.quotas = { ...(freePkg.quotas || {}), aiFlashcardsLimit: 25 };
-      await freePkg.save();
-    }
+    const { supabase } = await import("../utils/supabase.js");
+    // 1. Ensure ClassTech Free
+    await supabase
+      .from("student_packages")
+      .update({
+        title: "ClassTech Free",
+        name: "ClassTech Free",
+        badge_text: "FREE",
+        badge: "Free Tier",
+        price: 0,
+        is_active: true,
+      })
+      .eq("tier", "free");
 
-    // 2. Ensure Premium Tier
-    let premPkg = await StudentPackage.findOne({ slug: "classtech-premium" });
-    if (!premPkg) {
-      await StudentPackage.create(DEFAULT_PACKAGES[1]);
-    } else if (premPkg.quotas?.aiFlashcardsLimit === undefined) {
-      premPkg.quotas = { ...(premPkg.quotas || {}), aiFlashcardsLimit: 500 };
-      await premPkg.save();
-    }
+    // 2. Ensure ClassTech Premium
+    await supabase
+      .from("student_packages")
+      .update({
+        title: "ClassTech Premium",
+        name: "ClassTech Premium",
+        badge_text: "ALL ACCESS",
+        badge: "All Access",
+        price: 299,
+        is_active: true,
+      })
+      .eq("tier", "premium");
 
-    // Deactivate obsolete tiers so ONLY Free and ClassTech Premium exist
-    await StudentPackage.updateMany(
-      { slug: { $nin: ["classtech-free", "classtech-premium"] } },
-      { isActive: false }
-    );
+    // 3. Deactivate obsolete tiers (e.g. 'pro') so ONLY Free and ClassTech Premium exist
+    await supabase
+      .from("student_packages")
+      .update({ is_active: false })
+      .not("tier", "in", '("free","premium")');
   } catch (err) {
     console.warn("[studentEntitlementService] Error checking/seeding packages:", err.message);
   }
@@ -110,13 +119,36 @@ export async function ensureDefaultPackages() {
  * Helper to fetch configured flashcards limit for a given tier
  */
 export async function getTierFlashcardLimit(tier = "free") {
+  const t = tier === "premium" ? "premium" : "free";
+
+  // 1. Direct Supabase query
   try {
-    const slug = tier === "premium" ? "classtech-premium" : "classtech-free";
-    const pkg = await StudentPackage.findOne({ slug });
-    if (pkg && pkg.quotas && typeof pkg.quotas.aiFlashcardsLimit === "number") {
-      return pkg.quotas.aiFlashcardsLimit;
+    const { supabase } = await import("../utils/supabase.js");
+    const { data } = await supabase
+      .from("student_packages")
+      .select("ai_flashcards_limit, quotas")
+      .eq("tier", t)
+      .limit(1)
+      .maybeSingle();
+
+    if (data) {
+      if (typeof data.ai_flashcards_limit === "number") return data.ai_flashcards_limit;
+      if (data.quotas && typeof data.quotas.aiFlashcardsLimit === "number") return data.quotas.aiFlashcardsLimit;
     }
   } catch (_) {}
+
+  // 2. Fallback Mongoose query
+  try {
+    const slug = tier === "premium" ? "classtech-premium" : "classtech-free";
+    const pkg = await StudentPackage.findOne({
+      $or: [{ slug }, { tier: t }],
+    });
+    if (pkg) {
+      if (typeof pkg.ai_flashcards_limit === "number") return pkg.ai_flashcards_limit;
+      if (pkg.quotas && typeof pkg.quotas.aiFlashcardsLimit === "number") return pkg.quotas.aiFlashcardsLimit;
+    }
+  } catch (_) {}
+
   return tier === "premium" ? 500 : 25;
 }
 
@@ -125,22 +157,54 @@ export async function getTierFlashcardLimit(tier = "free") {
  */
 export async function updateTierFlashcardLimits({ freeLimit, premiumLimit }) {
   const results = {};
+  const { supabase } = await import("../utils/supabase.js");
+
   if (typeof freeLimit === "number" && freeLimit >= 0) {
-    const pkg = await StudentPackage.findOne({ slug: "classtech-free" });
-    if (pkg) {
-      pkg.quotas = { ...(pkg.quotas || {}), aiFlashcardsLimit: freeLimit };
-      await pkg.save();
+    try {
+      await supabase
+        .from("student_packages")
+        .update({
+          ai_flashcards_limit: freeLimit,
+          quotas: { aiFlashcardsLimit: freeLimit, aiDoubtsDailyLimit: 5 },
+        })
+        .eq("tier", "free");
       results.freeLimit = freeLimit;
-    }
+    } catch (_) {}
+
+    try {
+      const pkg = await StudentPackage.findOne({ $or: [{ slug: "classtech-free" }, { tier: "free" }] });
+      if (pkg) {
+        pkg.ai_flashcards_limit = freeLimit;
+        pkg.quotas = { ...(pkg.quotas || {}), aiFlashcardsLimit: freeLimit };
+        await pkg.save();
+        results.freeLimit = freeLimit;
+      }
+    } catch (_) {}
   }
+
   if (typeof premiumLimit === "number" && premiumLimit >= 0) {
-    const pkg = await StudentPackage.findOne({ slug: "classtech-premium" });
-    if (pkg) {
-      pkg.quotas = { ...(pkg.quotas || {}), aiFlashcardsLimit: premiumLimit };
-      await pkg.save();
+    try {
+      await supabase
+        .from("student_packages")
+        .update({
+          ai_flashcards_limit: premiumLimit,
+          quotas: { aiFlashcardsLimit: premiumLimit, aiDoubtsDailyLimit: 200 },
+        })
+        .eq("tier", "premium");
       results.premiumLimit = premiumLimit;
-    }
+    } catch (_) {}
+
+    try {
+      const pkg = await StudentPackage.findOne({ $or: [{ slug: "classtech-premium" }, { tier: "premium" }] });
+      if (pkg) {
+        pkg.ai_flashcards_limit = premiumLimit;
+        pkg.quotas = { ...(pkg.quotas || {}), aiFlashcardsLimit: premiumLimit };
+        await pkg.save();
+        results.premiumLimit = premiumLimit;
+      }
+    } catch (_) {}
   }
+
   return results;
 }
 

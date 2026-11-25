@@ -2,16 +2,28 @@ import mongoose from "../utils/supabaseModel.js";
 
 const studentPackageSchema = new mongoose.Schema(
   {
+    title: {
+      type: String,
+      trim: true,
+    },
+    tier: {
+      type: String,
+      trim: true,
+    },
+    badge_text: {
+      type: String,
+      trim: true,
+    },
+    ai_flashcards_limit: {
+      type: Number,
+      default: 25,
+    },
     name: {
       type: String,
-      required: true,
       trim: true,
     },
     slug: {
       type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
       trim: true,
     },
     badge: {
