@@ -1,5 +1,6 @@
 import { supabase } from "../utils/supabase.js";
 import { callGeminiRaw, extractJsonFromText } from "./aiService.js";
+import { logAiHarvest } from "../utils/aiHarvestLogger.js";
 import fs from "fs";
 import path from "path";
 
@@ -408,7 +409,16 @@ Return ONLY a valid JSON object with keys:
       temperature: 0.2,
     });
     const parsed = extractJsonFromText(rawRes);
-    if (parsed && parsed.rootCause) return parsed;
+    if (parsed && parsed.rootCause) {
+      logAiHarvest({
+        taskType: "MISTAKE_ROOT_CAUSE",
+        prompt: questionText,
+        response: rawRes,
+        generatedContent: parsed,
+        metadata: { subject, topic, suggestedTag: parsed.suggestedTag },
+      }).catch(() => {});
+      return parsed;
+    }
   } catch (err) {
     console.error("[MistakeBook] generateAiRootCauseAnalysis error:", err.message);
   }
@@ -470,6 +480,13 @@ Return ONLY valid JSON matching this structure:
     });
     const parsed = extractJsonFromText(rawRes);
     if (parsed && parsed.question && Array.isArray(parsed.options)) {
+      logAiHarvest({
+        taskType: "MISTAKE_TWIN_QUESTION",
+        prompt: questionText,
+        response: rawRes,
+        generatedContent: parsed,
+        metadata: { subject, topic, difficulty },
+      }).catch(() => {});
       return parsed;
     }
   } catch (err) {
@@ -542,6 +559,13 @@ Return ONLY valid JSON matching this schema:
     });
     const parsed = extractJsonFromText(rawRes);
     if (parsed && parsed.questionText) {
+      logAiHarvest({
+        taskType: "MISTAKE_OCR_SNAP",
+        prompt: `[Image OCR Snap: ${studentNotes || "None"}]`,
+        response: rawRes,
+        generatedContent: parsed,
+        metadata: { subject: parsed.subject, chapter: parsed.chapter },
+      }).catch(() => {});
       return parsed;
     }
   } catch (err) {
