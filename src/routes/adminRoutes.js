@@ -116,6 +116,12 @@ import {
   updateBadgeAdmin,
   deleteBadgeAdmin,
 } from "../controllers/streakController.js";
+import {
+  getAdminStudentSubscriptions,
+  cancelAdminStudentSubscription,
+  grantAdminStudentSubscription,
+  searchStudentsForSubscription,
+} from "../controllers/subscriptionAdminController.js";
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -271,5 +277,11 @@ router.get("/streaks/badges", getAllBadgesAdmin);
 router.post("/streaks/badges", createBadgeAdmin);
 router.put("/streaks/badges/:id", updateBadgeAdmin);
 router.delete("/streaks/badges/:id", deleteBadgeAdmin);
+
+// Super Admin Student Subscriptions (ClassTech Premium & ClassTech Pass)
+router.get("/student-subscriptions", getAdminStudentSubscriptions);
+router.post("/student-subscriptions/cancel", cancelAdminStudentSubscription);
+router.post("/student-subscriptions/grant", grantAdminStudentSubscription);
+router.get("/student-subscriptions/students-search", searchStudentsForSubscription);
 
 export default router;
