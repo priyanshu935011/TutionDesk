@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
+import axios from "axios";
 import User from "../models/User.js";
 import Student from "../models/Student.js";
 import StudentPackage from "../models/StudentPackage.js";
@@ -8,6 +9,7 @@ import StudentMistakeBook from "../models/StudentMistakeBook.js";
 import AiDoubtHistory from "../models/AiDoubtHistory.js";
 import FocusSession from "../models/FocusSession.js";
 import CashfreePayment from "../models/CashfreePayment.js";
+import { getCashfreeConfig, getBaseUrl, checkCashfreeOrderStatus } from "./paymentController.js";
 import { callGeminiRaw, extractJsonFromText } from "../services/aiService.js";
 import {
   getOrCreateStudentEntitlement,
@@ -796,22 +798,223 @@ export const getStorePackages = async (req, res) => {
   }
 };
 
+export const getPremiumPackageDetails = async (req, res) => {
+  try {
+    await ensureDefaultPackages();
+    let packages = await StudentPackage.find({ isActive: true });
+    let premiumPkg = packages.find(
+      (p) => (p.tier || "").toLowerCase() === "premium" || (p.slug || "").includes("premium")
+    );
+    if (!premiumPkg) {
+      premiumPkg = packages.find((p) => (Number(p.price) || 0) > 0) || packages[0];
+    }
+
+    const freeLimit = await getTierFlashcardLimit("free");
+    const premiumLimit = await getTierFlashcardLimit("premium");
+
+    const studentId = req.user?.studentId || req.user?.id || req.query.studentId;
+    let isCurrentStudentPremium = false;
+    let studentQuota = null;
+    if (studentId) {
+      try {
+        const ent = await getOrCreateStudentEntitlement(studentId);
+        isCurrentStudentPremium = (ent?.tier || "").toLowerCase() === "premium";
+        const student = await Student.findById(studentId);
+        if (student) {
+          studentQuota = {
+            limit: student.flashcards_limit ?? (isCurrentStudentPremium ? premiumLimit : freeLimit),
+            created: student.flashcards_created ?? 0,
+            remaining: Math.max(0, (student.flashcards_limit ?? (isCurrentStudentPremium ? premiumLimit : freeLimit)) - (student.flashcards_created ?? 0)),
+            planTier: student.plan_tier || ent?.tier || "free",
+          };
+        }
+      } catch (_) {}
+    }
+
+    const featureHighlights = [
+      {
+        icon: "flashcards",
+        title: "500 AI Flashcards / Month",
+        subtitle: "Generate smart active-recall cards from PDFs, notes & syllabus chapters with SM-2 spaced repetition.",
+        badge: "Smart Revision",
+      },
+      {
+        icon: "ai_tutor",
+        title: "24/7 AI Master Tutor & Step-by-Step Solver",
+        subtitle: "Instant solutions with diagrams & key takeaways for Boards, JEE, NEET, and school exams.",
+        badge: "Unlimited",
+      },
+      {
+        icon: "test_series",
+        title: "Full All-Access Test Series Pass",
+        subtitle: "Unlimited access to all chapter tests, mock exams, and real-time performance analytics.",
+        badge: "VIP Pass",
+      },
+      {
+        icon: "digital_notes",
+        title: "Complete Digital & Handwritten Notes Library",
+        subtitle: "Curated high-scoring formula cheat sheets, revision summaries, and expert notes.",
+        badge: "All Subjects",
+      },
+      {
+        icon: "mistake_book",
+        title: "AI Mistake Book & Automated Concept Retests",
+        subtitle: "Identifies weak concepts and creates targeted auto-generated practice retests.",
+        badge: "Deep Retention",
+      },
+      {
+        icon: "career_roadmap",
+        title: "AI Career Guidance & Goal Planner",
+        subtitle: "Target exam milestone roadmap, stream selection, and percentile predictor.",
+        badge: "Exclusive",
+      },
+      {
+        icon: "focus_rooms",
+        title: "Unlimited Focus Sessions & Study Streak Shields",
+        subtitle: "Ad-free lo-fi study rooms, coin multipliers, and streak freezes.",
+        badge: "Productivity",
+      },
+    ];
+
+    const faqs = [
+      {
+        q: "How many AI flashcards can I create with Premium?",
+        a: "You get 500 AI flashcards every month! Whenever you upload study notes or PDFs, ClassTech AI formats them into high-retention spaced repetition flashcards.",
+      },
+      {
+        q: "Does this include all Store Test Series and Notes?",
+        a: "Yes! ClassTech Premium includes full access to all Test Series and Digital Notes available in the ClassTech Store without extra purchase.",
+      },
+      {
+        q: "Can I cancel my subscription anytime?",
+        a: "Yes, you can cancel at any time directly from the app. You will retain access until the end of your billing period.",
+      },
+      {
+        q: "What payment modes are accepted?",
+        a: "We accept all major UPI apps (Google Pay, PhonePe, Paytm, BHIM), Credit/Debit cards, and Netbanking via secure Cashfree payment gateway.",
+      },
+    ];
+
+    return res.json({
+      success: true,
+      package: {
+        id: String(premiumPkg._id || premiumPkg.id),
+        title: premiumPkg.title || premiumPkg.name || "ClassTech Premium",
+        tier: "premium",
+        price: Number(premiumPkg.price || 299),
+        originalPrice: Number(premiumPkg.price || 299) >= 299 ? 999 : 499,
+        discountedPrice: Number(premiumPkg.discountedPrice || premiumPkg.discounted_price || premiumPkg.price || 299),
+        currency: premiumPkg.currency || "INR",
+        billingCycle: premiumPkg.billingCycle || premiumPkg.billing_cycle || "monthly",
+        badgeText: premiumPkg.badgeText || premiumPkg.badge_text || "ALL-ACCESS VIP",
+        aiFlashcardsLimit: premiumLimit,
+        aiDoubtDailyLimit: premiumPkg.aiDoubtDailyLimit || premiumPkg.ai_doubt_daily_limit || 200,
+        focusModeDailyLimitMinutes: premiumPkg.focusModeDailyLimitMinutes || premiumPkg.focus_mode_daily_limit_minutes || 480,
+        featureHighlights,
+        faqs,
+        freeLimit,
+        isCurrentStudentPremium,
+        studentQuota,
+      },
+    });
+  } catch (error) {
+    console.error("getPremiumPackageDetails error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateAdminPremiumPackageDetails = async (req, res) => {
+  try {
+    const {
+      title,
+      price,
+      discountedPrice,
+      billingCycle,
+      badgeText,
+      aiFlashcardsLimit,
+      aiDoubtDailyLimit,
+      features,
+      description,
+      isActive,
+    } = req.body;
+
+    await ensureDefaultPackages();
+    let packages = await StudentPackage.find();
+    let premiumPkg = packages.find(
+      (p) => (p.tier || "").toLowerCase() === "premium" || (p.slug || "").includes("premium")
+    );
+    if (!premiumPkg) {
+      return res.status(404).json({ success: false, message: "ClassTech Premium package not found." });
+    }
+
+    const updates = {};
+    if (title !== undefined) {
+      updates.title = title;
+      updates.name = title;
+    }
+    if (price !== undefined) updates.price = Number(price);
+    if (discountedPrice !== undefined) updates.discounted_price = Number(discountedPrice);
+    if (billingCycle !== undefined) {
+      updates.billing_cycle = billingCycle;
+      updates.billingCycle = billingCycle;
+    }
+    if (badgeText !== undefined) {
+      updates.badge_text = badgeText;
+      updates.badge = badgeText;
+    }
+    if (aiFlashcardsLimit !== undefined) {
+      updates.ai_flashcards_limit = Number(aiFlashcardsLimit);
+      await updateTierFlashcardLimits({ premiumLimit: Number(aiFlashcardsLimit) });
+    }
+    if (aiDoubtDailyLimit !== undefined) {
+      updates.ai_doubt_daily_limit = Number(aiDoubtDailyLimit);
+    }
+    if (features !== undefined) {
+      updates.features = features;
+    }
+    if (description !== undefined) {
+      updates.description = description;
+    }
+    if (isActive !== undefined) {
+      updates.is_active = Boolean(isActive);
+      updates.isActive = Boolean(isActive);
+    }
+
+    const updated = await StudentPackage.findByIdAndUpdate(premiumPkg._id || premiumPkg.id, updates, { new: true });
+
+    return res.json({
+      success: true,
+      message: "ClassTech Premium settings updated successfully.",
+      package: updated,
+    });
+  } catch (error) {
+    console.error("updateAdminPremiumPackageDetails error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const createPackageOrder = async (req, res) => {
   try {
     const studentId = String(req.user?.studentId || req.user?.id || req.body.studentId);
     const { packageId } = req.body;
 
-    const pkg = await StudentPackage.findById(packageId);
+    let pkg = null;
+    if (packageId) {
+      pkg = await StudentPackage.findById(packageId);
+    }
+    if (!pkg) {
+      const pkgs = await StudentPackage.find({ isActive: true });
+      pkg = pkgs.find((p) => (p.tier || "").toLowerCase() === "premium" || (p.slug || "").includes("premium")) || pkgs[0];
+    }
     if (!pkg) return res.status(404).json({ success: false, message: "Package not found." });
 
-    const orderId = `CT_STU_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const finalAmount = pkg.discountedPrice || pkg.price;
+    const finalAmount = Number(pkg.discountedPrice || pkg.discounted_price || pkg.price || 0);
 
-    // Instant unlock for free plans or mock tests
-    if (finalAmount === 0) {
+    // Instant unlock for free plans
+    if (finalAmount <= 0) {
       const entitlement = await getOrCreateStudentEntitlement(studentId);
-      entitlement.activePackage = pkg._id;
-      entitlement.tier = pkg.slug.includes("pro") ? "pro" : "free";
+      entitlement.activePackage = pkg._id || pkg.id;
+      entitlement.tier = (pkg.tier || pkg.slug || "free").includes("premium") ? "premium" : "free";
       await entitlement.save();
 
       return res.json({
@@ -822,24 +1025,87 @@ export const createPackageOrder = async (req, res) => {
       });
     }
 
+    // Lookup student profile for Cashfree customer details
+    const student = await Student.findById(studentId);
+    const user = await User.findById(studentId).catch(() => null);
+    const studentName = student?.name || user?.name || "Student";
+    const studentEmail = student?.email || user?.email || "student@classtech.in";
+    const rawPhone = student?.phone || student?.parentPhone || user?.phone || "9999999999";
+    const studentPhone = String(rawPhone).replace(/\D/g, "").slice(-10);
+
+    const cfOrderId = "prem_" + crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+    const config = await getCashfreeConfig();
+    const { appId, secretKey, environment } = config;
+    const baseUrl = getBaseUrl(environment);
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-api-version": "2023-08-01",
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+    };
+
+    const rawFrontendUrl = process.env.FRONTEND_URL || "https://app.classtech.in";
+    const secureFrontendUrl = rawFrontendUrl.startsWith("http://")
+      ? rawFrontendUrl.replace(/^http:\/\//, "https://")
+      : rawFrontendUrl.startsWith("https://")
+      ? rawFrontendUrl
+      : `https://${rawFrontendUrl}`;
+
+    const payload = {
+      order_id: cfOrderId,
+      order_amount: finalAmount,
+      order_currency: "INR",
+      customer_details: {
+        customer_id: studentId.slice(0, 45),
+        customer_name: studentName.slice(0, 50),
+        customer_email: studentEmail,
+        customer_phone: studentPhone.length === 10 ? studentPhone : "9999999999",
+      },
+      order_meta: {
+        return_url: `${secureFrontendUrl}/student/premium-status?order_id=${cfOrderId}`,
+      },
+      order_note: `ClassTech Premium: ${pkg.title || pkg.name || "Subscription"}`,
+    };
+
+    let paymentSessionId = "";
+    try {
+      const cfRes = await axios.post(`${baseUrl}/orders`, payload, { headers });
+      paymentSessionId = cfRes.data?.payment_session_id || "";
+    } catch (cfErr) {
+      console.error("Cashfree createPackageOrder error:", cfErr.response?.data || cfErr.message);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to initiate Cashfree payment gateway.",
+        details: cfErr.response?.data?.message || cfErr.message,
+      });
+    }
+
     // Cashfree / Gateway Order Record
-    const paymentRecord = await CashfreePayment.create({
-      orderId,
+    await CashfreePayment.create({
+      orderId: cfOrderId,
+      cfOrderId,
       amount: finalAmount,
       currency: "INR",
-      purpose: `Student Subscription: ${pkg.name}`,
+      purpose: `ClassTech Premium: ${pkg.title || pkg.name || "Subscription"}`,
       status: "PENDING",
       student: studentId,
-      metadata: { packageId: pkg._id, packageName: pkg.name },
-    }).catch(() => null);
+      metadata: {
+        packageId: String(pkg._id || pkg.id),
+        packageName: pkg.title || pkg.name,
+        tier: pkg.tier || "premium",
+      },
+    }).catch((e) => console.warn("CashfreePayment create warn:", e.message));
 
     return res.json({
       success: true,
-      orderId,
+      orderId: cfOrderId,
+      cfOrderId,
       amount: finalAmount,
-      packageName: pkg.name,
+      packageName: pkg.title || pkg.name,
       currency: "INR",
-      paymentSessionId: `session_${orderId}`,
+      paymentSessionId,
+      environment: (environment || "SANDBOX").toUpperCase(),
     });
   } catch (error) {
     console.error("createPackageOrder error:", error);
@@ -850,45 +1116,92 @@ export const createPackageOrder = async (req, res) => {
 export const verifyAndUnlockPackage = async (req, res) => {
   try {
     const studentId = String(req.user?.studentId || req.user?.id || req.body.studentId);
-    const { orderId, packageId } = req.body;
+    const { orderId, cfOrderId, packageId } = req.body;
+    const targetOrderId = cfOrderId || orderId;
 
-    const pkg = await StudentPackage.findById(packageId);
+    let pkg = null;
+    if (packageId) {
+      pkg = await StudentPackage.findById(packageId);
+    }
+    if (!pkg) {
+      const pkgs = await StudentPackage.find({ isActive: true });
+      pkg = pkgs.find((p) => (p.tier || "").toLowerCase() === "premium" || (p.slug || "").includes("premium")) || pkgs[0];
+    }
     if (!pkg) return res.status(404).json({ success: false, message: "Package not found." });
 
+    const finalAmount = Number(pkg.discountedPrice || pkg.discounted_price || pkg.price || 0);
+
+    // If order is paid or free
+    let isPaid = finalAmount <= 0;
+    let paymentRecord = null;
+
+    if (!isPaid && targetOrderId) {
+      paymentRecord = await CashfreePayment.findOne({
+        $or: [{ orderId: targetOrderId }, { cfOrderId: targetOrderId }],
+      });
+
+      if (paymentRecord && paymentRecord.status === "SUCCESS") {
+        isPaid = true;
+      } else {
+        const config = await getCashfreeConfig();
+        let cfStatus = await checkCashfreeOrderStatus(targetOrderId, config);
+        if (cfStatus?.status === "pending") {
+          await new Promise((r) => setTimeout(r, 1200));
+          cfStatus = await checkCashfreeOrderStatus(targetOrderId, config);
+        }
+        isPaid =
+          cfStatus?.status === "success" ||
+          cfStatus?.status === "paid" ||
+          cfStatus?.status === "PAID" ||
+          cfStatus?.order_status === "PAID" ||
+          cfStatus?.rawData?.order_status === "PAID" ||
+          (Array.isArray(cfStatus?.rawData?.payments) &&
+            cfStatus.rawData.payments.some(
+              (p) => String(p?.payment_status || "").toUpperCase() === "SUCCESS"
+            ));
+      }
+    }
+
+    if (!isPaid && finalAmount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment verification pending or unsuccessful with Cashfree. Please retry or contact support.",
+      });
+    }
+
+    if (paymentRecord) {
+      paymentRecord.status = "SUCCESS";
+      await paymentRecord.save().catch(() => {});
+    }
+
     const entitlement = await getOrCreateStudentEntitlement(studentId);
-    entitlement.activePackage = pkg._id;
-    entitlement.tier = pkg.slug.includes("master") ? "premium" : "pro";
+    entitlement.activePackage = pkg._id || pkg.id;
+    entitlement.tier = "premium";
 
     // Set expiration based on billingCycle
     const now = new Date();
-    if (pkg.billingCycle === "monthly") {
-      now.setMonth(now.getMonth() + 1);
-    } else if (pkg.billingCycle === "yearly") {
+    const cycle = (pkg.billingCycle || pkg.billing_cycle || "monthly").toLowerCase();
+    if (cycle === "yearly") {
       now.setFullYear(now.getFullYear() + 1);
+    } else {
+      now.setMonth(now.getMonth() + 1);
     }
     entitlement.packageExpiresAt = now;
     await entitlement.save();
 
-    // Mark Cashfree order as SUCCESS if present
-    if (orderId) {
-      await CashfreePayment.findOneAndUpdate({ orderId }, { status: "SUCCESS" }).catch(() => {});
-    }
-
-    // Add premium flashcards quota upon upgrading
-    let quotaUpgrade = null;
-    if (pkg.price > 0 || pkg.slug.includes("premium") || pkg.slug.includes("pro")) {
-      quotaUpgrade = await addStudentPremiumFlashcards(studentId);
-    }
+    // Award +500 premium flashcards quota and update student table plan_tier = 'premium'
+    const quotaUpgrade = await addStudentPremiumFlashcards(studentId);
 
     return res.json({
       success: true,
-      message: `Congratulations! ${pkg.name} is now active on your account.`,
-      tier: entitlement.tier,
+      message: `🎉 Congratulations! ${pkg.title || pkg.name} is now active on your account.`,
+      tier: "premium",
       expiresAt: entitlement.packageExpiresAt,
       entitlement,
       quota: quotaUpgrade,
     });
   } catch (error) {
+    console.error("verifyAndUnlockPackage error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

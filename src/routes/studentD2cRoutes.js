@@ -17,6 +17,8 @@ import {
   generateParentSnapshotToken,
   viewParentSnapshot,
   getStorePackages,
+  getPremiumPackageDetails,
+  updateAdminPremiumPackageDetails,
   createPackageOrder,
   verifyAndUnlockPackage,
   transitionArchivedStudent,
@@ -67,6 +69,7 @@ router.get("/parent-snapshot/view/:token", viewParentSnapshot);
 
 // 10. In-Dashboard Store & Native Cashfree Checkout
 router.get("/store/packages", getStorePackages);
+router.get("/premium-package", optionalAuth, getPremiumPackageDetails);
 router.post("/store/create-order", optionalAuth, createPackageOrder);
 router.post("/store/verify-payment", optionalAuth, verifyAndUnlockPackage);
 
@@ -77,6 +80,8 @@ router.post("/archive-transition", transitionArchivedStudent);
 router.get("/admin/packages", protect, superAdminOnly, getAdminStudentPackages);
 router.post("/admin/packages", protect, superAdminOnly, createOrUpdateStudentPackage);
 router.put("/admin/packages/:id", protect, superAdminOnly, createOrUpdateStudentPackage);
+router.get("/admin/premium-package", protect, superAdminOnly, getPremiumPackageDetails);
+router.put("/admin/premium-package", protect, superAdminOnly, updateAdminPremiumPackageDetails);
 router.post("/admin/student-override", protect, superAdminOnly, setStudentFeatureOverride);
 
 // 13. Tier Flashcard Limits Management
