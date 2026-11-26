@@ -1,6 +1,7 @@
 import {
   saveAssessmentDraft,
   getStudentAssessment,
+  getAssessmentAttemptsCount,
   generateRecommendations,
   getOrGenerateCareerRoadmap,
   toggleRoadmapMilestone,
@@ -16,25 +17,58 @@ import Student from "../models/Student.js";
 // Helper to extract student/user ID from authenticated request
 function getUserIdFromReq(req) {
   return String(
+    req.headers["x-student-id"] ||
     req.user?.studentId ||
     req.user?.id ||
     req.user?._id ||
     req.student?.id ||
     req.student?._id ||
-    req.body.userId ||
-    req.query.userId ||
+    req.body?.studentId ||
+    req.body?.userId ||
+    req.query?.studentId ||
+    req.query?.userId ||
     "guest_learner"
   );
 }
 
-// Helper to check if student has active ClassTech Premium
-async function checkIsStudentPremium(userId) {
+// Helper to get student's quota and entitlement status
+async function getStudentCareerQuota(userId) {
   try {
     const entitlement = await getOrCreateStudentEntitlement(userId);
-    return (entitlement?.tier || "").toLowerCase() === "premium";
-  } catch (_) {
-    return false;
+    const isPremium = (entitlement?.tier || "").toLowerCase() === "premium";
+    const pkg = entitlement?.activePackage || {};
+    const quotas = pkg.quotas || {};
+    const attemptsLimit = isPremium
+      ? -1
+      : Number(quotas.careerAssessmentAttemptsLimit ?? 1);
+
+    const attemptsCount = await getAssessmentAttemptsCount(userId);
+    const canTakeAssessment =
+      isPremium || attemptsLimit === -1 || attemptsCount < attemptsLimit;
+
+    return {
+      isPremium,
+      attemptsLimit,
+      attemptsCount,
+      canTakeAssessment,
+      entitlement,
+    };
+  } catch (err) {
+    console.warn("[CareerController] getStudentCareerQuota error:", err.message);
+    return {
+      isPremium: false,
+      attemptsLimit: 1,
+      attemptsCount: 0,
+      canTakeAssessment: true,
+      entitlement: null,
+    };
   }
+}
+
+// Helper to check if student has active ClassTech Premium
+async function checkIsStudentPremium(userId) {
+  const { isPremium } = await getStudentCareerQuota(userId);
+  return isPremium;
 }
 
 // ============================================================================
@@ -45,13 +79,16 @@ export const getAssessment = async (req, res) => {
   try {
     const userId = getUserIdFromReq(req);
     const assessment = await getStudentAssessment(userId);
-    const isPremium = await checkIsStudentPremium(userId);
+    const quota = await getStudentCareerQuota(userId);
 
     return res.json({
       success: true,
       assessment: assessment || null,
       hasAssessment: !!assessment,
-      isPremium,
+      attemptsCount: quota.attemptsCount,
+      attemptsLimit: quota.attemptsLimit,
+      canTakeAssessment: quota.canTakeAssessment,
+      isPremium: quota.isPremium,
     });
   } catch (error) {
     console.error("[CareerController] getAssessment error:", error);
@@ -81,9 +118,23 @@ export const completeAssessment = async (req, res) => {
     const userId = getUserIdFromReq(req);
     const data = req.body;
 
+    // Check attempts limit for free plan
+    const quota = await getStudentCareerQuota(userId);
+    // If user has already used their free attempt and is not premium
+    if (!quota.isPremium && quota.attemptsLimit !== -1 && quota.attemptsCount >= quota.attemptsLimit) {
+      return res.status(403).json({
+        success: false,
+        canUpgrade: true,
+        message: `You have completed your free Career Assessment (${quota.attemptsCount}/${quota.attemptsLimit} used). Upgrade to ClassTech Premium for unlimited re-assessments and detailed AI roadmaps!`,
+        attemptsCount: quota.attemptsCount,
+        attemptsLimit: quota.attemptsLimit,
+        isPremium: false,
+      });
+    }
+
     // Save final state as completed
     const saved = await saveAssessmentDraft(userId, { ...data, isCompleted: true });
-    const isPremium = await checkIsStudentPremium(userId);
+    const isPremium = quota.isPremium;
 
     // Generate recommendations immediately
     const recommendations = await generateRecommendations(userId, saved.id, isPremium);
@@ -93,6 +144,9 @@ export const completeAssessment = async (req, res) => {
       message: "Career Assessment completed successfully! Your recommendations are ready.",
       assessment: saved,
       recommendations,
+      attemptsCount: quota.attemptsCount + 1,
+      attemptsLimit: quota.attemptsLimit,
+      canTakeAssessment: isPremium || quota.attemptsLimit === -1,
       isPremium,
     });
   } catch (error) {

@@ -83,6 +83,10 @@ const studentPackageSchema = new mongoose.Schema(
         type: Number,
         default: 25, // Editable by admin per tier
       },
+      careerAssessmentAttemptsLimit: {
+        type: Number,
+        default: 1, // 1 for free, -1 for unlimited
+      },
     },
     features: {
       aiTutor: { type: Boolean, default: true },

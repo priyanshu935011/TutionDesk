@@ -25,6 +25,7 @@ export const DEFAULT_PACKAGES = [
       testSeriesAccess: "preview",
       digitalNotesAccess: "preview",
       maxFreeMockTests: 3,
+      careerAssessmentAttemptsLimit: 1, // 1 try for free tier
     },
     features: {
       aiTutor: true,
@@ -56,6 +57,7 @@ export const DEFAULT_PACKAGES = [
       testSeriesAccess: "all",
       digitalNotesAccess: "all",
       maxFreeMockTests: 100,
+      careerAssessmentAttemptsLimit: -1, // Unlimited tries for premium
     },
     features: {
       aiTutor: true,

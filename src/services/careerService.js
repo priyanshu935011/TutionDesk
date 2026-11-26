@@ -467,6 +467,7 @@ export async function saveAssessmentDraft(userId, data) {
 
   const payload = {
     user_id: uid,
+    student_id: uid,
     education_level: data.educationLevel || data.education_level || "10th",
     academic_profile: data.academicProfile || data.academic_profile || {},
     interests: data.interests || [],
@@ -483,7 +484,7 @@ export async function saveAssessmentDraft(userId, data) {
     const { data: existing } = await supabase
       .from("career_assessments")
       .select("id")
-      .eq("user_id", uid)
+      .or(`user_id.eq.${uid},student_id.eq.${uid}`)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -510,7 +511,7 @@ export async function saveAssessmentDraft(userId, data) {
 
   // Fallback Store
   const store = getFallbackStore();
-  let existingId = Object.keys(store.assessments).find((k) => store.assessments[k].user_id === uid);
+  let existingId = Object.keys(store.assessments).find((k) => store.assessments[k].user_id === uid || store.assessments[k].student_id === uid);
   const id = existingId || `assess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const record = { id, ...payload, created_at: store.assessments[id]?.created_at || nowIso };
   store.assessments[id] = record;
@@ -528,7 +529,7 @@ export async function getStudentAssessment(userId) {
     const { data } = await supabase
       .from("career_assessments")
       .select("*")
-      .eq("user_id", uid)
+      .or(`user_id.eq.${uid},student_id.eq.${uid}`)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -539,9 +540,33 @@ export async function getStudentAssessment(userId) {
   }
 
   const store = getFallbackStore();
-  const list = Object.values(store.assessments).filter((a) => a.user_id === uid);
+  const list = Object.values(store.assessments).filter((a) => a.user_id === uid || a.student_id === uid);
   list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   return list[0] || null;
+}
+
+/**
+ * Get total completed assessment attempts for quota enforcement
+ */
+export async function getAssessmentAttemptsCount(userId) {
+  const uid = String(userId);
+  try {
+    const { count, error } = await supabase
+      .from("career_assessments")
+      .select("id", { count: "exact", head: true })
+      .or(`user_id.eq.${uid},student_id.eq.${uid}`)
+      .eq("status", "completed");
+
+    if (!error && typeof count === "number") {
+      return count;
+    }
+  } catch (_) {}
+
+  const store = getFallbackStore();
+  const list = Object.values(store.assessments).filter(
+    (a) => (a.user_id === uid || a.student_id === uid) && a.status === "completed"
+  );
+  return list.length;
 }
 
 /**
@@ -575,6 +600,7 @@ export async function generateRecommendations(userId, assessmentId = null, isPre
     }));
     return {
       topMatches: defaultThree,
+      recommendations: defaultThree,
       totalMatchesCount: defaultThree.length,
       hasFullAssessment: false,
       isPremium,
@@ -674,6 +700,7 @@ Output strictly JSON:
 
   return {
     topMatches: userVisibleMatches,
+    recommendations: userVisibleMatches,
     totalMatchesCount: allFormattedMatches.length,
     hasFullAssessment: true,
     isPremium,
