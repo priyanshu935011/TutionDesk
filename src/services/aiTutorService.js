@@ -1,6 +1,28 @@
 import { supabase } from "../utils/supabase.js";
 import { getOrCreateStudentEntitlement } from "./studentEntitlementService.js";
+import { callGeminiRaw } from "./aiService.js";
 import axios from "axios";
+
+// Helper: Harvest logs for future model training
+async function harvestAiLog({ userId, studentId, taskType, prompt, response, metadata = {} }) {
+  try {
+    const payload = {
+      task_type: taskType || "AI_VOICE_TUTOR",
+      prompt: String(prompt || "").slice(0, 5000),
+      response: String(response || "").slice(0, 5000),
+      user_name: "Student",
+      user_role: "student",
+      metadata: {
+        userId: String(userId || ""),
+        studentId: String(studentId || ""),
+        ...metadata,
+      },
+    };
+    await supabase.from("ai_harvest_logs").insert(payload);
+  } catch (err) {
+    console.warn("[AiTutor] harvest log error:", err.message);
+  }
+}
 
 // Fallback in-memory / local storage for resilient operation
 const localSessions = new Map();
@@ -78,34 +100,31 @@ Maintain academic discipline and high standards.`,
   },
 ];
 
-// Helper: Call Gemini API using project's configured key
-async function callGemini(prompt, systemInstruction = "") {
-  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
-  if (!apiKey) {
-    return "I am ready to help you with your studies! What concept would you like to explore today?";
-  }
-
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-  for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-      };
-      if (systemInstruction) {
-        payload.systemInstruction = {
-          parts: [{ text: systemInstruction }],
-        };
+// Helper: Call Gemini API using centralized system credentials + fallback resilience
+async function callGemini(prompt, systemInstruction = "", harvestMeta = null) {
+  try {
+    const text = await callGeminiRaw({
+      prompt,
+      systemInstruction,
+      temperature: 0.35,
+      timeout: 15000,
+    });
+    if (text && text.trim().length > 0) {
+      const cleanText = text.trim();
+      if (harvestMeta) {
+        harvestAiLog({
+          userId: harvestMeta.userId,
+          studentId: harvestMeta.studentId,
+          taskType: harvestMeta.taskType || "AI_VOICE_TUTOR",
+          prompt,
+          response: cleanText,
+          metadata: harvestMeta.metadata,
+        });
       }
-
-      const res = await axios.post(url, payload, { timeout: 12000 });
-      const text = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text && text.trim().length > 0) {
-        return text.trim();
-      }
-    } catch (_) {
-      // try next fallback model
+      return cleanText;
     }
+  } catch (err) {
+    console.warn("[AiTutorService] callGemini error:", err.message);
   }
 
   return "Let's break that down step-by-step. What specific part would you like me to clarify?";
@@ -208,7 +227,12 @@ Mode: ${teachingMode}
 Language: ${language}
 Provide a warm, energetic, and engaging opening spoken remark (1-2 short sentences) introducing yourself and inviting the student's first question.`;
 
-  const initialGreeting = await callGemini(greetingPrompt, tutor.systemPrompt);
+  const initialGreeting = await callGemini(greetingPrompt, tutor.systemPrompt, {
+    userId,
+    studentId,
+    taskType: "AI_VOICE_TUTOR_GREETING",
+    metadata: { sessionId, tutorId, subject, chapter, language },
+  });
 
   session.messages.push({
     role: "assistant",
@@ -268,7 +292,12 @@ Respond naturally as ${tutor.name} in ${session.language}.
 Keep your reply concise, clear, and interactive for speech delivery (2-3 sentences max).
 Avoid markdown formatting or bullet points that sound unnatural when spoken aloud.`;
 
-  const reply = await callGemini(prompt, tutor.systemPrompt);
+  const reply = await callGemini(prompt, tutor.systemPrompt, {
+    userId: session.userId,
+    studentId: session.studentId,
+    taskType: "AI_VOICE_TUTOR_INTERACT",
+    metadata: { sessionId, isInterruption, tutorId: tutor.id, subject: session.subject },
+  });
 
   session.messages.push({
     role: "assistant",

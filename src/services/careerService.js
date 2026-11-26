@@ -587,23 +587,16 @@ export async function generateRecommendations(userId, assessmentId = null, isPre
     assessment = await getStudentAssessment(uid);
   }
 
-  if (!assessment) {
-    // Return standard top curated recommendations if assessment not taken yet
-    const defaultThree = CAREER_CATALOG.slice(0, 3).map((c, i) => ({
-      id: c.id,
-      career_name: c.career_name,
-      category: c.category,
-      match_score: 95 - i * 3,
-      match_reason: "High-growth domain aligned with foundational academic excellence.",
-      recommendation_data: c,
-      is_top_three: true,
-    }));
+  if (!assessment || assessment.status !== "completed") {
+    // Return empty matches if assessment has not been completed yet (do not show mock data)
     return {
-      topMatches: defaultThree,
-      recommendations: defaultThree,
-      totalMatchesCount: defaultThree.length,
+      topMatches: [],
+      recommendations: [],
+      lockedMatches: [],
+      totalMatchesCount: 0,
       hasFullAssessment: false,
       isPremium,
+      lockedCount: 0,
     };
   }
 
@@ -697,14 +690,16 @@ Output strictly JSON:
 
   // Free users receive top 3; Premium users receive all 10
   const userVisibleMatches = isPremium ? allFormattedMatches : allFormattedMatches.slice(0, 3);
+  const lockedMatches = isPremium ? [] : allFormattedMatches.slice(3, 10);
 
   return {
     topMatches: userVisibleMatches,
     recommendations: userVisibleMatches,
+    lockedMatches: lockedMatches,
     totalMatchesCount: allFormattedMatches.length,
     hasFullAssessment: true,
     isPremium,
-    lockedCount: isPremium ? 0 : Math.max(0, allFormattedMatches.length - 3),
+    lockedCount: lockedMatches.length,
     studentProfileSummary: {
       educationLevel: assessment.education_level,
       stream: assessment.academic_profile?.stream || "General",
