@@ -99,6 +99,51 @@ export function calculateSM2(rating, prevReps = 0, prevInterval = 0, prevEF = 2.
 }
 
 /**
+ * Safely find a student record from Supabase across UUID id, phone, enrollment number, or email
+ */
+export async function findStudentRow(identifier) {
+  if (!identifier || identifier === "guest_student") return null;
+  const strId = String(identifier).trim();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(strId);
+
+  // 1. Try by UUID primary key
+  if (isUuid) {
+    try {
+      const { data, error } = await supabase
+        .from("students")
+        .select("*")
+        .eq("id", strId)
+        .limit(1)
+        .maybeSingle();
+      if (data && !error) return data;
+    } catch (_) {}
+  }
+
+  // 2. Try by phone or enrollment_number or email
+  try {
+    const { data, error } = await supabase
+      .from("students")
+      .select("*")
+      .or(`enrollment_number.eq.${strId},phone.eq.${strId},email.eq.${strId}`)
+      .limit(1);
+    if (data && data.length > 0 && !error) return data[0];
+  } catch (_) {}
+
+  // 3. Try checking user_id if column exists
+  try {
+    const { data, error } = await supabase
+      .from("students")
+      .select("*")
+      .eq("user_id", strId)
+      .limit(1)
+      .maybeSingle();
+    if (data && !error) return data;
+  } catch (_) {}
+
+  return null;
+}
+
+/**
  * Fetch Flashcards Quota for a student
  */
 export async function getStudentFlashcardQuota(userId) {
@@ -107,22 +152,24 @@ export async function getStudentFlashcardQuota(userId) {
   let planTier = "free";
 
   if (!userId || userId === "guest_student") {
-    return { limit, created, remaining: limit - created, planTier };
+    const store = getFallbackStore();
+    const guestQuota = (store.quotas && store.quotas["guest_student"]) || { limit: 25, created: 0, planTier: "free" };
+    return {
+      limit: guestQuota.limit,
+      created: guestQuota.created,
+      remaining: Math.max(0, guestQuota.limit - guestQuota.created),
+      planTier: guestQuota.planTier,
+    };
   }
 
   // 1. Try Supabase students table
   try {
-    const { data, error } = await supabase
-      .from("students")
-      .select("flashcards_limit, flashcards_created, plan_tier")
-      .or(`id.eq.${userId},user_id.eq.${userId}`)
-      .limit(1)
-      .maybeSingle();
-
-    if (data && !error) {
-      limit = Number(data.flashcards_limit ?? 25);
-      created = Number(data.flashcards_created ?? 0);
-      planTier = data.plan_tier || "free";
+    const studentRow = await findStudentRow(userId);
+    if (studentRow) {
+      planTier = studentRow.plan_tier || "free";
+      const defaultLimit = planTier.toLowerCase().includes("premium") ? 500 : 25;
+      limit = Number(studentRow.flashcards_limit != null ? studentRow.flashcards_limit : defaultLimit);
+      created = Number(studentRow.flashcards_created != null ? studentRow.flashcards_created : 0);
       return {
         limit,
         created,
@@ -130,25 +177,42 @@ export async function getStudentFlashcardQuota(userId) {
         planTier,
       };
     }
+  } catch (err) {
+    console.warn("[Flashcards] getStudentFlashcardQuota Supabase query error:", err.message);
+  }
+
+  // 2. Try fallback store
+  try {
+    const store = getFallbackStore();
+    if (store.quotas && store.quotas[String(userId)]) {
+      const q = store.quotas[String(userId)];
+      return {
+        limit: q.limit || 25,
+        created: q.created || 0,
+        remaining: Math.max(0, (q.limit || 25) - (q.created || 0)),
+        planTier: q.planTier || "free",
+      };
+    }
   } catch (_) {}
 
-  // 2. Try Mongoose Student model
+  // 3. Try Mongoose Student model
   try {
     const mongoose = (await import("mongoose")).default;
     const Student = (await import("../models/Student.js")).default;
     let stu = null;
     if (mongoose.Types.ObjectId.isValid(userId)) {
-      stu = await Student.findById(userId).lean();
+      stu = await Student.findById(userId).lean().catch(() => null);
     }
     if (!stu) {
       stu = await Student.findOne({
-        $or: [{ _id: userId }, { user: userId }, { phone: userId }, { email: userId }],
-      }).lean();
+        $or: [{ _id: userId }, { phone: userId }, { email: userId }],
+      }).lean().catch(() => null);
     }
     if (stu) {
-      limit = Number(stu.flashcards_limit ?? stu.flashcardsLimit ?? 25);
-      created = Number(stu.flashcards_created ?? stu.flashcardsCreated ?? 0);
       planTier = stu.plan_tier || stu.planTier || "free";
+      const defaultLimit = planTier.toLowerCase().includes("premium") ? 500 : 25;
+      limit = Number(stu.flashcards_limit ?? stu.flashcardsLimit ?? defaultLimit);
+      created = Number(stu.flashcards_created ?? stu.flashcardsCreated ?? 0);
     }
   } catch (_) {}
 
@@ -164,50 +228,66 @@ export async function getStudentFlashcardQuota(userId) {
  * Increment student flashcard usage count
  */
 export async function incrementStudentFlashcardUsage(userId, count) {
-  if (!count || count <= 0 || !userId || userId === "guest_student") return;
+  if (!count || count <= 0 || !userId) return;
 
-  // 1. Supabase update
+  const numCount = Number(count) || 1;
+
+  // 1. Supabase direct student row update
   try {
+    const studentRow = await findStudentRow(userId);
+    if (studentRow && studentRow.id) {
+      const cur = Number(studentRow.flashcards_created || 0);
+      const newCreated = cur + numCount;
+      const { error: upErr } = await supabase
+        .from("students")
+        .update({ flashcards_created: newCreated })
+        .eq("id", studentRow.id);
+
+      if (!upErr) {
+        console.log(`[Flashcards] Updated student ${studentRow.id} flashcards_created from ${cur} to ${newCreated}`);
+      }
+    }
+
+    // Try stored procedure if available
     await supabase.rpc("increment_student_flashcard_usage", {
-      p_student_id: String(userId),
-      p_count: count,
-    }).catch(async () => {
-      const { data: row } = await supabase
-        .from("students")
-        .select("flashcards_created")
-        .or(`id.eq.${userId},user_id.eq.${userId}`)
-        .limit(1)
-        .maybeSingle();
-      const cur = Number(row?.flashcards_created || 0);
-      await supabase
-        .from("students")
-        .update({ flashcards_created: cur + count })
-        .or(`id.eq.${userId},user_id.eq.${userId}`);
+      p_student_id: String(studentRow ? studentRow.id : userId),
+      p_count: numCount,
     });
   } catch (err) {
     console.warn("[Flashcards] Supabase usage increment error:", err.message);
   }
 
-  // 2. Mongoose update
+  // 2. Always persist into fallback store quotas
+  try {
+    const store = getFallbackStore();
+    store.quotas = store.quotas || {};
+    const key = String(userId);
+    const existing = store.quotas[key] || { limit: 25, created: 0, planTier: "free" };
+    existing.created = (Number(existing.created) || 0) + numCount;
+    store.quotas[key] = existing;
+    saveFallbackStore(store);
+  } catch (err) {
+    console.warn("[Flashcards] Fallback store usage increment error:", err.message);
+  }
+
+  // 3. Mongoose update
   try {
     const mongoose = (await import("mongoose")).default;
     const Student = (await import("../models/Student.js")).default;
     let query = { $or: [{ phone: userId }, { email: userId }] };
     if (mongoose.Types.ObjectId.isValid(userId)) {
-      query.$or.unshift({ _id: userId }, { user: userId });
+      query.$or.unshift({ _id: userId });
     }
     await Student.findOneAndUpdate(
       query,
       {
         $inc: {
-          flashcards_created: count,
-          flashcardsCreated: count,
+          flashcards_created: numCount,
+          flashcardsCreated: numCount,
         },
       }
-    );
-  } catch (err) {
-    console.warn("[Flashcards] Mongoose usage increment error:", err.message);
-  }
+    ).catch(() => null);
+  } catch (_) {}
 }
 
 /**

@@ -4,6 +4,8 @@ import {
   getStudySessionCards,
   recordCardReview,
   toggleCardBookmark,
+  incrementStudentFlashcardUsage,
+  getStudentFlashcardQuota,
 } from "../services/flashcardService.js";
 import { supabase } from "../utils/supabase.js";
 
@@ -270,11 +272,17 @@ export const createDeckManual = async (req, res) => {
       savedCards = cards;
     }
 
+    if (cards.length > 0) {
+      await incrementStudentFlashcardUsage(userId, cards.length);
+    }
+    const updatedQuota = await getStudentFlashcardQuota(userId);
+
     return res.json({
       success: true,
       data: {
         deck: savedDeck,
         cards: savedCards,
+        quota: updatedQuota,
       },
     });
   } catch (error) {

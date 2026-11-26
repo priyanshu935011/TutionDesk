@@ -1026,6 +1026,26 @@ export async function incrementMonthlyCareerUsage(userId, feature = "ai_counsell
   return newCount;
 }
 
+// Helper: Log AI queries to ai_harvest_logs for training
+async function harvestAiLog({ userId, taskType = "CAREER_COUNSELLOR", prompt, response, metadata = {} }) {
+  try {
+    const payload = {
+      task_type: taskType,
+      prompt: String(prompt || "").slice(0, 5000),
+      response: String(response || "").slice(0, 5000),
+      user_name: "Student",
+      user_role: "student",
+      metadata: {
+        userId: String(userId || ""),
+        ...metadata,
+      },
+    };
+    await supabase.from("ai_harvest_logs").insert(payload);
+  } catch (err) {
+    console.warn("[CareerService] AI harvest log save warning:", err.message);
+  }
+}
+
 /**
  * Chat with AI Career Counsellor
  */
@@ -1081,12 +1101,22 @@ ${studentContext}`;
     timeout: 30000,
   });
 
+  const cleanReply = replyText ? replyText.trim() : "I am here to help you navigate your academic and career goals. Could you please specify your question?";
+
+  harvestAiLog({
+    userId: uid,
+    taskType: "CAREER_COUNSELLOR",
+    prompt: message,
+    response: cleanReply,
+    metadata: { sessionId, isPremium },
+  });
+
   // Record usage count for free users
   const updatedUsage = await incrementMonthlyCareerUsage(uid, "ai_counsellor", 1);
 
   return {
     success: true,
-    reply: replyText.trim(),
+    reply: cleanReply,
     quota: {
       usedThisMonth: updatedUsage,
       limit: isPremium ? "unlimited" : freeMonthlyLimit,
