@@ -39,6 +39,8 @@ router.get("/status", getAgentStatus);
 router.get("/:agentId/status", getAgentStatus);
 router.post("/start", startAgent);
 router.post("/stop", stopAgent);
+router.get("/stop", stopAgent);
+router.all("/emergency-stop", stopAgent);
 router.post("/step", triggerStep);
 router.put("/config", updateConfig);
 

@@ -295,6 +295,7 @@ export const CURRICULUM_CATALOG = {
 // Internal active timer reference
 let agentIntervalTimer = null;
 let isLoopRunning = false;
+let isForceStopped = false;
 const AGENT_ID = "test_series_agent";
 
 // Helper: Append log to agent state
@@ -497,15 +498,15 @@ async function selectNextSynthesisTarget(agentDoc) {
 
 // 4. Autonomous Agent Step Synthesis
 export async function executeAgentStep(agentId = AGENT_ID) {
-  if (isLoopRunning) {
-    console.log("[AgentService] Step already running, skipping overlapping tick.");
+  if (isLoopRunning || isForceStopped) {
+    console.log("[AgentService] Step already running or agent force stopped, skipping tick.");
     return;
   }
   isLoopRunning = true;
 
   try {
     const doc = await AgentStateConfig.findOne({ agentId });
-    if (!doc || !doc.isRunning) {
+    if (!doc || !doc.isRunning || isForceStopped) {
       isLoopRunning = false;
       return;
     }
@@ -636,6 +637,20 @@ Return strictly a JSON object with this exact structure:
       preferredModel,
     });
 
+    // Check if stopped while awaiting Gemini API response
+    if (isForceStopped) {
+      console.log("[AgentService] Agent was force stopped during AI generation. Discarding output.");
+      isLoopRunning = false;
+      return;
+    }
+
+    const freshDoc = await AgentStateConfig.findOne({ agentId });
+    if (!freshDoc || !freshDoc.isRunning || isForceStopped) {
+      console.log("[AgentService] Fresh doc check: Agent was halted. Discarding output.");
+      isLoopRunning = false;
+      return;
+    }
+
     const parsedData = extractJsonFromText(rawResponse);
     if (!parsedData || !Array.isArray(parsedData.questions) || parsedData.questions.length === 0) {
       throw new Error("Failed to parse valid structured test series JSON from Gemini response.");
@@ -690,16 +705,16 @@ Return strictly a JSON object with this exact structure:
       status: "pending_review",
     });
 
-    // Update telemetry state
-    doc.lastRunAt = new Date();
-    doc.runsThisHour = (doc.runsThisHour || 0) + 1;
-    doc.consecutiveErrors = 0; // Reset error streak on success
-    doc.state = {
-      ...doc.state,
-      totalGenerated: (doc.state?.totalGenerated || 0) + 1,
+    // Update telemetry state using freshDoc
+    freshDoc.lastRunAt = new Date();
+    freshDoc.runsThisHour = (freshDoc.runsThisHour || 0) + 1;
+    freshDoc.consecutiveErrors = 0; // Reset error streak on success
+    freshDoc.state = {
+      ...freshDoc.state,
+      totalGenerated: (freshDoc.state?.totalGenerated || 0) + 1,
       lastGeneratedTitle: stagedTest.title,
     };
-    await doc.save();
+    await freshDoc.save();
 
     await appendAgentLog(
       agentId,
@@ -746,6 +761,7 @@ Return strictly a JSON object with this exact structure:
 
 // 5. Start Agent Loop
 export async function startAgent(agentId = AGENT_ID) {
+  isForceStopped = false;
   let doc = await AgentStateConfig.findOne({ agentId });
   if (!doc) {
     await getAgentState(agentId);
@@ -780,17 +796,24 @@ export async function startAgent(agentId = AGENT_ID) {
 
 // 6. Stop Agent Loop
 export async function stopAgent(agentId = AGENT_ID) {
+  isForceStopped = true;
+  stopAgentLoop();
+  isLoopRunning = false;
+
   let doc = await AgentStateConfig.findOne({ agentId });
   if (doc) {
     doc.isRunning = false;
     await doc.save();
   }
 
-  stopAgentLoop();
+  try {
+    await AgentStateConfig.updateOne({ agentId }, { $set: { isRunning: false } });
+  } catch (_) {}
+
   await appendAgentLog(
     agentId,
-    "info",
-    "Autonomous Agent halted by Super Admin. Standby mode active."
+    "warn",
+    "🛑 EMERGENCY STOP: Autonomous Agent loop completely stopped by Super Admin."
   );
 
   return await getAgentState(agentId);
