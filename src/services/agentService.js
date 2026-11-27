@@ -317,7 +317,15 @@ export async function appendAgentLog(agentId, level, message, details = null) {
       // Keep last 100 log entries
       const updatedLogs = [logEntry, ...existingLogs].slice(0, 100);
       doc.logs = updatedLogs;
-      await doc.save();
+      try {
+        await doc.save();
+      } catch (saveErr) {
+        // Fallback: direct Supabase table update on primary key agent_id
+        await AgentStateConfig.supabase
+          .from("agent_state_configs")
+          .update({ logs: updatedLogs, updated_at: new Date().toISOString() })
+          .eq("agent_id", agentId);
+      }
     }
   } catch (err) {
     console.error("[AgentService] Failed to append log:", err.message);
@@ -768,14 +776,28 @@ export async function startAgent(agentId = AGENT_ID) {
     doc = await AgentStateConfig.findOne({ agentId });
   }
 
-  if (doc.circuitBreakerTripped) {
-    // Reset circuit breaker when user explicitly turns agent on
-    doc.circuitBreakerTripped = false;
-    doc.consecutiveErrors = 0;
-  }
+  if (doc) {
+    if (doc.circuitBreakerTripped) {
+      // Reset circuit breaker when user explicitly turns agent on
+      doc.circuitBreakerTripped = false;
+      doc.consecutiveErrors = 0;
+    }
 
-  doc.isRunning = true;
-  await doc.save();
+    doc.isRunning = true;
+    try {
+      await doc.save();
+    } catch (err) {
+      await AgentStateConfig.supabase
+        .from("agent_state_configs")
+        .update({ is_running: true, updated_at: new Date().toISOString() })
+        .eq("agent_id", agentId);
+    }
+  } else {
+    await AgentStateConfig.supabase
+      .from("agent_state_configs")
+      .update({ is_running: true, updated_at: new Date().toISOString() })
+      .eq("agent_id", agentId);
+  }
 
   await appendAgentLog(
     agentId,
@@ -789,7 +811,7 @@ export async function startAgent(agentId = AGENT_ID) {
   }, 1000);
 
   // Set recurring loop interval
-  startAgentLoop(agentId, doc.config?.intervalSeconds || 45);
+  startAgentLoop(agentId, doc?.config?.intervalSeconds || 45);
 
   return await getAgentState(agentId);
 }
@@ -800,10 +822,24 @@ export async function stopAgent(agentId = AGENT_ID) {
   stopAgentLoop();
   isLoopRunning = false;
 
-  let doc = await AgentStateConfig.findOne({ agentId });
-  if (doc) {
-    doc.isRunning = false;
-    await doc.save();
+  try {
+    let doc = await AgentStateConfig.findOne({ agentId });
+    if (doc) {
+      doc.isRunning = false;
+      await doc.save();
+    }
+  } catch (err) {
+    console.warn("[AgentService] doc.save error on stopAgent:", err.message);
+  }
+
+  // Direct Supabase update ensures is_running is immediately false in PostgreSQL
+  try {
+    await AgentStateConfig.supabase
+      .from("agent_state_configs")
+      .update({ is_running: false, updated_at: new Date().toISOString() })
+      .eq("agent_id", agentId);
+  } catch (err) {
+    console.warn("[AgentService] Direct Supabase stop fallback error:", err.message);
   }
 
   try {

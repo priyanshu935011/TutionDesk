@@ -798,9 +798,13 @@ class SupabaseDocument {
       return;
     }
 
-    // Map database 'id' to mongoose '_id'
+    // Map database 'id' or primary key 'agent_id' to mongoose '_id'
     if (data.id && !data._id) {
       this._id = data.id;
+    } else if (data.agent_id && !data._id) {
+      this._id = data.agent_id;
+    } else if (data.agentId && !data._id) {
+      this._id = data.agentId;
     }
 
     // Automatically parse dates and expose camelCase aliases for all snake_case properties
@@ -1208,7 +1212,7 @@ class SupabaseDocument {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -1236,7 +1240,7 @@ class SupabaseDocument {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -1480,11 +1484,22 @@ class SupabaseDocument {
       if (oUser) payload.owner_user = toValidUUID(oUser);
     }
 
-    if (this._id) {
-      payload.id = this._id;
+    const isAgentStateTable = this._tableName === "agent_state_configs";
+    const pKeyCol = isAgentStateTable ? "agent_id" : "id";
+    const pKeyVal = isAgentStateTable
+      ? (this.agent_id || this.agentId || this._id)
+      : (this._id || payload.id);
+
+    if (pKeyVal) {
+      if (isAgentStateTable) {
+        payload.agent_id = pKeyVal;
+        delete payload.id;
+      } else {
+        payload.id = pKeyVal;
+      }
     }
 
-    if (payload.id) {
+    if (pKeyVal) {
       // Update
       stripKnownMissingColumns(this._tableName, payload);
       let attempt = 0;
@@ -1492,7 +1507,7 @@ class SupabaseDocument {
         const { data, error } = await this._model.supabase
           .from(this._tableName)
           .update(payload)
-          .eq("id", payload.id)
+          .eq(pKeyCol, pKeyVal)
           .select()
           .maybeSingle();
 
@@ -1530,7 +1545,7 @@ class SupabaseDocument {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -1663,6 +1678,10 @@ class SupabaseDocument {
       return this;
     } else {
       // Insert
+      if (this._tableName === "agent_state_configs") {
+        payload.agent_id = this.agent_id || this.agentId || this._id;
+        delete payload.id;
+      }
       stripKnownMissingColumns(this._tableName, payload);
       let attempt = 0;
       while (attempt < 5) {
@@ -1706,7 +1725,7 @@ class SupabaseDocument {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -2164,7 +2183,7 @@ class SupabaseQuery {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -2298,7 +2317,7 @@ class SupabaseQuery {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -3716,7 +3735,7 @@ class SupabaseModel {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
@@ -3740,7 +3759,7 @@ class SupabaseModel {
             this.id = this._id;
           }
           const plainObj = typeof this.toObject === "function" ? this.toObject() : { ...this };
-          const idx = fallbackData.findIndex(doc => doc.id === this._id || doc._id === this._id);
+          const idx = fallbackData.findIndex(doc => (doc[pKeyCol] && doc[pKeyCol] === pKeyVal) || doc.id === this._id || doc._id === this._id);
           if (idx !== -1) {
             fallbackData[idx] = { ...fallbackData[idx], ...plainObj };
           } else {
