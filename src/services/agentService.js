@@ -3,7 +3,7 @@ import AgentTestSeries from "../models/AgentTestSeries.js";
 import TestSeries from "../models/TestSeries.js";
 import { callGeminiApi, extractJsonFromText } from "./aiService.js";
 import { readCategoryTaxonomy, writeCategoryTaxonomy } from "../controllers/testSeriesController.js";
-import { formatDisplayMath, formatStepByStepSolution, cleanLatexToText } from "../utils/mathFormatter.js";
+import { sanitizeContent } from "../utils/mathFormatter.js";
 
 // Comprehensive Curriculum Knowledge Tree
 export const CURRICULUM_CATALOG = {
@@ -583,49 +583,23 @@ Produce rigorous, accurate, high-quality test series with zero hallucinations. E
 
 CRITICAL TUTOR-STYLE EXPLANATION & FORMATTING INSTRUCTIONS:
 Explain every solution like an exceptional, patient master tutor teaching a student at a chalkboard:
-1. START WITH GIVEN EQUATIONS / SETUP:
-   State each given equation or condition clearly on its own line:
-   Given:
-   1) a - b = 0
-   2) 2a + 3b + c = 0
-   3) a - 2b - c = 1
+1. STRUCTURE & STEP-BY-STEP FORMAT:
+   - Use clean Markdown with headers (e.g. "### Step 1: Identify Key Concepts", "### Step 2: Set Up Equations").
+   - Put every equation and deduction on its own line.
+   - Never cram multiple algebraic steps onto a single line.
 
-2. ONE DEDUCTION PER LINE (NO CRAMMED ARROWS):
-   NEVER cram multiple algebraic steps or chained arrows together horizontally on a single line (NEVER write: 2a + 3b + c = 0 ➔ 5a + c = 0 ➔ c = -5a).
-   Write each intermediate deduction and substitution on its own separate line:
-   Step 1: Express b in terms of a
-   From (1): a - b = 0
-   ➔ a = b
+2. MATHEMATICAL & PHYSICAL NOTATION:
+   - For all mathematical formulas, physical dimensions, variables, and units, use standard LaTeX enclosed in $ ... $ for inline math (e.g. $v(t) = 6t^2 - 18t + 12$, $[M^0 L T^{-3}]$, $10^{-6}\text{ s}$, $\propto$).
+   - For centered equations, use display math $$ ... $$ on its own line.
+   - For chemical equations and formulas, use standard mhchem notation inside math: $\\ce{2H2 + O2 -> 2H2O}$, $\\ce{CaCO3 -> CaO + CO2 ^}$.
+   - Standard minus signs (-) for mathematical subtraction and negative numbers.
 
-   Step 2: Express c in terms of a
-   Substitute b = a into (2):
-   2a + 3(a) + c = 0
-   5a + c = 0
-   ➔ c = -5a
+3. CLEAN NUMERICAL & SYMBOL INTEGRITY:
+   - Never split numbers, decimals, or units across newlines (write 0.02, never split as 0. and 02; write (N + 1), never split as (N + and 1)).
+   - Do not output raw unformatted ASCII carets without math tags.
 
-   Step 3: Solve for a
-   Substitute b = a and c = -5a into (3):
-   a - 2(a) - (-5a) = 1
-   a - 2a + 5a = 1
-   2a = 1
-   ➔ a = 1/2
-
-   Conclusion:
-   Thus, Option B is correct.
-
-3. PRESERVE ALGEBRAIC MINUS SIGNS:
-   Always write standard minus signs (-) for mathematical subtraction and negative numbers (e.g. a - b = 0, c = -5a). Never use bullet points or dashes inside equations.
-
-4. ZERO RAW LATEX CODE & ZERO DOLLAR SIGNS:
-   Do NOT output raw LaTeX commands (\\frac, \\sqrt, \\text{}, \\implies, \\times, etc.) and NEVER wrap expressions in dollar signs ($ or $$).
-   Convert all mathematical expressions to clean, natural text:
-   • Fractions: write dx/dt or (a)/(b) or 1/2 instead of \\frac{dx}{dt}
-   • Roots: write √(x) instead of \\sqrt{x}
-   • Units: write m, s, kg, J directly instead of \\text{ m}, \\text{ s}
-   • Exponents: use real Unicode superscripts: x², t³, 10⁻⁶, [M⁰ L T⁻³]
-
-5. NO INTERNAL DELIBERATIONS / SCRATCHPAD:
-   Never include internal self-checking, re-verification, or conversational filler (never write "wait, let's re-verify...", "let's recalculate carefully...", "Wait, let's re-check..."). Return only the final clean, structured educational solution.
+4. NO INTERNAL DELIBERATIONS / SCRATCHPAD:
+   - Never include internal self-checking, re-verification, or conversational filler (never write "wait, let's re-verify...", "let's recalculate carefully...", "Wait, let's re-check..."). Return only the final clean, structured educational solution.
 
 Respond ONLY with a valid, clean JSON object matching the requested schema.`;
 
@@ -644,8 +618,8 @@ Requirements:
    - Medium: Multi-concept problems, standard exam level, tricky edge cases.
    - Hard: Advanced multi-step derivations, Olympiad/JEE-Advanced level numericals, assertion-reason or composite statements.
 4. Total Marks: ${questionsCount * 4}, Passing Marks: ${Math.round(questionsCount * 4 * 0.4)}, Duration: ${Math.max(30, questionsCount * 3)} minutes.
-5. All mathematical symbols, physical dimensions, and chemical equations MUST be formatted using real-world typographic notation. Never use raw ASCII carets or bracketed powers like [M^0 L T^(-3)] or x^2 or 10^(-6). Use real-world superscripts: e.g. [M⁰ L T⁻³], [M¹ L² T⁻²], 10⁻⁶, x², cm³, kg m⁻³.
-6. Format every question explanation step-by-step with newlines separating each step, equation, and conclusion. Zero raw LaTeX commands, zero dollar signs, zero scratchpad chatter.
+5. All mathematical symbols, physical dimensions, and chemical equations MUST use standard LaTeX ($...$ or $$...$$) and mhchem ($\ce{...}$).
+6. Format every question explanation step-by-step with clean Markdown headings and line breaks separating each step, equation, and conclusion. Zero scratchpad chatter.
 7. Provide an informative summary in sourceInfo explaining the historical exam frequency, target years, and key conceptual anchors.
 
 Return strictly a JSON object with this exact structure:
@@ -670,17 +644,17 @@ Return strictly a JSON object with this exact structure:
     {
       "id": "q_1",
       "type": "single_choice",
-      "question": "string without latex code or dollar signs",
+      "question": "string with standard markdown and latex ($...$)",
       "options": [
-        { "id": "A", "text": "string" },
-        { "id": "B", "text": "string" },
-        { "id": "C", "text": "string" },
-        { "id": "D", "text": "string" }
+        { "id": "A", "text": "string with standard markdown and latex" },
+        { "id": "B", "text": "string with standard markdown and latex" },
+        { "id": "C", "text": "string with standard markdown and latex" },
+        { "id": "D", "text": "string with standard markdown and latex" }
       ],
       "correctAnswers": ["A"],
       "marks": 4,
       "negativeMarks": 1,
-      "explanation": "Step-by-step human-readable explanation with line breaks separating each step, calculation, and final conclusion"
+      "explanation": "Step-by-step human-readable explanation with markdown and latex"
     }
   ]
 }`;
@@ -712,11 +686,11 @@ Return strictly a JSON object with this exact structure:
       throw new Error("Failed to parse valid structured test series JSON from Gemini response.");
     }
 
-    // Format & validate questions with real-world superscripts
+    // Format & validate questions cleanly
     const formattedQuestions = parsedData.questions.map((q, idx) => ({
       id: q.id || `q_${Date.now()}_${idx + 1}`,
       type: q.type || "single_choice",
-      question: formatDisplayMath(q.question || "Question prompt"),
+      question: sanitizeContent(q.question || "Question prompt"),
       questionImageUrl: q.questionImageUrl || "",
       options: (Array.isArray(q.options) && q.options.length >= 2
         ? q.options
@@ -728,7 +702,7 @@ Return strictly a JSON object with this exact structure:
           ]
       ).map((opt, oIdx) => ({
         id: opt.id || String.fromCharCode(65 + oIdx),
-        text: formatDisplayMath(String(opt.text || "")),
+        text: sanitizeContent(String(opt.text || "")),
         imageUrl: opt.imageUrl || "",
       })),
       correctAnswers: Array.isArray(q.correctAnswers)
@@ -738,13 +712,13 @@ Return strictly a JSON object with this exact structure:
         : ["A"],
       marks: Number(q.marks || 4),
       negativeMarks: Number(q.negativeMarks || 1),
-      explanation: formatStepByStepSolution(String(q.explanation || "")),
+      explanation: sanitizeContent(String(q.explanation || "")),
     }));
 
     // Stage into AgentTestSeries
     const stagedTest = await AgentTestSeries.create({
-      title: formatDisplayMath(parsedData.title || `${target.category} ${target.subject} - ${target.topic}`),
-      description: formatDisplayMath(parsedData.description || `Autonomous AI Curated PYQs and conceptual benchmarks for ${target.topic}.`),
+      title: sanitizeContent(parsedData.title || `${target.category} ${target.subject} - ${target.topic}`),
+      description: sanitizeContent(parsedData.description || `Autonomous AI Curated PYQs and conceptual benchmarks for ${target.topic}.`),
       category: target.category,
       subject: target.subject,
       topic: target.topic,
@@ -946,17 +920,17 @@ export async function getStagedTestSeries({ status, page = 1, limit = 20, search
     .skip(skip)
     .limit(Number(limit));
 
-  // Sanitize questions so existing staged tests immediately display clean text & step-by-step layout
+  // Sanitize questions so existing staged tests repair any historical artifacts (≤ft, split numbers)
   const sanitizedItems = items.map((test) => {
     const obj = typeof test.toObject === "function" ? test.toObject() : { ...test };
     if (Array.isArray(obj.questions)) {
       obj.questions = obj.questions.map((q) => ({
         ...q,
-        question: formatDisplayMath(q.question),
+        question: sanitizeContent(q.question),
         options: Array.isArray(q.options)
-          ? q.options.map((opt) => ({ ...opt, text: formatDisplayMath(opt.text) }))
+          ? q.options.map((opt) => ({ ...opt, text: sanitizeContent(opt.text) }))
           : q.options,
-        explanation: formatStepByStepSolution(q.explanation || ""),
+        explanation: sanitizeContent(q.explanation || ""),
       }));
     }
     return obj;
@@ -985,14 +959,14 @@ export async function approveAgentTest(stagedId, adminUser = null) {
 
   const folderPath = `/${staged.category}/${staged.subject}/${staged.topic}`;
 
-  // Sanitize questions with clean step-by-step formatting before creating production test
+  // Sanitize questions with non-destructive normalizer before creating production test
   const cleanQuestions = (Array.isArray(staged.questions) ? staged.questions : []).map((q) => ({
     ...q,
-    question: formatDisplayMath(q.question),
+    question: sanitizeContent(q.question),
     options: Array.isArray(q.options)
-      ? q.options.map((opt) => ({ ...opt, text: formatDisplayMath(opt.text) }))
+      ? q.options.map((opt) => ({ ...opt, text: sanitizeContent(opt.text) }))
       : q.options,
-    explanation: formatStepByStepSolution(q.explanation || ""),
+    explanation: sanitizeContent(q.explanation || ""),
   }));
 
   // Copy into main TestSeries table
