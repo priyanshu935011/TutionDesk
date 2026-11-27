@@ -4358,13 +4358,18 @@ export const sendFeeReminderWhatsApp = async (req, res) => {
 
 export const getStudentNotifications = async (req, res) => {
   try {
-    const students = req.students || (req.student ? [req.student] : []);
+    let students = req.students || (req.student ? [req.student] : []);
+    if ((!students || students.length === 0) && req.user) {
+      students = [{ _id: req.user._id || req.user.id, id: req.user._id || req.user.id }];
+    }
+
     if (!students || students.length === 0) {
-      return res.json({ success: true, notificationsMap: {} });
+      return res.json({ success: true, notifications: [], notificationsMap: {} });
     }
 
     const { supabase: sb } = await import("../utils/supabase.js");
     const notificationsMap = {};
+    const allNotifications = [];
 
     for (const student of students) {
       const stIdStr = String(student._id || student.id || "").trim();
@@ -4375,7 +4380,7 @@ export const getStudentNotifications = async (req, res) => {
       const { data: rows, error } = await sb
         .from("notifications")
         .select("*")
-        .eq("student_id", stIdStr)
+        .or(`student_id.eq.${stIdStr},student_id.is.null`)
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -4399,7 +4404,9 @@ export const getStudentNotifications = async (req, res) => {
           }
         }
       } else {
-        const docs = await Notification.find({ student: student._id || student.id })
+        const docs = await Notification.find({
+          $or: [{ student: student._id || student.id }, { student: null }],
+        })
           .sort({ createdAt: -1 })
           .limit(50);
         const seenKeys = new Set();
@@ -4423,10 +4430,14 @@ export const getStudentNotifications = async (req, res) => {
       }
 
       notificationsMap[stIdStr] = studentNotifications;
+      allNotifications.push(...studentNotifications);
     }
+
+    allNotifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     return res.json({
       success: true,
+      notifications: allNotifications,
       notificationsMap,
     });
   } catch (error) {
