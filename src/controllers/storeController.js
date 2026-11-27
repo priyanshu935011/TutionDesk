@@ -99,9 +99,8 @@ export const getAdminProducts = async (req, res) => {
 
 export const getLockedTestSeries = async (req, res) => {
   try {
-    // Only return platform/super-admin test series that are locked
+    // Return all platform/super-admin test series (both locked and unlocked)
     const filter = {
-      isLocked: true,
       $or: [{ institute: null }, { institute: { $exists: false } }],
     };
     let testSeries = await TestSeries.find(filter).sort({ title: 1 });
@@ -118,11 +117,12 @@ export const getLockedTestSeries = async (req, res) => {
         difficulty: t.difficulty || "Medium",
         totalMarks: t.totalMarks,
         questionsCount: Array.isArray(t.questions) ? t.questions.length : 0,
+        isLocked: !!t.isLocked,
       })),
     });
   } catch (err) {
     console.error("getLockedTestSeries error:", err);
-    res.status(500).json({ message: "Failed to fetch locked test series", error: err.message });
+    res.status(500).json({ message: "Failed to fetch test series", error: err.message });
   }
 };
 
