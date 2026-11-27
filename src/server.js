@@ -36,6 +36,7 @@ import careerRoutes from "./routes/careerRoutes.js";
 import aiTutorRoutes from "./routes/aiTutorRoutes.js";
 import mistakeBookRoutes from "./routes/mistakeBookRoutes.js";
 import doubtRoutes from "./routes/doubtRoutes.js";
+import agentRoutes from "./routes/agentRoutes.js";
 import SystemSetting from "./models/SystemSetting.js";
 import { initializeSupabaseStorage } from "./utils/supabaseModel.js";
 import { startAttendanceReminderScheduler } from "./services/attendanceReminderService.js";
@@ -189,6 +190,7 @@ app.use(["/career", "/api/career", "/api/v2/career"], careerRoutes);
 app.use(["/ai-tutor", "/api/ai-tutor", "/api/v2/ai-tutor"], aiTutorRoutes);
 app.use(["/mistake-book", "/api/mistake-book", "/api/v2/mistake-book"], mistakeBookRoutes);
 app.use(["/doubts", "/api/doubts", "/api/v2/doubts"], doubtRoutes);
+app.use(["/agents", "/api/agents"], agentRoutes);
 
 app.get("/debug-sentry", protect, function mainHandler(req, res) {
   if (process.env.NODE_ENV === "production" || req.user?.role !== "super_admin") {

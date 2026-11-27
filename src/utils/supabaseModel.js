@@ -4246,6 +4246,8 @@ const mockMongoose = {
       else if (modelName === "StreakTask" || modelName === "StreakTasks") tableName = "streak_tasks";
       else if (modelName === "Badge" || modelName === "Badges") tableName = "badges";
       else if (modelName === "StudentStreak" || modelName === "StudentStreaks") tableName = "student_streaks";
+      else if (modelName === "AgentTestSeries" || modelName === "AgentTestSeriesList") tableName = "agent_test_series";
+      else if (modelName === "AgentStateConfig" || modelName === "AgentStateConfigs") tableName = "agent_state_configs";
       else tableName = modelName.toLowerCase() + "s";
 
       if (tableName === "marketingtemplates" || tableName === "marketingtemplate") tableName = "marketing_templates";
