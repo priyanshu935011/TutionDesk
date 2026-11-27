@@ -1,7 +1,7 @@
 /**
  * Universal utility for converting power notation, raw LaTeX symbols,
  * and scientific equations into clean, natural human-readable text
- * with clear step-by-step layout.
+ * with clear step-by-step layout and centered formula alignment.
  */
 
 export const SUPERSCRIPT_MAP = {
@@ -103,6 +103,9 @@ export const SUBSCRIPT_MAP = {
 };
 
 export const LATEX_SYMBOLS = {
+  '\\propto': '∝',
+  '\\sim': '∼',
+  '\\equiv': '≡',
   '\\times': '×',
   '\\cdot': '·',
   '\\pm': '±',
@@ -141,6 +144,10 @@ export const LATEX_SYMBOLS = {
   '\\varepsilon': 'ε',
   '\\degree': '°',
   '\\circ': '°',
+  '\\perp': '⊥',
+  '\\parallel': '∥',
+  '\\therefore': '∴',
+  '\\because': '∵',
 };
 
 export function toSuperscript(str) {
@@ -169,7 +176,7 @@ export function formatPowersToSuperscript(text) {
   // 2. Simple signed/unsigned numbers: ^-3, ^+2, ^0, ^2, ^12
   res = res.replace(/\^([\+\-]?\d+)/g, (_, exp) => toSuperscript(exp));
 
-  // 3. Single letter powers: ^n, ^x, ^-x, ^m, ^k, ^i
+  // 3. Single letter powers: ^n, ^x, ^-x, ^m, ^k, ^i, ^a, ^b, ^c
   res = res.replace(/\^([\+\-]?[a-zA-Z])/g, (_, exp) => toSuperscript(exp));
 
   return res;
@@ -177,30 +184,32 @@ export function formatPowersToSuperscript(text) {
 
 /**
  * Converts raw LaTeX commands, math tags, and symbols into clean,
- * natural human-readable text.
+ * natural human-readable text without corrupting expressions.
  */
 export function cleanLatexToText(text) {
   if (!text || typeof text !== 'string') return text;
   let str = text;
 
   // 1. Remove rambling chain-of-thought self-checks from Gemini
-  // e.g. "... wait, let's re-verify: ... Wait, let's re-check $d_1+d_2+d_3 = 11\text{ m}$."
   str = str.replace(
     /(\.{2,3}\s*)?(wait,?\s*)?(let'?s\s+(re-?verify|re-?calculate|re-?check|check again|verify carefully))[\s\S]*?(?=(Thus|Hence|Therefore|So|In conclusion|Conclusion|Option\s+[A-D]|Final Answer|$))/i,
     ''
   );
 
-  // 2. Ensure space between closing brace/tag and subsequent word: e.g. \text{ s}andt -> \text{ s} andt
-  str = str.replace(/([\}])([a-zA-Z])/g, '$1 $2');
-  str = str.replace(/([a-zA-Z]{2,})([a-zA-Z]\([a-zA-Z0-9]+\))/g, '$1 $2'); // "Settingv(t)" -> "Setting v(t)"
-  str = str.replace(/(\d+)([a-zA-Z]{2,})/g, '$1 $2'); // "0yields" -> "0 yields"
-  str = str.replace(/\batt\s*=\s*/g, 'at t = '); // "att = 1" -> "at t = 1"
-  str = str.replace(/\bandt\s*=\s*/g, 'and t = '); // "andt = 2" -> "and t = 2"
-  str = str.replace(/\bFromt\s*=\s*/g, 'From t = '); // "Fromt = 1" -> "From t = 1"
-  str = str.replace(/\btot\s*=\s*/g, 'to t = '); // "tot = 2" -> "to t = 2"
-  str = str.replace(/([a-zA-Z0-9])=\s*([a-zA-Z0-9])/g, '$1 = $2'); // "distance =d" -> "distance = d"
+  // 2. Strip \left and \right BEFORE symbol replacements so \le doesn't turn \left into ≤ft
+  str = str.replace(/\\left\s*[\(\[\{]/g, '(');
+  str = str.replace(/\\right\s*[\)\]\}]/g, ')');
+  str = str.replace(/\\left\s*\|/g, '|');
+  str = str.replace(/\\right\s*\|/g, '|');
+  str = str.replace(/\\(left|right)\s*\./g, '');
+  str = str.replace(/\\(left|right)\b/g, '');
 
-  // 3. Convert \frac{a}{b} -> a/b (or (a)/(b) if composite)
+  // 3. Repair any pre-corrupted "≤ft" from previous passes
+  str = str.replace(/≤ft\s*\(/g, '(');
+  str = str.replace(/≤ft\s*\[/g, '[');
+  str = str.replace(/≤ft\b/g, '');
+
+  // 4. Convert \frac{a}{b} -> a/b (or (a)/(b) if composite)
   str = str.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_, num, den) => {
     const cleanNum = num.trim();
     const cleanDen = den.trim();
@@ -210,31 +219,53 @@ export function cleanLatexToText(text) {
     return `(${cleanNum})/(${cleanDen})`;
   });
 
-  // 4. Convert \sqrt{x} -> √(x)
+  // 5. Convert \sqrt{x} -> √(x)
   str = str.replace(/\\sqrt\s*\{([^{}]+)\}/g, (_, inner) => `√(${inner.trim()})`);
 
-  // 5. Convert \text{...}, \mathrm{...}, \mathbf{...} -> inner
+  // 6. Convert \text{...}, \mathrm{...}, \mathbf{...} -> inner
   str = str.replace(/\\(text|mathrm|mathbf|mathit|textnormal)\s*\{([^{}]+)\}/g, (_, __, inner) => inner);
 
-  // 6. Replace known LaTeX symbol commands
-  for (const [tex, sym] of Object.entries(LATEX_SYMBOLS)) {
-    str = str.replaceAll(tex, sym);
+  // 7. Replace known LaTeX symbol commands with word boundary checks for alphanumeric commands
+  const sortedSymbols = Object.keys(LATEX_SYMBOLS).sort((a, b) => b.length - a.length);
+  for (const tex of sortedSymbols) {
+    const sym = LATEX_SYMBOLS[tex];
+    const isAlpha = /^\\[a-zA-Z]+$/.test(tex);
+    if (isAlpha) {
+      str = str.replace(new RegExp(tex.replace('\\', '\\\\') + '\\b', 'g'), sym);
+    } else {
+      str = str.replaceAll(tex, sym);
+    }
   }
 
-  // 7. Convert subscripts: d_1 -> d₁, x_0 -> x₀, d_{1} -> d₁
-  str = str.replace(/([a-zA-Z])_\{?([0-9a-z\+\-]+)\}?/g, (_, varName, sub) => `${varName}${toSubscript(sub)}`);
+  // 8. Fix run-on glue words
+  str = str.replace(/([\}])([a-zA-Z])/g, '$1 $2');
+  str = str.replace(/([a-zA-Z]{2,})([a-zA-Z]\([a-zA-Z0-9]+\))/g, '$1 $2');
+  str = str.replace(/(\d+)([a-zA-Z]{2,})/g, '$1 $2');
+  str = str.replace(/\batt\s*=\s*/g, 'at t = ');
+  str = str.replace(/\bandt\s*=\s*/g, 'and t = ');
+  str = str.replace(/\bFromt\s*=\s*/g, 'From t = ');
+  str = str.replace(/\btot\s*=\s*/g, 'to t = ');
+  str = str.replace(/([a-zA-Z0-9])=\s*([a-zA-Z0-9])/g, '$1 = $2');
 
-  // 8. Convert powers: x^2 -> x², t^3 -> t³, 10^(-6) -> 10⁻⁶
+  // 9. Subscripts: t_{mean} -> t_mean, d_1 -> d₁, F_{net} -> F_net
+  str = str.replace(/_\{([a-zA-Z0-9\+\-]+)\}/g, (_, sub) => {
+    if (/^[0-9\+\-]+$/.test(sub) && sub.length <= 3) return toSubscript(sub);
+    return `_${sub}`;
+  });
+  str = str.replace(/([a-zA-Z])_([0-9])/g, (_, v, s) => `${v}${toSubscript(s)}`);
+  str = str.replace(/([a-zA-Z])_([a-zA-Z]{1,4})\b/g, '$1_$2');
+
+  // 10. Convert powers: x^2 -> x², t^3 -> t³, 10^(-6) -> 10⁻⁶
   str = formatPowersToSuperscript(str);
 
-  // 9. Remove all remaining stray dollar signs
+  // 11. Remove all remaining stray dollar signs
   str = str.replace(/\$+/g, '');
 
-  // 10. Clean any lingering backslash artifacts (\left, \right, etc.)
+  // 12. Clean any lingering backslash artifacts
   str = str.replace(/\\(left|right|displaystyle|quad|qquad|,|;|!)/g, ' ');
   str = str.replace(/\\([%_&])/g, '$1');
 
-  // 11. Normalize spaces
+  // 13. Normalize spaces
   str = str.replace(/[ \t]+/g, ' ');
 
   return str.trim();
@@ -249,7 +280,13 @@ export function formatStepByStepSolution(text) {
   if (!text || typeof text !== 'string') return text;
   let str = cleanLatexToText(text);
 
-  // 1. Repair any corrupted bullets that were mistakenly inserted before minus signs or variables:
+  // 1. Repair accidentally broken numbers, decimals, or parentheses:
+  // e.g. "(N +\n\n1)" -> "(N + 1)"
+  str = str.replace(/\(([^()\n]*?)\s*\n+\s*([0-9a-zA-Z\+\-\*\/\s]+)\)/g, '($1 $2)');
+  // e.g. "0.\n\n02" -> "0.02"
+  str = str.replace(/(\d+)\.\s*\n+\s*(\d+)/g, '$1.$2');
+
+  // 2. Repair any corrupted bullets mistakenly inserted before minus signs or variables:
   // e.g. "a\n• b = 0" -> "a - b = 0", "• a - 2b\n• c = 1" -> "a - 2b - c = 1"
   str = str.replace(/([a-zA-Z0-9\)])\s*\n\s*•\s*([a-zA-Z0-9])/g, '$1 - $2');
   str = str.replace(/([a-zA-Z0-9\)])\s*•\s*([a-zA-Z0-9])/g, '$1 - $2');
@@ -257,28 +294,23 @@ export function formatStepByStepSolution(text) {
   str = str.replace(/([➔=>])\s*\n\s*•\s*([a-zA-Z0-9])/g, '$1 $2');
   str = str.replace(/(^|\n)\s*•\s*([a-zA-Z0-9]\s*[-+=])/g, '$1$2');
 
-  // 2. Put numbered steps/equations on their own new lines: 1), 2), 3) or 1., 2., 3.
-  str = str.replace(/([^\n])\s*(\b\d+[\)\.]\s+[a-zA-Z0-9])/g, '$1\n\n$2');
+  // 3. Put numbered steps/equations on their own lines ONLY when preceded by newline or start
+  str = str.replace(/(^|\n)\s*(\d+[\)\.]\s+[a-zA-Z0-9])/g, '$1$2');
 
-  // 3. Segment "Step X:" or "Step 1:"
-  str = str.replace(/([^\n])\s*(Step\s*\d+[:.-])/gi, '$1\n\n$2');
-
-  // 4. Break long chains of arrows (➔) onto sequential indented lines like a tutor at a chalkboard
+  // 4. Break chained arrows onto the next indented line
   str = str.replace(/\s*([➔])\s*/g, '\n   ➔ ');
 
-  // 5. Segment transitional tutor headers: "Given:", "Now, calculate", "Let's evaluate", "Evaluating"
-  str = str.replace(/([^\n])\s*(Given\b[:\s])/gi, '$1\n\n$2');
+  // 5. Section headings get clean 2 line breaks (\n\n)
+  str = str.replace(/([^\n])\s*(Step\s*\d+[:.-])/gi, '$1\n\n$2');
+  str = str.replace(/(^|[.\n])\s*(Given\s*:)/g, '$1\n\n$2');
+  str = str.replace(/([^\n])\s*(Substitute\b[^:\n]+:?)/g, '$1\n\n$2');
+  str = str.replace(/([^\n])\s*(Equating\s+dimensions:?)/gi, '$1\n\n$2');
+  str = str.replace(/([^\n])\s*(Solving\s+the\s+system\b[^:]*:?)/gi, '$1\n\n$2');
   str = str.replace(/([^\n])\s*(Now,?\s*calculate\b)/gi, '$1\n\n$2');
-  str = str.replace(/([^\n])\s*(Let'?s\s*evaluate\b)/gi, '$1\n\n$2');
-  str = str.replace(/([^\n])\s*(Substitute\b)/gi, '$1\n\n$2');
-
-  // 6. Segment "Total distance", "Total Distance"
   str = str.replace(/([^\n])\s*(Total\s+[dD]istance\s*=)/g, '$1\n\n$2');
+  str = str.replace(/([^\n])\s*(Thus|Therefore|Hence|In conclusion),?\s*(Option\s+[A-D]|the\s+correct|T\s*=|[a-z]\s*=|the\s+result)/gi, '$1\n\n$2, $3');
 
-  // 7. Segment concluding sentences: "Thus,", "Therefore,", "Hence,", "In conclusion,"
-  str = str.replace(/([^\n])\s*(Thus|Therefore|Hence|In conclusion),?\s*(Option\s+[A-D]|the\s+correct)/gi, '$1\n\n$2, $3');
-
-  // 8. Trim excess whitespace and normalize newlines
+  // 6. Trim excess whitespace and normalize newlines
   str = str
     .split('\n')
     .map((l) => l.trimEnd())
@@ -296,19 +328,21 @@ export function formatStepByStepSolution(text) {
 export function formatDisplayMath(text) {
   if (!text || typeof text !== 'string') return text;
   
-  // If the text looks like an explanation or contains steps/latex, format step-by-step
   if (
     text.includes('\\') ||
     text.includes('$') ||
     text.includes('Step') ||
     text.includes('From t') ||
     text.includes('Total distance') ||
+    text.includes('VSD') ||
+    text.includes('MSD') ||
+    text.includes('≤ft') ||
+    text.includes('propto') ||
     text.length > 80
   ) {
     return formatStepByStepSolution(text);
   }
 
-  // Quick clean for short labels/options
   return cleanLatexToText(text);
 }
 
