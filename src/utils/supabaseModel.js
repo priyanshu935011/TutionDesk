@@ -1363,7 +1363,8 @@ class SupabaseDocument {
 
     if (this._tableName === "test_series") {
       if (payload.institute !== undefined || payload.institute_id !== undefined) {
-        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+        const rawInst = payload.institute_id || payload.institute;
+        payload.institute_id = rawInst ? toValidUUID(rawInst) : null;
         delete payload.institute;
       }
       if (payload.folder !== undefined || payload.folder_id !== undefined) {
@@ -3221,8 +3222,9 @@ class SupabaseModel {
     }
 
     if (this.tableName === "test_series") {
-      if (payload.institute || payload.institute_id) {
-        payload.institute_id = toValidUUID(payload.institute_id || payload.institute);
+      if (payload.institute !== undefined || payload.institute_id !== undefined) {
+        const rawInst = payload.institute_id || payload.institute;
+        payload.institute_id = rawInst ? toValidUUID(rawInst) : null;
         delete payload.institute;
       }
       if (payload.folder || payload.folder_id) {

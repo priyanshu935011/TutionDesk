@@ -100,14 +100,10 @@ export const getAdminProducts = async (req, res) => {
 export const getLockedTestSeries = async (req, res) => {
   try {
     // Return all platform/super-admin test series (both locked and unlocked)
-    const filter = {
-      $or: [{ institute: null }, { institute: { $exists: false } }],
-    };
-    let testSeries = await TestSeries.find(filter).sort({ title: 1 });
-    testSeries = (testSeries || []).filter((t) => !t.institute || t.institute === "null");
+    const testSeries = await TestSeries.find({}).sort({ title: 1 });
 
     res.json({
-      testSeries: testSeries.map((t) => ({
+      testSeries: (testSeries || []).map((t) => ({
         id: t._id || t.id,
         _id: t._id || t.id,
         title: t.title,
@@ -118,6 +114,7 @@ export const getLockedTestSeries = async (req, res) => {
         totalMarks: t.totalMarks,
         questionsCount: Array.isArray(t.questions) ? t.questions.length : 0,
         isLocked: !!t.isLocked,
+        isGlobal: !!t.isGlobal,
       })),
     });
   } catch (err) {

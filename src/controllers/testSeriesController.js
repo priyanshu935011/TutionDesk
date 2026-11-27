@@ -794,20 +794,13 @@ export const getTestSeriesList = async (req, res) => {
     const isSuperAdmin = req.user?.role === "super_admin" || req.user?.role === "tech_admin";
 
     if (isSuperAdmin) {
-      const filter = {
-        $or: [{ institute: null }, { institute: { $exists: false } }],
-      };
+      const filter = {};
       if (folder) filter.folder = folder;
       if (category && category !== "All") filter.category = category;
       if (search) filter.title = { $regex: search, $options: "i" };
 
-      let testSeries = await TestSeries.find(filter).sort({ createdAt: -1 });
-      // Exclude institution-added test series
-      testSeries = (testSeries || []).filter((t) => {
-        const inst = t.institute || t.institute_id;
-        return !inst || inst === "null" || inst === "";
-      });
-      return res.json({ testSeries });
+      const testSeries = await TestSeries.find(filter).sort({ createdAt: -1 });
+      return res.json({ testSeries: testSeries || [] });
     }
 
     // Teacher Request

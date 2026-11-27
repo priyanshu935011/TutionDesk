@@ -986,6 +986,8 @@ export async function approveAgentTest(stagedId, adminUser = null) {
     isGlobal: true,
     isPublished: true,
     isLocked: false,
+    institute: null,
+    institute_id: null,
     createdBy: adminUser?._id || adminUser?.id || null,
   });
 
