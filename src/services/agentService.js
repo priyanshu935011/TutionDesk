@@ -3,7 +3,7 @@ import AgentTestSeries from "../models/AgentTestSeries.js";
 import TestSeries from "../models/TestSeries.js";
 import { callGeminiApi, extractJsonFromText } from "./aiService.js";
 import { readCategoryTaxonomy, writeCategoryTaxonomy } from "../controllers/testSeriesController.js";
-import { formatDisplayMath } from "../utils/mathFormatter.js";
+import { formatDisplayMath, formatStepByStepSolution, cleanLatexToText } from "../utils/mathFormatter.js";
 
 // Comprehensive Curriculum Knowledge Tree
 export const CURRICULUM_CATALOG = {
@@ -580,6 +580,23 @@ export async function executeAgentStep(agentId = AGENT_ID) {
     const systemInstruction = `You are an elite Examination Board Chief Curator, Competitive Test Architect, and Academic Researcher specializing in Indian & Global standardized examinations (JEE Main & Advanced, NEET-UG, CBSE Board, ICSE, CUET, Banking, Olympiads).
 Your task is to crawl and synthesize authentic Previous Year Questions (PYQs), repeated examination patterns, top coaching institute benchmarks, and high-yield problems.
 Produce rigorous, accurate, high-quality test series with zero hallucinations. Every question must feature unambiguous options, an accurate correct answer, and an in-depth step-by-step mathematical/conceptual derivation in explanation.
+CRITICAL FORMATTING & EXPLANATION INSTRUCTIONS:
+- NEVER USE RAW LATEX CODE: Do NOT output raw LaTeX commands in question text, options, or explanations. Do NOT write \\frac, \\sqrt, \\text{}, \\implies, \\times, etc.
+  Convert all mathematical expressions to clean, human-readable text:
+  • Fractions: write dx/dt or (a)/(b) or 1/2 instead of \\frac{dx}{dt}
+  • Roots: write √(x) instead of \\sqrt{x}
+  • Arrows: write -> or => instead of \\implies
+  • Units: write m, s, kg, J directly instead of \\text{ m}, \\text{ s}
+  • Multiplications: write * or × instead of \\times
+- NEVER WRAP IN DOLLAR SIGNS: Never output stray dollar signs ($ or $$). Write expressions cleanly as plain text: v(t) = 6t² - 18t + 12.
+- STEP-BY-STEP EXPLANATION FORMAT: Every explanation MUST be structured with clean line breaks (\\n\\n) between steps so humans can read it comfortably:
+  Step 1: State governing principle or initial equation
+  Step 2: Substitute given values or differentiate/integrate
+  Step 3: Solve for intermediate and final results
+  Conclusion: Conclude with the correct option letter.
+  Never bunch or mash multiple calculation steps into a single unreadable paragraph.
+- NO INTERNAL DELIBERATIONS / SCRATCHPAD: Never include internal chain-of-thought, self-correction, or rambling deliberations (never write "wait, let's re-verify...", "let's recalculate carefully...", "Wait, let's re-check..."). Return only the final clean, structured educational derivation.
+- REAL-WORLD SUPERSCRIPTS: Format all exponents, units, and powers using real Unicode superscripts: e.g. [M⁰ L T⁻³], 10⁻⁶, x², t³, cm³.
 Respond ONLY with a valid, clean JSON object matching the requested schema.`;
 
     const prompt = `Research and generate a complete, authentic high-yield test series for:
@@ -598,7 +615,8 @@ Requirements:
    - Hard: Advanced multi-step derivations, Olympiad/JEE-Advanced level numericals, assertion-reason or composite statements.
 4. Total Marks: ${questionsCount * 4}, Passing Marks: ${Math.round(questionsCount * 4 * 0.4)}, Duration: ${Math.max(30, questionsCount * 3)} minutes.
 5. All mathematical symbols, physical dimensions, and chemical equations MUST be formatted using real-world typographic notation. Never use raw ASCII carets or bracketed powers like [M^0 L T^(-3)] or x^2 or 10^(-6). Use real-world superscripts: e.g. [M⁰ L T⁻³], [M¹ L² T⁻²], 10⁻⁶, x², cm³, kg m⁻³.
-6. Provide an informative summary in sourceInfo explaining the historical exam frequency, target years, and key conceptual anchors.
+6. Format every question explanation step-by-step with newlines separating each step, equation, and conclusion. Zero raw LaTeX commands, zero dollar signs, zero scratchpad chatter.
+7. Provide an informative summary in sourceInfo explaining the historical exam frequency, target years, and key conceptual anchors.
 
 Return strictly a JSON object with this exact structure:
 {
@@ -622,7 +640,7 @@ Return strictly a JSON object with this exact structure:
     {
       "id": "q_1",
       "type": "single_choice",
-      "question": "string",
+      "question": "string without latex code or dollar signs",
       "options": [
         { "id": "A", "text": "string" },
         { "id": "B", "text": "string" },
@@ -632,7 +650,7 @@ Return strictly a JSON object with this exact structure:
       "correctAnswers": ["A"],
       "marks": 4,
       "negativeMarks": 1,
-      "explanation": "string with detailed derivation"
+      "explanation": "Step-by-step human-readable explanation with line breaks separating each step, calculation, and final conclusion"
     }
   ]
 }`;
@@ -690,7 +708,7 @@ Return strictly a JSON object with this exact structure:
         : ["A"],
       marks: Number(q.marks || 4),
       negativeMarks: Number(q.negativeMarks || 1),
-      explanation: formatDisplayMath(String(q.explanation || "")),
+      explanation: formatStepByStepSolution(String(q.explanation || "")),
     }));
 
     // Stage into AgentTestSeries
@@ -898,8 +916,24 @@ export async function getStagedTestSeries({ status, page = 1, limit = 20, search
     .skip(skip)
     .limit(Number(limit));
 
+  // Sanitize questions so existing staged tests immediately display clean text & step-by-step layout
+  const sanitizedItems = items.map((test) => {
+    const obj = typeof test.toObject === "function" ? test.toObject() : { ...test };
+    if (Array.isArray(obj.questions)) {
+      obj.questions = obj.questions.map((q) => ({
+        ...q,
+        question: formatDisplayMath(q.question),
+        options: Array.isArray(q.options)
+          ? q.options.map((opt) => ({ ...opt, text: formatDisplayMath(opt.text) }))
+          : q.options,
+        explanation: formatStepByStepSolution(q.explanation || ""),
+      }));
+    }
+    return obj;
+  });
+
   return {
-    items,
+    items: sanitizedItems,
     pagination: {
       total,
       page: Number(page),
@@ -921,6 +955,16 @@ export async function approveAgentTest(stagedId, adminUser = null) {
 
   const folderPath = `/${staged.category}/${staged.subject}/${staged.topic}`;
 
+  // Sanitize questions with clean step-by-step formatting before creating production test
+  const cleanQuestions = (Array.isArray(staged.questions) ? staged.questions : []).map((q) => ({
+    ...q,
+    question: formatDisplayMath(q.question),
+    options: Array.isArray(q.options)
+      ? q.options.map((opt) => ({ ...opt, text: formatDisplayMath(opt.text) }))
+      : q.options,
+    explanation: formatStepByStepSolution(q.explanation || ""),
+  }));
+
   // Copy into main TestSeries table
   const mainTest = await TestSeries.create({
     title: staged.title,
@@ -933,7 +977,7 @@ export async function approveAgentTest(stagedId, adminUser = null) {
     totalMarks: staged.totalMarks,
     passingMarks: staged.passingMarks,
     instructions: staged.instructions,
-    questions: staged.questions,
+    questions: cleanQuestions,
     folderPath,
     isGlobal: true,
     isPublished: true,
