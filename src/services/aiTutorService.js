@@ -1,6 +1,7 @@
 import { supabase } from "../utils/supabase.js";
 import { getOrCreateStudentEntitlement } from "./studentEntitlementService.js";
 import { callGeminiRaw } from "./aiService.js";
+import { formatDisplayMath } from "../utils/mathFormatter.js";
 import axios from "axios";
 
 // Helper: Harvest logs for future model training
@@ -121,7 +122,8 @@ async function callGemini(prompt, systemInstruction = "", harvestMeta = null) {
           metadata: harvestMeta.metadata,
         });
       }
-      return cleanText;
+      const formattedText = formatDisplayMath(cleanText);
+      return formattedText;
     }
   } catch (err) {
     console.warn("[AiTutorService] callGemini error:", err.message);

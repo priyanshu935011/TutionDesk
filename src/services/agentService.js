@@ -3,6 +3,7 @@ import AgentTestSeries from "../models/AgentTestSeries.js";
 import TestSeries from "../models/TestSeries.js";
 import { callGeminiApi, extractJsonFromText } from "./aiService.js";
 import { readCategoryTaxonomy, writeCategoryTaxonomy } from "../controllers/testSeriesController.js";
+import { formatDisplayMath } from "../utils/mathFormatter.js";
 
 // Comprehensive Curriculum Knowledge Tree
 export const CURRICULUM_CATALOG = {
@@ -587,7 +588,7 @@ Requirements:
    - Medium: Multi-concept problems, standard exam level, tricky edge cases.
    - Hard: Advanced multi-step derivations, Olympiad/JEE-Advanced level numericals, assertion-reason or composite statements.
 4. Total Marks: ${questionsCount * 4}, Passing Marks: ${Math.round(questionsCount * 4 * 0.4)}, Duration: ${Math.max(30, questionsCount * 3)} minutes.
-5. All mathematical symbols or chemical equations should be clearly formatted.
+5. All mathematical symbols, physical dimensions, and chemical equations MUST be formatted using real-world typographic notation. Never use raw ASCII carets or bracketed powers like [M^0 L T^(-3)] or x^2 or 10^(-6). Use real-world superscripts: e.g. [M⁰ L T⁻³], [M¹ L² T⁻²], 10⁻⁶, x², cm³, kg m⁻³.
 6. Provide an informative summary in sourceInfo explaining the historical exam frequency, target years, and key conceptual anchors.
 
 Return strictly a JSON object with this exact structure:
@@ -640,11 +641,11 @@ Return strictly a JSON object with this exact structure:
       throw new Error("Failed to parse valid structured test series JSON from Gemini response.");
     }
 
-    // Format & validate questions
+    // Format & validate questions with real-world superscripts
     const formattedQuestions = parsedData.questions.map((q, idx) => ({
       id: q.id || `q_${Date.now()}_${idx + 1}`,
       type: q.type || "single_choice",
-      question: q.question || "Question prompt",
+      question: formatDisplayMath(q.question || "Question prompt"),
       questionImageUrl: q.questionImageUrl || "",
       options: (Array.isArray(q.options) && q.options.length >= 2
         ? q.options
@@ -656,7 +657,7 @@ Return strictly a JSON object with this exact structure:
           ]
       ).map((opt, oIdx) => ({
         id: opt.id || String.fromCharCode(65 + oIdx),
-        text: String(opt.text || ""),
+        text: formatDisplayMath(String(opt.text || "")),
         imageUrl: opt.imageUrl || "",
       })),
       correctAnswers: Array.isArray(q.correctAnswers)
@@ -666,13 +667,13 @@ Return strictly a JSON object with this exact structure:
         : ["A"],
       marks: Number(q.marks || 4),
       negativeMarks: Number(q.negativeMarks || 1),
-      explanation: String(q.explanation || ""),
+      explanation: formatDisplayMath(String(q.explanation || "")),
     }));
 
     // Stage into AgentTestSeries
     const stagedTest = await AgentTestSeries.create({
-      title: parsedData.title || `${target.category} ${target.subject} - ${target.topic}`,
-      description: parsedData.description || `Autonomous AI Curated PYQs and conceptual benchmarks for ${target.topic}.`,
+      title: formatDisplayMath(parsedData.title || `${target.category} ${target.subject} - ${target.topic}`),
+      description: formatDisplayMath(parsedData.description || `Autonomous AI Curated PYQs and conceptual benchmarks for ${target.topic}.`),
       category: target.category,
       subject: target.subject,
       topic: target.topic,

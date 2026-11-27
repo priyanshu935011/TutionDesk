@@ -18,6 +18,7 @@ import mongoose, { toValidUUID } from "../utils/supabaseModel.js";
 import { getCache, setCache, deleteCache, clearCachePattern } from "../utils/cache.js";
 import { sendStudentNotification } from "../services/notificationService.js";
 import { autoIngestFromTestAttempt } from "../services/mistakeBookService.js";
+import { formatDisplayMath } from "../utils/mathFormatter.js";
 
 const DEFAULT_CATEGORIES = [
   { name: "Class 10", icon: "🎓" },
@@ -1047,21 +1048,21 @@ export const createTestSeries = async (req, res) => {
       ? req.user?.institute?._id || req.user?.institute || req.instituteId
       : null;
 
-    // Validate and format questions
+    // Validate and format questions with real-world superscripts
     const formattedQuestions = (Array.isArray(questions) ? questions : []).map((q, idx) => ({
       id: q.id || `q_${Date.now()}_${idx}`,
       type: q.type || "single_choice",
-      question: q.question || "",
+      question: formatDisplayMath(q.question || ""),
       questionImageUrl: q.questionImageUrl || "",
       options: (Array.isArray(q.options) ? q.options : []).map((opt, oIdx) => ({
         id: opt.id || `opt_${oIdx + 1}`,
-        text: opt.text || "",
+        text: formatDisplayMath(opt.text || ""),
         imageUrl: opt.imageUrl || "",
       })),
       correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : (q.correctAnswer ? [q.correctAnswer] : []),
       marks: Number(q.marks || 4),
       negativeMarks: Number(q.negativeMarks || 0),
-      explanation: q.explanation || "",
+      explanation: formatDisplayMath(q.explanation || ""),
     }));
 
     const calculatedTotalMarks =
@@ -1204,17 +1205,17 @@ export const updateTestSeries = async (req, res) => {
       test.questions = questions.map((q, idx) => ({
         id: q.id || `q_${Date.now()}_${idx}`,
         type: q.type || "single_choice",
-        question: q.question || "",
+        question: formatDisplayMath(q.question || ""),
         questionImageUrl: q.questionImageUrl || "",
         options: (Array.isArray(q.options) ? q.options : []).map((opt, oIdx) => ({
           id: opt.id || `opt_${oIdx + 1}`,
-          text: opt.text || "",
+          text: formatDisplayMath(opt.text || ""),
           imageUrl: opt.imageUrl || "",
         })),
         correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : (q.correctAnswer ? [q.correctAnswer] : []),
         marks: Number(q.marks || 4),
         negativeMarks: Number(q.negativeMarks || 0),
-        explanation: q.explanation || "",
+        explanation: formatDisplayMath(q.explanation || ""),
       }));
     }
 

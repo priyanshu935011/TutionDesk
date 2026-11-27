@@ -2,6 +2,7 @@ import { supabase } from "../utils/supabase.js";
 import { callGeminiRaw, extractJsonFromText } from "./aiService.js";
 import { logAiHarvest } from "../utils/aiHarvestLogger.js";
 import { ingestMistake } from "./mistakeBookService.js";
+import { formatDisplayMath } from "../utils/mathFormatter.js";
 import fs from "fs";
 import path from "path";
 
@@ -123,6 +124,9 @@ ${questionText.trim() ? `Question Text:\n"${questionText.trim()}"` : "Question i
 TASK:
 Solve this academic doubt with supreme clarity, precision, and educational quality.
 Break your solution into a pedagogical structure so the student truly understands every step.
+CRITICAL FORMATTING RULES:
+- Never use raw ASCII carets or bracketed powers like [M^0 L T^(-3)] or x^2 or 10^(-6). Format all dimensional formulas, physical units, exponents, and mathematical powers using real-world Unicode superscripts: e.g. [M⁰ L T⁻³], [M¹ L² T⁻²], 10⁻⁶, x², cm³, kg m⁻³.
+- Never wrap simple standalone numbers or arithmetic in stray dollar signs (never output $2$, $2 + 2$, or $a = 2$; write them cleanly as 2, 2 + 2, a = 2).
 
 Return ONLY a valid JSON object matching this exact schema:
 {
@@ -194,6 +198,22 @@ Return ONLY a valid JSON object matching this exact schema:
       memoryTip: "Double check units and boundary conditions.",
       commonPitfall: "Misreading question constraints.",
     };
+  }
+
+  // Sanitize and format powers to real-world superscripts across all solution fields
+  if (solutionData.extractedQuestion) solutionData.extractedQuestion = formatDisplayMath(solutionData.extractedQuestion);
+  if (solutionData.givenParameters) solutionData.givenParameters = formatDisplayMath(solutionData.givenParameters);
+  if (solutionData.governingFormula) solutionData.governingFormula = formatDisplayMath(solutionData.governingFormula);
+  if (solutionData.finalAnswer) solutionData.finalAnswer = formatDisplayMath(solutionData.finalAnswer);
+  if (solutionData.memoryTip) solutionData.memoryTip = formatDisplayMath(solutionData.memoryTip);
+  if (solutionData.commonPitfall) solutionData.commonPitfall = formatDisplayMath(solutionData.commonPitfall);
+  if (Array.isArray(solutionData.steps)) {
+    solutionData.steps = solutionData.steps.map((s) => ({
+      ...s,
+      title: formatDisplayMath(s.title || ""),
+      explanation: formatDisplayMath(s.explanation || ""),
+      latex: formatDisplayMath(s.latex || ""),
+    }));
   }
 
   const doubtRecord = {
