@@ -243,37 +243,45 @@ export function cleanLatexToText(text) {
 /**
  * Formats a solution into a structured step-by-step layout with clean newlines
  * between equations, calculations, evaluations, and conclusions.
+ * Restores mathematical minus signs and separates chained deductions like a real tutor.
  */
 export function formatStepByStepSolution(text) {
   if (!text || typeof text !== 'string') return text;
   let str = cleanLatexToText(text);
 
-  // Segment numbered points: "1. From ...", "2. From ...", "3. From ..."
-  str = str.replace(/([^\n])\s*(\d+\.\s+From\b)/gi, '$1\n\n$2');
-  str = str.replace(/^(\d+\.\s+From\b)/gi, '$1');
+  // 1. Repair any corrupted bullets that were mistakenly inserted before minus signs or variables:
+  // e.g. "a\n• b = 0" -> "a - b = 0", "• a - 2b\n• c = 1" -> "a - 2b - c = 1"
+  str = str.replace(/([a-zA-Z0-9\)])\s*\n\s*•\s*([a-zA-Z0-9])/g, '$1 - $2');
+  str = str.replace(/([a-zA-Z0-9\)])\s*•\s*([a-zA-Z0-9])/g, '$1 - $2');
+  str = str.replace(/(\d+[\)\.])\s*\n\s*•\s*([a-zA-Z0-9])/g, '$1 $2');
+  str = str.replace(/([➔=>])\s*\n\s*•\s*([a-zA-Z0-9])/g, '$1 $2');
+  str = str.replace(/(^|\n)\s*•\s*([a-zA-Z0-9]\s*[-+=])/g, '$1$2');
 
-  // Segment "Step X:" or "Step 1:"
+  // 2. Put numbered steps/equations on their own new lines: 1), 2), 3) or 1., 2., 3.
+  str = str.replace(/([^\n])\s*(\b\d+[\)\.]\s+[a-zA-Z0-9])/g, '$1\n\n$2');
+
+  // 3. Segment "Step X:" or "Step 1:"
   str = str.replace(/([^\n])\s*(Step\s*\d+[:.-])/gi, '$1\n\n$2');
 
-  // Segment bullet items: "- x(0) =" or "• x(0) ="
-  str = str.replace(/([^\n])\s*[-•]\s*([a-zA-Z]\(\d+\)\s*=)/g, '$1\n• $2');
-  str = str.replace(/([^\n])\s*-\s*([a-zA-Z]\b)/g, '$1\n• $2');
+  // 4. Break long chains of arrows (➔) onto sequential indented lines like a tutor at a chalkboard
+  str = str.replace(/\s*([➔])\s*/g, '\n   ➔ ');
 
-  // Segment transitional headers: "Now, calculate", "Let's evaluate", "Evaluating"
+  // 5. Segment transitional tutor headers: "Given:", "Now, calculate", "Let's evaluate", "Evaluating"
+  str = str.replace(/([^\n])\s*(Given\b[:\s])/gi, '$1\n\n$2');
   str = str.replace(/([^\n])\s*(Now,?\s*calculate\b)/gi, '$1\n\n$2');
   str = str.replace(/([^\n])\s*(Let'?s\s*evaluate\b)/gi, '$1\n\n$2');
-  str = str.replace(/([^\n])\s*(Given\s+that\b)/gi, '$1\n\n$2');
+  str = str.replace(/([^\n])\s*(Substitute\b)/gi, '$1\n\n$2');
 
-  // Segment "Total distance", "Total Distance"
+  // 6. Segment "Total distance", "Total Distance"
   str = str.replace(/([^\n])\s*(Total\s+[dD]istance\s*=)/g, '$1\n\n$2');
 
-  // Segment concluding sentences: "Thus,", "Therefore,", "Hence,", "In conclusion,"
+  // 7. Segment concluding sentences: "Thus,", "Therefore,", "Hence,", "In conclusion,"
   str = str.replace(/([^\n])\s*(Thus|Therefore|Hence|In conclusion),?\s*(Option\s+[A-D]|the\s+correct)/gi, '$1\n\n$2, $3');
 
-  // Trim excess newlines and keep clean line breaks
+  // 8. Trim excess whitespace and normalize newlines
   str = str
     .split('\n')
-    .map((l) => l.trim())
+    .map((l) => l.trimEnd())
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

@@ -577,26 +577,56 @@ export async function executeAgentStep(agentId = AGENT_ID) {
     await doc.save();
 
     // Call Gemini API to scrape & synthesize authentic content
-    const systemInstruction = `You are an elite Examination Board Chief Curator, Competitive Test Architect, and Academic Researcher specializing in Indian & Global standardized examinations (JEE Main & Advanced, NEET-UG, CBSE Board, ICSE, CUET, Banking, Olympiads).
+    const systemInstruction = `You are an elite Examination Board Chief Curator, Master Competitive Exam Tutor, and Academic Researcher specializing in Indian & Global standardized examinations (JEE Main & Advanced, NEET-UG, CBSE Board, ICSE, CUET, Banking, Olympiads).
 Your task is to crawl and synthesize authentic Previous Year Questions (PYQs), repeated examination patterns, top coaching institute benchmarks, and high-yield problems.
-Produce rigorous, accurate, high-quality test series with zero hallucinations. Every question must feature unambiguous options, an accurate correct answer, and an in-depth step-by-step mathematical/conceptual derivation in explanation.
-CRITICAL FORMATTING & EXPLANATION INSTRUCTIONS:
-- NEVER USE RAW LATEX CODE: Do NOT output raw LaTeX commands in question text, options, or explanations. Do NOT write \\frac, \\sqrt, \\text{}, \\implies, \\times, etc.
-  Convert all mathematical expressions to clean, human-readable text:
-  • Fractions: write dx/dt or (a)/(b) or 1/2 instead of \\frac{dx}{dt}
-  • Roots: write √(x) instead of \\sqrt{x}
-  • Arrows: write -> or => instead of \\implies
-  • Units: write m, s, kg, J directly instead of \\text{ m}, \\text{ s}
-  • Multiplications: write * or × instead of \\times
-- NEVER WRAP IN DOLLAR SIGNS: Never output stray dollar signs ($ or $$). Write expressions cleanly as plain text: v(t) = 6t² - 18t + 12.
-- STEP-BY-STEP EXPLANATION FORMAT: Every explanation MUST be structured with clean line breaks (\\n\\n) between steps so humans can read it comfortably:
-  Step 1: State governing principle or initial equation
-  Step 2: Substitute given values or differentiate/integrate
-  Step 3: Solve for intermediate and final results
-  Conclusion: Conclude with the correct option letter.
-  Never bunch or mash multiple calculation steps into a single unreadable paragraph.
-- NO INTERNAL DELIBERATIONS / SCRATCHPAD: Never include internal chain-of-thought, self-correction, or rambling deliberations (never write "wait, let's re-verify...", "let's recalculate carefully...", "Wait, let's re-check..."). Return only the final clean, structured educational derivation.
-- REAL-WORLD SUPERSCRIPTS: Format all exponents, units, and powers using real Unicode superscripts: e.g. [M⁰ L T⁻³], 10⁻⁶, x², t³, cm³.
+Produce rigorous, accurate, high-quality test series with zero hallucinations. Every question must feature unambiguous options, an accurate correct answer, and an in-depth tutor-quality step-by-step derivation in explanation.
+
+CRITICAL TUTOR-STYLE EXPLANATION & FORMATTING INSTRUCTIONS:
+Explain every solution like an exceptional, patient master tutor teaching a student at a chalkboard:
+1. START WITH GIVEN EQUATIONS / SETUP:
+   State each given equation or condition clearly on its own line:
+   Given:
+   1) a - b = 0
+   2) 2a + 3b + c = 0
+   3) a - 2b - c = 1
+
+2. ONE DEDUCTION PER LINE (NO CRAMMED ARROWS):
+   NEVER cram multiple algebraic steps or chained arrows together horizontally on a single line (NEVER write: 2a + 3b + c = 0 ➔ 5a + c = 0 ➔ c = -5a).
+   Write each intermediate deduction and substitution on its own separate line:
+   Step 1: Express b in terms of a
+   From (1): a - b = 0
+   ➔ a = b
+
+   Step 2: Express c in terms of a
+   Substitute b = a into (2):
+   2a + 3(a) + c = 0
+   5a + c = 0
+   ➔ c = -5a
+
+   Step 3: Solve for a
+   Substitute b = a and c = -5a into (3):
+   a - 2(a) - (-5a) = 1
+   a - 2a + 5a = 1
+   2a = 1
+   ➔ a = 1/2
+
+   Conclusion:
+   Thus, Option B is correct.
+
+3. PRESERVE ALGEBRAIC MINUS SIGNS:
+   Always write standard minus signs (-) for mathematical subtraction and negative numbers (e.g. a - b = 0, c = -5a). Never use bullet points or dashes inside equations.
+
+4. ZERO RAW LATEX CODE & ZERO DOLLAR SIGNS:
+   Do NOT output raw LaTeX commands (\\frac, \\sqrt, \\text{}, \\implies, \\times, etc.) and NEVER wrap expressions in dollar signs ($ or $$).
+   Convert all mathematical expressions to clean, natural text:
+   • Fractions: write dx/dt or (a)/(b) or 1/2 instead of \\frac{dx}{dt}
+   • Roots: write √(x) instead of \\sqrt{x}
+   • Units: write m, s, kg, J directly instead of \\text{ m}, \\text{ s}
+   • Exponents: use real Unicode superscripts: x², t³, 10⁻⁶, [M⁰ L T⁻³]
+
+5. NO INTERNAL DELIBERATIONS / SCRATCHPAD:
+   Never include internal self-checking, re-verification, or conversational filler (never write "wait, let's re-verify...", "let's recalculate carefully...", "Wait, let's re-check..."). Return only the final clean, structured educational solution.
+
 Respond ONLY with a valid, clean JSON object matching the requested schema.`;
 
     const prompt = `Research and generate a complete, authentic high-yield test series for:
