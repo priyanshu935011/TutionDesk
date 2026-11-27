@@ -5,6 +5,7 @@ import {
   toggleDoubtStar,
   saveDoubtToMistakeNotebook,
 } from "../services/doubtSolverService.js";
+import { recordStudentActivity } from "../services/streakService.js";
 import { supabase } from "../utils/supabase.js";
 
 function getUserIdFromReq(req) {
@@ -46,6 +47,11 @@ export const solveDoubt = async (req, res) => {
       gradeLevel,
       studentNotes,
     });
+
+    // Credit student streak & doubt solver metric
+    if (userId && userId !== "guest_student") {
+      recordStudentActivity(userId, { doubtsSolved: 1, doubtsAsked: 1 }).catch(() => {});
+    }
 
     return res.status(201).json({
       success: true,

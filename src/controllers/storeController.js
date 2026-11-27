@@ -1766,7 +1766,31 @@ export const passCheckout = async (req, res) => {
       return res.status(401).json({ message: "Unauthorized student. Please log in." });
     }
 
-    const student = await Student.findById(studentId);
+    let student = await Student.findById(studentId);
+    if (!student && req.student) {
+      student = req.student;
+    }
+    if (!student) {
+      student = await Student.findOne({ $or: [{ user: studentId }, { _id: studentId }] });
+    }
+    if (!student) {
+      const u = await User.findById(studentId);
+      if (u) {
+        student = await Student.findOne({ $or: [{ email: u.email }, { phone: u.phone }] });
+        if (!student) {
+          student = await Student.create({
+            user: u._id,
+            name: u.name || "Student",
+            phone: u.phone || "9999999999",
+            email: u.email,
+            parentName: "Parent",
+            parentPhone: u.phone || "9999999999",
+            enrollmentNumber: `STU-PASS-${Date.now().toString().slice(-6)}`,
+          });
+        }
+      }
+    }
+
     if (!student) {
       return res.status(404).json({ message: "Student record not found" });
     }
@@ -1867,15 +1891,20 @@ export const passCheckout = async (req, res) => {
       ? rawFrontendUrl
       : `https://${rawFrontendUrl}`;
 
+    const cleanCustId = String(student._id || student.id || studentId).replace(/[^a-zA-Z0-9_-]/g, "");
+    const cleanCustPhone = studentPhone.length === 10 ? studentPhone : "9876543210";
+    const cleanCustEmail = studentEmail && studentEmail.includes("@") ? studentEmail.trim() : "student@classtech.in";
+    const cleanCustName = (studentName || "ClassTech Learner").trim();
+
     const payload = {
       order_id: cfOrderId,
       order_amount: price,
       order_currency: "INR",
       customer_details: {
-        customer_id: String(student._id || student.id),
-        customer_name: studentName,
-        customer_email: studentEmail,
-        customer_phone: studentPhone.length === 10 ? studentPhone : "9999999999",
+        customer_id: cleanCustId,
+        customer_name: cleanCustName,
+        customer_email: cleanCustEmail,
+        customer_phone: cleanCustPhone,
       },
       order_meta: {
         return_url: `${secureFrontendUrl}/store/pass/verify?order_id=${cfOrderId}`,
@@ -1890,8 +1919,14 @@ export const passCheckout = async (req, res) => {
     } catch (cfErr) {
       console.error("Cashfree Pass Order Error:", cfErr.response?.data || cfErr.message);
       return res.status(500).json({
-        message: "Failed to initiate Cashfree payment session for ClassTech Pass",
+        message: cfErr.response?.data?.message || "Failed to initiate Cashfree payment session for ClassTech Pass",
         error: cfErr.response?.data?.message || cfErr.message,
+      });
+    }
+
+    if (!paymentSessionId) {
+      return res.status(500).json({
+        message: "Payment gateway did not return a session token. Please verify Cashfree API credentials.",
       });
     }
 

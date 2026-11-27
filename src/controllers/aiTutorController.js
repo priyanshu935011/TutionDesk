@@ -1,4 +1,5 @@
 import aiTutorService from "../services/aiTutorService.js";
+import { recordStudentActivity } from "../services/streakService.js";
 
 export async function getConfig(req, res) {
   try {
@@ -27,6 +28,12 @@ export async function startSession(req, res) {
       language,
     });
 
+    // Credit student streak task for voice tutor activity
+    const activeStudentId = studentId || userId;
+    if (activeStudentId && activeStudentId !== "guest_student") {
+      recordStudentActivity(activeStudentId, { voiceTutorInteractions: 1 }).catch(() => {});
+    }
+
     return res.json({ success: true, session });
   } catch (error) {
     return res.status(error.status || 500).json({
@@ -51,6 +58,12 @@ export async function interact(req, res) {
       userSpeech: userSpeech.trim(),
       isInterruption: isInterruption === true,
     });
+
+    // Credit student streak task for voice tutor activity
+    const activeStudentId = req.user?.studentId || req.user?.id || req.body?.studentId || req.body?.userId;
+    if (activeStudentId && activeStudentId !== "guest_student") {
+      recordStudentActivity(activeStudentId, { voiceTutorInteractions: 1 }).catch(() => {});
+    }
 
     return res.json({ success: true, ...response });
   } catch (error) {

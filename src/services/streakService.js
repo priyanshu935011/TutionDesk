@@ -4,6 +4,7 @@ import StudentStreak from "../models/StudentStreak.js";
 import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
 import VideoWatchLog from "../models/VideoWatchLog.js";
 import AiDoubtHistory from "../models/AiDoubtHistory.js";
+import { supabase } from "../utils/supabase.js";
 
 /**
  * Returns current date formatted as YYYY-MM-DD in India Standard Time (Asia/Kolkata).
@@ -251,16 +252,26 @@ export const recordStudentActivity = async (studentId, metrics = {}) => {
           testsCompleted: 0,
           videosWatched: 0,
           doubtsAsked: 0,
+          doubtsSolved: 0,
+          revisionCardsReviewed: 0,
+          voiceTutorInteractions: 0,
         },
       };
       streakDoc.activityHistory.push(todayEntry);
     }
 
-    if (metrics.classesAttended) todayEntry.taskMetrics.classesAttended += Number(metrics.classesAttended) || 0;
-    if (metrics.questionsSolved) todayEntry.taskMetrics.questionsSolved += Number(metrics.questionsSolved) || 0;
-    if (metrics.testsCompleted) todayEntry.taskMetrics.testsCompleted += Number(metrics.testsCompleted) || 0;
-    if (metrics.videosWatched) todayEntry.taskMetrics.videosWatched += Number(metrics.videosWatched) || 0;
-    if (metrics.doubtsAsked) todayEntry.taskMetrics.doubtsAsked += Number(metrics.doubtsAsked) || 0;
+    if (!todayEntry.taskMetrics) {
+      todayEntry.taskMetrics = {};
+    }
+
+    if (metrics.classesAttended) todayEntry.taskMetrics.classesAttended = (todayEntry.taskMetrics.classesAttended || 0) + (Number(metrics.classesAttended) || 0);
+    if (metrics.questionsSolved) todayEntry.taskMetrics.questionsSolved = (todayEntry.taskMetrics.questionsSolved || 0) + (Number(metrics.questionsSolved) || 0);
+    if (metrics.testsCompleted) todayEntry.taskMetrics.testsCompleted = (todayEntry.taskMetrics.testsCompleted || 0) + (Number(metrics.testsCompleted) || 0);
+    if (metrics.videosWatched) todayEntry.taskMetrics.videosWatched = (todayEntry.taskMetrics.videosWatched || 0) + (Number(metrics.videosWatched) || 0);
+    if (metrics.doubtsAsked) todayEntry.taskMetrics.doubtsAsked = (todayEntry.taskMetrics.doubtsAsked || 0) + (Number(metrics.doubtsAsked) || 0);
+    if (metrics.doubtsSolved) todayEntry.taskMetrics.doubtsSolved = (todayEntry.taskMetrics.doubtsSolved || 0) + (Number(metrics.doubtsSolved) || 0);
+    if (metrics.revisionCardsReviewed) todayEntry.taskMetrics.revisionCardsReviewed = (todayEntry.taskMetrics.revisionCardsReviewed || 0) + (Number(metrics.revisionCardsReviewed) || 0);
+    if (metrics.voiceTutorInteractions) todayEntry.taskMetrics.voiceTutorInteractions = (todayEntry.taskMetrics.voiceTutorInteractions || 0) + (Number(metrics.voiceTutorInteractions) || 0);
 
     await evaluateTasksAndStreaks(streakDoc, todayEntry);
     await streakDoc.save();
@@ -282,22 +293,29 @@ const evaluateTasksAndStreaks = async (streakDoc, todayEntry) => {
     let currentVal = 0;
     switch (task.taskType) {
       case "attend_class":
-        currentVal = (todayEntry.taskMetrics.classesAttended || 0) + (todayEntry.taskMetrics.videosWatched || 0);
+        currentVal = (todayEntry.taskMetrics?.classesAttended || 0) + (todayEntry.taskMetrics?.videosWatched || 0);
         break;
       case "solve_questions":
-        currentVal = todayEntry.taskMetrics.questionsSolved || 0;
+        currentVal = todayEntry.taskMetrics?.questionsSolved || 0;
         break;
       case "complete_test":
-        currentVal = todayEntry.taskMetrics.testsCompleted || 0;
+        currentVal = todayEntry.taskMetrics?.testsCompleted || 0;
         break;
       case "watch_video":
-        currentVal = todayEntry.taskMetrics.videosWatched || 0;
+        currentVal = todayEntry.taskMetrics?.videosWatched || 0;
         break;
       case "ask_doubt":
-        currentVal = todayEntry.taskMetrics.doubtsAsked || 0;
+      case "doubt_solver":
+        currentVal = Math.max(todayEntry.taskMetrics?.doubtsSolved || 0, todayEntry.taskMetrics?.doubtsAsked || 0);
+        break;
+      case "revision_cards":
+        currentVal = todayEntry.taskMetrics?.revisionCardsReviewed || 0;
+        break;
+      case "voice_tutor":
+        currentVal = todayEntry.taskMetrics?.voiceTutorInteractions || 0;
         break;
       default:
-        currentVal = (todayEntry.taskMetrics.testsCompleted || 0) + (todayEntry.taskMetrics.questionsSolved || 0);
+        currentVal = (todayEntry.taskMetrics?.testsCompleted || 0) + (todayEntry.taskMetrics?.questionsSolved || 0);
     }
 
     if (currentVal >= task.targetCount) {
@@ -439,16 +457,64 @@ export const getStudentStreaksAndBadges = async (studentId) => {
     });
 
     // Doubts asked today
-    const dbDoubtsAsked = await AiDoubtHistory.countDocuments({
-      student: studentId,
-      createdAt: { $gte: startUTC, $lte: endUTC },
-    });
+    let dbDoubtsAsked = 0;
+    try {
+      dbDoubtsAsked = await AiDoubtHistory.countDocuments({
+        student: studentId,
+        createdAt: { $gte: startUTC, $lte: endUTC },
+      });
+    } catch (_) {}
+
+    // Doubts from Supabase student_doubts today
+    let dbDoubtsSolved = 0;
+    try {
+      const { data: doubtData } = await supabase
+        .from("student_doubts")
+        .select("id")
+        .eq("user_id", String(studentId))
+        .gte("created_at", startUTC.toISOString())
+        .lte("created_at", endUTC.toISOString());
+      if (Array.isArray(doubtData)) {
+        dbDoubtsSolved = doubtData.length;
+      }
+    } catch (_) {}
+
+    // Revision cards reviewed today from supabase
+    let dbRevisionCards = 0;
+    try {
+      const { data: revData } = await supabase
+        .from("flashcard_reviews")
+        .select("id")
+        .eq("user_id", String(studentId))
+        .gte("created_at", startUTC.toISOString())
+        .lte("created_at", endUTC.toISOString());
+      if (Array.isArray(revData)) {
+        dbRevisionCards = revData.length;
+      }
+    } catch (_) {}
+
+    // Voice tutor interactions today
+    let dbVoiceTutor = 0;
+    try {
+      const { data: tutorData } = await supabase
+        .from("ai_harvest_logs")
+        .select("id")
+        .in("task_type", ["AI_VOICE_TUTOR_INTERACT", "AI_VOICE_TUTOR", "AI_VOICE_TUTOR_GREETING"])
+        .gte("created_at", startUTC.toISOString())
+        .lte("created_at", endUTC.toISOString());
+      if (Array.isArray(tutorData)) {
+        dbVoiceTutor = tutorData.length;
+      }
+    } catch (_) {}
 
     // Maximize metrics with DB observations
     todayEntry.taskMetrics.testsCompleted = Math.max(todayEntry.taskMetrics.testsCompleted || 0, dbTestsCompleted);
     todayEntry.taskMetrics.questionsSolved = Math.max(todayEntry.taskMetrics.questionsSolved || 0, dbQuestionsSolved);
     todayEntry.taskMetrics.videosWatched = Math.max(todayEntry.taskMetrics.videosWatched || 0, dbVideosWatched);
-    todayEntry.taskMetrics.doubtsAsked = Math.max(todayEntry.taskMetrics.doubtsAsked || 0, dbDoubtsAsked);
+    todayEntry.taskMetrics.doubtsAsked = Math.max(todayEntry.taskMetrics.doubtsAsked || 0, dbDoubtsAsked, dbDoubtsSolved);
+    todayEntry.taskMetrics.doubtsSolved = Math.max(todayEntry.taskMetrics.doubtsSolved || 0, dbDoubtsAsked, dbDoubtsSolved);
+    todayEntry.taskMetrics.revisionCardsReviewed = Math.max(todayEntry.taskMetrics.revisionCardsReviewed || 0, dbRevisionCards);
+    todayEntry.taskMetrics.voiceTutorInteractions = Math.max(todayEntry.taskMetrics.voiceTutorInteractions || 0, dbVoiceTutor);
   } catch (err) {
     console.warn("[StreakService] DB activity aggregation notice:", err.message);
   }
@@ -470,22 +536,29 @@ export const getStudentStreaksAndBadges = async (studentId) => {
     let currentCount = 0;
     switch (task.taskType) {
       case "attend_class":
-        currentCount = (todayEntry.taskMetrics.classesAttended || 0) + (todayEntry.taskMetrics.videosWatched || 0);
+        currentCount = (todayEntry.taskMetrics?.classesAttended || 0) + (todayEntry.taskMetrics?.videosWatched || 0);
         break;
       case "solve_questions":
-        currentCount = todayEntry.taskMetrics.questionsSolved || 0;
+        currentCount = todayEntry.taskMetrics?.questionsSolved || 0;
         break;
       case "complete_test":
-        currentCount = todayEntry.taskMetrics.testsCompleted || 0;
+        currentCount = todayEntry.taskMetrics?.testsCompleted || 0;
         break;
       case "watch_video":
-        currentCount = todayEntry.taskMetrics.videosWatched || 0;
+        currentCount = todayEntry.taskMetrics?.videosWatched || 0;
         break;
       case "ask_doubt":
-        currentCount = todayEntry.taskMetrics.doubtsAsked || 0;
+      case "doubt_solver":
+        currentCount = Math.max(todayEntry.taskMetrics?.doubtsSolved || 0, todayEntry.taskMetrics?.doubtsAsked || 0);
+        break;
+      case "revision_cards":
+        currentCount = todayEntry.taskMetrics?.revisionCardsReviewed || 0;
+        break;
+      case "voice_tutor":
+        currentCount = todayEntry.taskMetrics?.voiceTutorInteractions || 0;
         break;
       default:
-        currentCount = todayEntry.taskMetrics.testsCompleted || 0;
+        currentCount = todayEntry.taskMetrics?.testsCompleted || 0;
     }
 
     const isCompleted = currentCount >= task.targetCount;
@@ -506,10 +579,16 @@ export const getStudentStreaksAndBadges = async (studentId) => {
   let lifetimeQuestions = 0;
   let lifetimeTests = 0;
   let lifetimeClasses = 0;
+  let lifetimeRevisionCards = 0;
+  let lifetimeVoiceTutor = 0;
+  let lifetimeDoubts = 0;
   for (const hist of streakDoc.activityHistory || []) {
     lifetimeQuestions += hist.taskMetrics?.questionsSolved || 0;
     lifetimeTests += hist.taskMetrics?.testsCompleted || 0;
     lifetimeClasses += (hist.taskMetrics?.classesAttended || 0) + (hist.taskMetrics?.videosWatched || 0);
+    lifetimeRevisionCards += hist.taskMetrics?.revisionCardsReviewed || 0;
+    lifetimeVoiceTutor += hist.taskMetrics?.voiceTutorInteractions || 0;
+    lifetimeDoubts += Math.max(hist.taskMetrics?.doubtsSolved || 0, hist.taskMetrics?.doubtsAsked || 0);
   }
 
   // Load all active badges
@@ -526,6 +605,18 @@ export const getStudentStreaksAndBadges = async (studentId) => {
     switch (badge.criteriaType) {
       case "streak_days":
         currentValue = Math.max(streakDoc.currentStreak || 0, streakDoc.longestStreak || 0);
+        break;
+      case "revision_cards":
+      case "revision_cards_reviewed":
+        currentValue = lifetimeRevisionCards;
+        break;
+      case "voice_tutor":
+      case "voice_tutor_sessions":
+        currentValue = lifetimeVoiceTutor;
+        break;
+      case "doubt_solver":
+      case "doubts_solved":
+        currentValue = lifetimeDoubts;
         break;
       case "questions_solved":
         currentValue = lifetimeQuestions;

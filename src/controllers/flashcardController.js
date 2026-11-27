@@ -7,6 +7,7 @@ import {
   incrementStudentFlashcardUsage,
   getStudentFlashcardQuota,
 } from "../services/flashcardService.js";
+import { recordStudentActivity } from "../services/streakService.js";
 import { supabase } from "../utils/supabase.js";
 
 // Helper to extract student/user id safely
@@ -161,6 +162,11 @@ export const submitCardReview = async (req, res) => {
       rating: Number(rating),
       timeTakenSeconds: Number(timeTakenSeconds) || 0,
       sessionId,
+    });
+
+    // Automatically credit student daily streak & revision cards metric
+    recordStudentActivity(userId, { revisionCardsReviewed: 1 }).catch((e) => {
+      console.warn("[Flashcards] recordStudentActivity notice:", e.message);
     });
 
     return res.json({
