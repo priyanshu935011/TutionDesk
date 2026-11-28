@@ -27,6 +27,7 @@ import {
   setStudentFeatureOverride,
   getAdminTierLimits,
   updateAdminTierLimits,
+  getStudentStudyAnalytics,
 } from "../controllers/studentD2cController.js";
 import { getStudentStreaks } from "../controllers/streakController.js";
 
@@ -38,6 +39,9 @@ router.post("/auth/verify-otp", verifyDirectStudentOtp);
 
 // Streaks & Badges (IST timezone)
 router.get("/streaks", optionalAuth, getStudentStreaks);
+
+// Study Analytics (Performance, Accuracy, Score history)
+router.get("/study-analytics", optionalAuth, getStudentStudyAnalytics);
 
 // 2. Multimodal AI Doubt Solver
 router.post("/ai/solve-doubt", optionalAuth, solveStudentDoubtWithAi);

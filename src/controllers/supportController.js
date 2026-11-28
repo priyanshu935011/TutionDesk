@@ -66,6 +66,7 @@ const CLASSTECH_TUTORIALS = [
     duration: "2:15 mins",
     videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     thumbnailUrl: "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=600&auto=format&fit=crop&q=80",
+    audience: "teacher",
   },
   {
     id: "tut_2",
@@ -75,6 +76,7 @@ const CLASSTECH_TUTORIALS = [
     duration: "1:45 mins",
     videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     thumbnailUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=600&auto=format&fit=crop&q=80",
+    audience: "teacher",
   },
   {
     id: "tut_3",
@@ -84,6 +86,7 @@ const CLASSTECH_TUTORIALS = [
     duration: "3:10 mins",
     videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     thumbnailUrl: "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80",
+    audience: "teacher",
   },
   {
     id: "tut_4",
@@ -93,6 +96,99 @@ const CLASSTECH_TUTORIALS = [
     duration: "2:40 mins",
     videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     thumbnailUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
+    audience: "teacher",
+  },
+];
+
+// Authentic FAQs for Student AI Dashboard
+const STUDENT_CLASSTECH_FAQS = [
+  {
+    category: "AI Learning Tools",
+    question: "How do I ask doubts to the AI Doubt Solver?",
+    answer: "1. Tap 'AI Doubt Solver' from the home screen or AI Learning Hub.\n2. Type your question directly or tap the Camera/Upload button to take a photo of equations or textbook questions.\n3. Tap 'Solve Doubt' for step-by-step verified conceptual solutions and practice questions.",
+    audience: "student",
+  },
+  {
+    category: "AI Learning Tools",
+    question: "How does the AI Voice Tutor work?",
+    answer: "1. Tap 'AI Voice Tutor' from your home dashboard.\n2. Select your topic or subject of discussion.\n3. Tap the microphone icon and speak your question naturally. The AI Voice Tutor explains concepts conversationally in real-time.",
+    audience: "student",
+  },
+  {
+    category: "Test Series & Exams",
+    question: "How do I take a Test Series or Mock Exam?",
+    answer: "1. Tap 'Test Series' from the dashboard or bottom navigation.\n2. Browse by target exam (JEE, NEET, Boards) or search your subject.\n3. Tap on any test to view syllabus and duration, then tap 'Start Test'.",
+    audience: "student",
+  },
+  {
+    category: "Test Series & Exams",
+    question: "Where can I view my test results and answer keys?",
+    answer: "1. In 'Test Series', tap the 'My Tests' or 'Attempt History' tab.\n2. Tap any completed test to view your scorecard, correct answers, detailed explanations, and time taken per question.",
+    audience: "student",
+  },
+  {
+    category: "Mistakebook & Revision",
+    question: "How does Mistakebook help me review missed questions?",
+    answer: "1. Any question you answer incorrectly in mock tests is automatically recorded in your 'Mistakebook'.\n2. Open 'Mistakebook' to review underlying concepts and step-by-step solutions.\n3. Tap 'Retest Mistakes' to practice only your missed questions until mastered.",
+    audience: "student",
+  },
+  {
+    category: "Mistakebook & Revision",
+    question: "How do Flashcards and spaced repetition work?",
+    answer: "1. Open 'Flashcards' from your AI tools.\n2. Select your subject and chapter deck.\n3. Tap each flashcard to flip between the question and formula/answer.\n4. Rate your memory confidence to schedule spaced repetitions.",
+    audience: "student",
+  },
+  {
+    category: "ClassTech Pass & Store",
+    question: "What is ClassTech Pass and how do I activate it?",
+    answer: "1. ClassTech Pass gives you 1-click unlimited access to all test series, revision notes, and premium AI learning features for 365 days.\n2. Tap 'ClassTech Pass' from the top header or Store screen.\n3. Tap 'Unlock Pass' to subscribe with instant access.",
+    audience: "student",
+  },
+  {
+    category: "Study Analytics",
+    question: "How do I check my Study Analytics and progress?",
+    answer: "1. Tap 'Profile' in the bottom navigation bar.\n2. Tap 'Study Analytics'.\n3. View your tests attempted, overall accuracy %, average score, questions solved, and subject-wise strength breakdown.",
+    audience: "student",
+  },
+  {
+    category: "Account & Support",
+    question: "How do I report a bug or get help from support?",
+    answer: "1. Go to 'Profile' -> 'Help & Support'.\n2. Tap 'Raise Query' to submit a ticket with a screenshot and issue description.\n3. Or tap 'Chat on WhatsApp' for real-time support from our team.",
+    audience: "student",
+  },
+];
+
+// Student Video Tutorials
+const STUDENT_CLASSTECH_TUTORIALS = [
+  {
+    id: "stu_tut_1",
+    title: "How to Take Test Series & Review Mock Analytics",
+    category: "Tests",
+    description: "Learn how to attempt timed test series, submit answers, and view performance analysis.",
+    duration: "2:10 mins",
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    thumbnailUrl: "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=600&auto=format&fit=crop&q=80",
+    audience: "student",
+  },
+  {
+    id: "stu_tut_2",
+    title: "Mastering Doubts with AI Doubt Solver",
+    category: "AI Tools",
+    description: "Scan handwritten equations or questions to get instant step-by-step solutions.",
+    duration: "1:50 mins",
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    thumbnailUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
+    audience: "student",
+  },
+  {
+    id: "stu_tut_3",
+    title: "Retesting Weak Areas with AI Mistakebook",
+    category: "Revision",
+    description: "How Mistakebook automatically logs incorrect answers and generates personalized retests.",
+    duration: "2:30 mins",
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    thumbnailUrl: "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=600&auto=format&fit=crop&q=80",
+    audience: "student",
   },
 ];
 
@@ -110,6 +206,9 @@ function safeSerializeTicket(t) {
     id: clean.id || clean._id || t.id || t._id,
     _id: clean._id || clean.id || t._id || t.id,
     ticketNumber: clean.ticket_number || clean.ticketNumber || t.ticket_number || t.ticketNumber || String(clean.id || "").slice(-6),
+    audience: clean.audience || clean.target_role || clean.targetRole || clean.user_role || clean.userRole || "teacher",
+    targetRole: clean.target_role || clean.targetRole || clean.audience || clean.user_role || clean.userRole || "teacher",
+    userRole: clean.user_role || clean.userRole || "teacher",
   };
 }
 
@@ -126,6 +225,8 @@ export async function createTicket(req, res) {
       deviceInfo,
       screenshotBase64,
       priority = "NORMAL",
+      targetRole,
+      audience,
     } = req.body;
 
     if (!category || !subject || !description) {
@@ -135,15 +236,20 @@ export async function createTicket(req, res) {
       });
     }
 
-    const rawUserId = req.user?._id ? String(req.user._id) : (req.user?.id ? String(req.user.id) : null);
+    const rawUserId = req.user?._id ? String(req.user._id) : (req.user?.id ? String(req.user.id) : (req.user?.studentId ? String(req.user.studentId) : null));
     const userId = rawUserId || (req.user?.email ? req.user.email : "anonymous");
-    const userName = req.user?.name || "ClassTech Educator";
-    const userPhone = req.user?.phone || req.user?.email || "";
-    const userRole = req.user?.role || "teacher";
+    const userName = req.user?.name || (targetRole === "student" || audience === "student" ? "ClassTech Student" : "ClassTech Educator");
+    const userPhone = req.user?.phone || req.user?.parentPhone || req.user?.email || "";
+    
+    // Determine target role / audience (student vs teacher)
+    const isStudent = req.user?.role === "student" || targetRole === "student" || audience === "student";
+    const userRole = isStudent ? "student" : (req.user?.role || "teacher");
+    const assignedTargetRole = isStudent ? "student" : (targetRole || "teacher");
+    const assignedAudience = isStudent ? "student" : (audience || assignedTargetRole);
 
     const rawInst = req.user?.institute;
     const instituteId = rawInst?._id ? String(rawInst._id) : (rawInst ? String(rawInst) : null);
-    const instituteName = rawInst?.name || "ClassTech Tuition";
+    const instituteName = rawInst?.name || (isStudent ? "ClassTech Student AI" : "ClassTech Tuition");
 
     const attachments = [];
 
@@ -186,6 +292,8 @@ export async function createTicket(req, res) {
       userName,
       userPhone,
       userRole,
+      targetRole: assignedTargetRole,
+      audience: assignedAudience,
       instituteId: instituteId || null,
       instituteName,
       category,
@@ -225,15 +333,20 @@ export async function createTicket(req, res) {
  */
 export async function getMyTickets(req, res) {
   try {
-    const userId = req.user?._id ? String(req.user._id) : null;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+    const userId = req.user?._id ? String(req.user._id) : (req.user?.id ? String(req.user.id) : (req.user?.studentId ? String(req.user.studentId) : null));
+    const userPhone = req.user?.phone || req.user?.parentPhone || "";
+    const userEmail = req.user?.email || "";
+
+    const orConditions = [];
+    if (userId) orConditions.push({ userId });
+    if (userPhone && userPhone.length >= 7) orConditions.push({ userPhone });
+    if (userEmail) orConditions.push({ userId: userEmail });
+
+    if (orConditions.length === 0) {
+      return res.json({ success: true, tickets: [] });
     }
 
-    const tickets = await SupportTicket.find({
-      $or: [{ userId }, { userPhone: req.user?.phone || "" }],
-    }).sort({ createdAt: -1 });
-
+    const tickets = await SupportTicket.find({ $or: orConditions }).sort({ createdAt: -1 });
     const formattedTickets = (tickets || []).map(safeSerializeTicket);
 
     return res.json({
@@ -253,21 +366,44 @@ export async function getMyTickets(req, res) {
 /**
  * GET /api/support/faqs
  * Get categorized list of FAQs with exact app steps
+ * Supports ?audience=student or ?audience=teacher
  */
 export async function getFaqs(req, res) {
   try {
-    const dbFaqs = await SupportFaq.find({ isActive: true }).sort({ orderIndex: 1, createdAt: -1 });
+    const requestedAudience = req.query.audience ? String(req.query.audience).toLowerCase().trim() : null;
+
+    let filter = { isActive: true };
+    if (requestedAudience === "student") {
+      filter.$or = [{ audience: "student" }, { audience: "all" }];
+    } else if (requestedAudience === "teacher") {
+      filter.$or = [{ audience: "teacher" }, { audience: "all" }, { audience: { $exists: false } }, { audience: null }];
+    }
+
+    let dbFaqs = await SupportFaq.find(filter).sort({ orderIndex: 1, createdAt: -1 });
+
     if (dbFaqs && dbFaqs.length > 0) {
       return res.json({
         success: true,
         faqs: dbFaqs,
       });
     }
+
+    // Default fallbacks if no FAQs in database yet
+    if (requestedAudience === "student") {
+      return res.json({
+        success: true,
+        faqs: STUDENT_CLASSTECH_FAQS,
+      });
+    }
+
     return res.json({
       success: true,
       faqs: CLASSTECH_FAQS,
     });
   } catch (error) {
+    if (req.query?.audience === "student") {
+      return res.json({ success: true, faqs: STUDENT_CLASSTECH_FAQS });
+    }
     return res.json({ success: true, faqs: CLASSTECH_FAQS });
   }
 }
@@ -275,16 +411,34 @@ export async function getFaqs(req, res) {
 /**
  * GET /api/support/tutorials
  * Get video tutorials for core app features
+ * Supports ?audience=student or ?audience=teacher
  */
 export async function getTutorials(req, res) {
   try {
-    const dbTuts = await SupportTutorial.find({ isActive: true }).sort({ orderIndex: 1, createdAt: -1 });
+    const requestedAudience = req.query.audience ? String(req.query.audience).toLowerCase().trim() : null;
+
+    let filter = { isActive: true };
+    if (requestedAudience === "student") {
+      filter.$or = [{ audience: "student" }, { audience: "all" }];
+    } else if (requestedAudience === "teacher") {
+      filter.$or = [{ audience: "teacher" }, { audience: "all" }, { audience: { $exists: false } }, { audience: null }];
+    }
+
+    const dbTuts = await SupportTutorial.find(filter).sort({ orderIndex: 1, createdAt: -1 });
     if (dbTuts && dbTuts.length > 0) {
       return res.json({
         success: true,
         tutorials: dbTuts,
       });
     }
+
+    if (requestedAudience === "student") {
+      return res.json({
+        success: true,
+        tutorials: STUDENT_CLASSTECH_TUTORIALS,
+      });
+    }
+
     const isSeeded = await SystemSetting.findOne({ key: "tutorials_initial_seeded" }).catch(() => null);
     if (isSeeded) {
       return res.json({ success: true, tutorials: [] });
@@ -294,7 +448,10 @@ export async function getTutorials(req, res) {
       tutorials: CLASSTECH_TUTORIALS,
     });
   } catch (error) {
-    return res.json({ success: true, tutorials: [] });
+    return res.json({
+      success: true,
+      tutorials: req.query?.audience === "student" ? STUDENT_CLASSTECH_TUTORIALS : [],
+    });
   }
 }
 
@@ -372,13 +529,22 @@ CRITICAL RULES:
  */
 export async function adminGetTickets(req, res) {
   try {
-    const { status, category, search } = req.query;
+    const { status, category, search, audience, targetRole } = req.query;
     const filter = {};
     if (status && status !== "ALL") {
       filter.status = status.toUpperCase();
     }
     if (category && category !== "ALL") {
       filter.category = category;
+    }
+
+    const aud = (audience || targetRole || "").toLowerCase().trim();
+    if (aud && aud !== "all") {
+      filter.$or = [
+        { audience: aud },
+        { targetRole: aud },
+        { userRole: aud },
+      ];
     }
 
     let tickets = await SupportTicket.find(filter).sort({ createdAt: -1 });
@@ -479,19 +645,28 @@ export async function adminReplyTicket(req, res) {
  */
 export async function adminGetFaqs(req, res) {
   try {
-    let faqs = await SupportFaq.find({}).sort({ orderIndex: 1, createdAt: -1 });
+    const { audience } = req.query;
+    const filter = {};
+    if (audience && audience !== "ALL" && audience !== "all") {
+      filter.$or = [{ audience }, { audience: "all" }];
+    }
+
+    let faqs = await SupportFaq.find(filter).sort({ orderIndex: 1, createdAt: -1 });
     if (!faqs || faqs.length === 0) {
       try {
+        const seedList = audience === "student" ? STUDENT_CLASSTECH_FAQS : CLASSTECH_FAQS;
         const seeded = await SupportFaq.create(
-          CLASSTECH_FAQS.map((f, i) => ({
+          seedList.map((f, i) => ({
             ...f,
             orderIndex: i,
             isActive: true,
+            audience: f.audience || "teacher",
           }))
         );
         faqs = Array.isArray(seeded) ? seeded : [seeded];
       } catch (_) {
-        faqs = CLASSTECH_FAQS.map((f, i) => ({ ...f, _id: `seed_${i}`, orderIndex: i, isActive: true }));
+        const seedList = audience === "student" ? STUDENT_CLASSTECH_FAQS : CLASSTECH_FAQS;
+        faqs = seedList.map((f, i) => ({ ...f, _id: `seed_${i}`, orderIndex: i, isActive: true }));
       }
     }
     return res.json({ success: true, faqs });
@@ -505,7 +680,7 @@ export async function adminGetFaqs(req, res) {
  */
 export async function adminCreateFaq(req, res) {
   try {
-    const { category, question, answer, orderIndex = 0, isActive = true } = req.body;
+    const { category, question, answer, orderIndex = 0, isActive = true, audience = "teacher" } = req.body;
     if (!category || !question || !answer) {
       return res.status(400).json({ success: false, message: "Category, question, and answer required." });
     }
@@ -516,6 +691,7 @@ export async function adminCreateFaq(req, res) {
       answer: answer.trim(),
       orderIndex: Number(orderIndex) || 0,
       isActive: Boolean(isActive),
+      audience: (audience || "teacher").toLowerCase().trim(),
     });
 
     return res.status(201).json({ success: true, message: "FAQ created successfully", faq });
@@ -530,13 +706,14 @@ export async function adminCreateFaq(req, res) {
 export async function adminUpdateFaq(req, res) {
   try {
     const { id } = req.params;
-    const { category, question, answer, orderIndex, isActive } = req.body;
+    const { category, question, answer, orderIndex, isActive, audience } = req.body;
     const update = {};
     if (category !== undefined) update.category = category.trim();
     if (question !== undefined) update.question = question.trim();
     if (answer !== undefined) update.answer = answer.trim();
     if (orderIndex !== undefined) update.orderIndex = Number(orderIndex);
     if (isActive !== undefined) update.isActive = Boolean(isActive);
+    if (audience !== undefined) update.audience = (audience || "teacher").toLowerCase().trim();
 
     const faq = await SupportFaq.findByIdAndUpdate(id, update, { new: true });
     return res.json({ success: true, message: "FAQ updated successfully", faq });
@@ -563,13 +740,20 @@ export async function adminDeleteFaq(req, res) {
  */
 export async function adminGetTutorials(req, res) {
   try {
-    let tutorials = await SupportTutorial.find({}).sort({ orderIndex: 1, createdAt: -1 });
+    const { audience } = req.query;
+    const filter = {};
+    if (audience && audience !== "ALL" && audience !== "all") {
+      filter.$or = [{ audience }, { audience: "all" }];
+    }
+
+    let tutorials = await SupportTutorial.find(filter).sort({ orderIndex: 1, createdAt: -1 });
     const isSeeded = await SystemSetting.findOne({ key: "tutorials_initial_seeded" }).catch(() => null);
 
     if ((!tutorials || tutorials.length === 0) && !isSeeded) {
       try {
+        const seedList = audience === "student" ? STUDENT_CLASSTECH_TUTORIALS : CLASSTECH_TUTORIALS;
         const seeded = await SupportTutorial.create(
-          CLASSTECH_TUTORIALS.map((t, i) => ({
+          seedList.map((t, i) => ({
             title: t.title,
             category: t.category,
             description: t.description || "",
@@ -578,12 +762,14 @@ export async function adminGetTutorials(req, res) {
             duration: t.duration || "",
             orderIndex: i,
             isActive: true,
+            audience: t.audience || "teacher",
           }))
         );
         tutorials = Array.isArray(seeded) ? seeded : [seeded];
         await SystemSetting.create({ key: "tutorials_initial_seeded", value: true }).catch(() => null);
       } catch (_) {
-        tutorials = CLASSTECH_TUTORIALS.map((t, i) => ({ ...t, _id: `seed_tut_${i}`, orderIndex: i, isActive: true }));
+        const seedList = audience === "student" ? STUDENT_CLASSTECH_TUTORIALS : CLASSTECH_TUTORIALS;
+        tutorials = seedList.map((t, i) => ({ ...t, _id: `seed_tut_${i}`, orderIndex: i, isActive: true }));
       }
     }
     return res.json({ success: true, tutorials: tutorials || [] });
@@ -597,7 +783,7 @@ export async function adminGetTutorials(req, res) {
  */
 export async function adminCreateTutorial(req, res) {
   try {
-    const { title, category, description, duration, videoUrl, thumbnailUrl, orderIndex = 0, isActive = true } = req.body;
+    const { title, category, description, duration, videoUrl, thumbnailUrl, orderIndex = 0, isActive = true, audience = "teacher" } = req.body;
     if (!title || !category || !videoUrl) {
       return res.status(400).json({ success: false, message: "Title, category, and videoUrl are required." });
     }
@@ -611,6 +797,7 @@ export async function adminCreateTutorial(req, res) {
       thumbnailUrl: (thumbnailUrl || "").trim(),
       orderIndex: Number(orderIndex) || 0,
       isActive: Boolean(isActive),
+      audience: (audience || "teacher").toLowerCase().trim(),
     });
 
     return res.status(201).json({ success: true, message: "Tutorial created successfully", tutorial });
@@ -625,7 +812,7 @@ export async function adminCreateTutorial(req, res) {
 export async function adminUpdateTutorial(req, res) {
   try {
     const { id } = req.params;
-    const { title, category, description, duration, videoUrl, thumbnailUrl, orderIndex, isActive } = req.body;
+    const { title, category, description, duration, videoUrl, thumbnailUrl, orderIndex, isActive, audience } = req.body;
     const update = {};
     if (title !== undefined) update.title = title.trim();
     if (category !== undefined) update.category = category.trim();
@@ -635,6 +822,7 @@ export async function adminUpdateTutorial(req, res) {
     if (thumbnailUrl !== undefined) update.thumbnailUrl = (thumbnailUrl || "").trim();
     if (orderIndex !== undefined) update.orderIndex = Number(orderIndex);
     if (isActive !== undefined) update.isActive = Boolean(isActive);
+    if (audience !== undefined) update.audience = (audience || "teacher").toLowerCase().trim();
 
     const tutorial = await SupportTutorial.findByIdAndUpdate(id, update, { new: true });
     return res.json({ success: true, message: "Tutorial updated successfully", tutorial });

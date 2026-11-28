@@ -9,6 +9,9 @@ import StudentMistakeBook from "../models/StudentMistakeBook.js";
 import AiDoubtHistory from "../models/AiDoubtHistory.js";
 import FocusSession from "../models/FocusSession.js";
 import CashfreePayment from "../models/CashfreePayment.js";
+import TestSeriesAttempt from "../models/TestSeriesAttempt.js";
+import TestResult from "../models/TestResult.js";
+import StudentStreak from "../models/StudentStreak.js";
 import { getCashfreeConfig, getBaseUrl, checkCashfreeOrderStatus } from "./paymentController.js";
 import { callGeminiRaw, extractJsonFromText } from "../services/aiService.js";
 import {
@@ -1341,5 +1344,300 @@ export const updateAdminTierLimits = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============================================================================
+// 14. STUDENT STUDY ANALYTICS (Exact details, zero-safe 0-0 display)
+// ============================================================================
+
+export const getStudentStudyAnalytics = async (req, res) => {
+  try {
+    const rawStudentId = req.user?.studentId || req.user?.id || req.user?._id || req.query.studentId;
+    const candidateIds = [
+      rawStudentId,
+      req.user?._id ? String(req.user._id) : null,
+      req.user?.id ? String(req.user.id) : null,
+      req.user?.studentId ? String(req.user.studentId) : null,
+      req.query?.studentId ? String(req.query.studentId) : null,
+    ].filter(Boolean).map(String);
+
+    const userEmail = (req.user?.email || "").toLowerCase().trim();
+    const userPhone = (req.user?.phone || req.user?.parentPhone || "").replace(/\D/g, "").slice(-10);
+
+    // 1. Fetch Test Series Attempts
+    const orFilters = [];
+    if (candidateIds.length > 0) {
+      orFilters.push({ student: { $in: candidateIds } });
+      orFilters.push({ student_id: { $in: candidateIds } });
+      orFilters.push({ studentId: { $in: candidateIds } });
+    }
+    if (userEmail) {
+      orFilters.push({ studentEmail: userEmail });
+    }
+    if (userPhone && userPhone.length >= 7) {
+      orFilters.push({ studentPhone: userPhone });
+    }
+
+    let attempts = [];
+    if (orFilters.length > 0) {
+      try {
+        attempts = await TestSeriesAttempt.find({ $or: orFilters })
+          .populate("testSeries", "title name subject category totalMarks durationMinutes")
+          .sort({ submittedAt: -1, createdAt: -1 })
+          .limit(100);
+      } catch (attErr) {
+        console.warn("[StudyAnalytics] Error querying attempts:", attErr.message);
+      }
+    }
+
+    // 2. Fetch Offline / Teacher Test Results
+    let offlineTests = [];
+    if (candidateIds.length > 0) {
+      try {
+        offlineTests = await TestResult.find({ student: { $in: candidateIds } })
+          .sort({ examDate: -1, createdAt: -1 })
+          .limit(50);
+      } catch (offErr) {
+        console.warn("[StudyAnalytics] Error querying offline test results:", offErr.message);
+      }
+    }
+
+    // 3. Fetch Doubts Solved Count
+    let doubtsCount = 0;
+    if (candidateIds.length > 0) {
+      try {
+        doubtsCount = await AiDoubtHistory.countDocuments({
+          $or: candidateIds.map((id) => ({ studentId: id })),
+        });
+      } catch (_) {}
+    }
+
+    // 4. Fetch Mistakebook Counts
+    let mistakesTotal = 0;
+    let mistakesResolved = 0;
+    if (candidateIds.length > 0) {
+      try {
+        mistakesTotal = await StudentMistakeBook.countDocuments({
+          $or: candidateIds.map((id) => ({ studentId: id })),
+        });
+        mistakesResolved = await StudentMistakeBook.countDocuments({
+          $or: candidateIds.map((id) => ({ studentId: id })),
+          status: "mastered",
+        });
+      } catch (_) {}
+    }
+
+    // 5. Fetch Streak
+    let currentStreak = 0;
+    if (candidateIds.length > 0) {
+      try {
+        const streakDoc = await StudentStreak.findOne({
+          $or: [
+            ...candidateIds.map((id) => ({ student: id })),
+            ...candidateIds.map((id) => ({ studentId: id })),
+          ],
+        });
+        if (streakDoc) {
+          currentStreak = streakDoc.currentStreak || streakDoc.streak || 0;
+        }
+      } catch (_) {}
+    }
+
+    const totalTestsCount = attempts.length + offlineTests.length;
+
+    // Handle exact 0-0 zero-state if student has not performed any test actions
+    if (totalTestsCount === 0) {
+      return res.json({
+        success: true,
+        hasActivity: false,
+        summary: {
+          testsAttempted: 0,
+          questionsSolved: 0,
+          accuracy: 0,
+          averageScore: 0,
+          totalMarksObtained: 0,
+          totalPossibleMarks: 0,
+          totalTimeSpentSeconds: 0,
+          totalTimeSpentFormatted: "0 hrs",
+          correctCount: 0,
+          wrongCount: 0,
+          unansweredCount: 0,
+          currentStreak: currentStreak || 0,
+          doubtsSolved: doubtsCount || 0,
+          mistakesCount: mistakesTotal || 0,
+          mistakesResolved: mistakesResolved || 0,
+        },
+        subjectBreakdown: [],
+        recentAttempts: [],
+        scoreHistory: [],
+      });
+    }
+
+    // Aggregate attempts
+    let totalQuestionsAttempted = 0;
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let totalUnanswered = 0;
+    let totalScore = 0;
+    let totalPossibleMarks = 0;
+    let totalTimeTakenSeconds = 0;
+    const subjectMap = {};
+
+    const formattedRecentAttempts = [];
+    const scoreHistory = [];
+
+    // Process online attempts
+    for (const att of attempts) {
+      const qAttempted = Number(att.attemptedQuestions) || 0;
+      const qCorrect = Number(att.correctAnswersCount) || 0;
+      const qWrong = Number(att.wrongAnswersCount) || 0;
+      const qUnanswered = Number(att.unansweredCount) || 0;
+      const attScore = Number(att.score) || 0;
+      const attTotalMarks = Number(att.totalMarks) || (attScore > 0 ? attScore : 100);
+      const attPercentage = att.percentage !== undefined && att.percentage !== null
+        ? Number(att.percentage)
+        : (attTotalMarks > 0 ? Math.round((attScore / attTotalMarks) * 100) : 0);
+      const attTime = Number(att.timeTakenSeconds) || 0;
+
+      totalQuestionsAttempted += qAttempted;
+      totalCorrect += qCorrect;
+      totalWrong += qWrong;
+      totalUnanswered += qUnanswered;
+      totalScore += attScore;
+      totalPossibleMarks += attTotalMarks;
+      totalTimeTakenSeconds += attTime;
+
+      const testTitle = att.testSeries?.title || att.testSeries?.name || att.studentName || "Mock Test Series";
+      const subject = att.testSeries?.subject || "General";
+
+      if (!subjectMap[subject]) {
+        subjectMap[subject] = {
+          subject,
+          testsCount: 0,
+          correct: 0,
+          totalQuestions: 0,
+          totalScore: 0,
+          totalMax: 0,
+        };
+      }
+      subjectMap[subject].testsCount += 1;
+      subjectMap[subject].correct += qCorrect;
+      subjectMap[subject].totalQuestions += (qAttempted || 1);
+      subjectMap[subject].totalScore += attScore;
+      subjectMap[subject].totalMax += attTotalMarks;
+
+      formattedRecentAttempts.push({
+        id: att._id || att.id,
+        title: testTitle,
+        subject,
+        score: attScore,
+        totalMarks: attTotalMarks,
+        percentage: attPercentage,
+        accuracy: qAttempted > 0 ? Math.round((qCorrect / qAttempted) * 100) : 0,
+        timeTakenSeconds: attTime,
+        submittedAt: att.submittedAt || att.createdAt,
+        isPassed: att.isPassed ?? (attPercentage >= 40),
+        type: "Test Series",
+      });
+
+      scoreHistory.push({
+        date: att.submittedAt || att.createdAt,
+        score: attScore,
+        percentage: attPercentage,
+        label: testTitle.length > 15 ? testTitle.slice(0, 15) + "..." : testTitle,
+      });
+    }
+
+    // Process offline tests
+    for (const off of offlineTests) {
+      const offScore = Number(off.score) || 0;
+      const offTotal = Number(off.totalMarks) || 100;
+      const offPct = offTotal > 0 ? Math.round((offScore / offTotal) * 100) : 0;
+      const offSubject = off.subject || "General";
+
+      totalScore += offScore;
+      totalPossibleMarks += offTotal;
+
+      if (!subjectMap[offSubject]) {
+        subjectMap[offSubject] = {
+          subject: offSubject,
+          testsCount: 0,
+          correct: 0,
+          totalQuestions: 0,
+          totalScore: 0,
+          totalMax: 0,
+        };
+      }
+      subjectMap[offSubject].testsCount += 1;
+      subjectMap[offSubject].totalScore += offScore;
+      subjectMap[offSubject].totalMax += offTotal;
+
+      formattedRecentAttempts.push({
+        id: off._id || off.id,
+        title: off.title || "Classroom Unit Test",
+        subject: offSubject,
+        score: offScore,
+        totalMarks: offTotal,
+        percentage: offPct,
+        accuracy: offPct,
+        timeTakenSeconds: 0,
+        submittedAt: off.examDate || off.createdAt,
+        isPassed: offPct >= 40,
+        type: off.testType || "Classroom Test",
+      });
+    }
+
+    // Summary calculations
+    const accuracy = totalQuestionsAttempted > 0
+      ? Math.round((totalCorrect / totalQuestionsAttempted) * 100)
+      : (totalPossibleMarks > 0 ? Math.round((totalScore / totalPossibleMarks) * 100) : 0);
+
+    const averageScore = totalPossibleMarks > 0
+      ? Math.round((totalScore / totalPossibleMarks) * 100)
+      : 0;
+
+    const totalHours = (totalTimeTakenSeconds / 3600).toFixed(1);
+    const totalTimeSpentFormatted = `${totalHours} hrs`;
+
+    // Subject breakdown
+    const subjectBreakdown = Object.values(subjectMap).map((s) => ({
+      subject: s.subject,
+      testsCount: s.testsCount,
+      accuracy: s.totalQuestions > 0 ? Math.round((s.correct / s.totalQuestions) * 100) : (s.totalMax > 0 ? Math.round((s.totalScore / s.totalMax) * 100) : 0),
+      avgScore: s.totalMax > 0 ? Math.round((s.totalScore / s.totalMax) * 100) : 0,
+    }));
+
+    return res.json({
+      success: true,
+      hasActivity: true,
+      summary: {
+        testsAttempted: totalTestsCount,
+        questionsSolved: totalQuestionsAttempted,
+        accuracy,
+        averageScore,
+        totalMarksObtained: totalScore,
+        totalPossibleMarks,
+        totalTimeSpentSeconds: totalTimeTakenSeconds,
+        totalTimeSpentFormatted,
+        correctCount: totalCorrect,
+        wrongCount: totalWrong,
+        unansweredCount: totalUnanswered,
+        currentStreak: currentStreak || 0,
+        doubtsSolved: doubtsCount || 0,
+        mistakesCount: mistakesTotal || 0,
+        mistakesResolved: mistakesResolved || 0,
+      },
+      subjectBreakdown,
+      recentAttempts: formattedRecentAttempts.slice(0, 20),
+      scoreHistory: scoreHistory.slice(0, 15).reverse(),
+    });
+  } catch (error) {
+    console.error("[StudyAnalytics] Error in getStudentStudyAnalytics:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to compute study analytics",
+      error: error.message,
+    });
   }
 };

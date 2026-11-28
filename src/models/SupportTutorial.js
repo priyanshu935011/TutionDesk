@@ -33,6 +33,11 @@ const supportTutorialSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    audience: {
+      type: String,
+      enum: ["teacher", "student", "all"],
+      default: "teacher",
+    },
     isActive: {
       type: Boolean,
       default: true,

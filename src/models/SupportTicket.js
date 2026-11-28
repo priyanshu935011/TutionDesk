@@ -21,6 +21,16 @@ const supportTicketSchema = new mongoose.Schema(
       type: String,
       default: "teacher",
     },
+    targetRole: {
+      type: String,
+      enum: ["teacher", "student", "all"],
+      default: "teacher",
+    },
+    audience: {
+      type: String,
+      enum: ["teacher", "student", "all"],
+      default: "teacher",
+    },
     instituteId: {
       type: String,
       default: null,

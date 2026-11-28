@@ -21,6 +21,7 @@ import {
   uploadStudentProfilePicture,
 } from "../controllers/studentAuthController.js";
 import { getStudentStreaks } from "../controllers/streakController.js";
+import { getStudentStudyAnalytics } from "../controllers/studentD2cController.js";
 import protectStudent from "../middleware/studentAuthMiddleware.js";
 
 const router = express.Router();
@@ -44,6 +45,7 @@ router.get("/videos", getStudentVideos);
 router.get("/fee-payment", getStudentFeePayment);
 router.get("/dashboard", getStudentPortalData);
 router.get("/streaks", getStudentStreaks);
+router.get("/study-analytics", getStudentStudyAnalytics);
 router.get("/notes/:id/download", downloadStudentNote);
 router.get("/notifications", getStudentNotifications);
 router.put("/notifications/:id/read", markNotificationRead);
